@@ -6,11 +6,20 @@ import {
   ResumableUploadManager,
   StorageManager,
   type StorageManagerOptions,
+  TusUploadHandler,
   type UploadSessionStore,
 } from '@dudousxd/nestjs-media-core';
 import { type DynamicModule, Global, Module, type Provider } from '@nestjs/common';
+import { MediaUploadController } from './media-upload.controller';
 import { MediaService } from './media.service';
-import { MEDIA_LIBRARY, MEDIA_STORAGE, MEDIA_UPLOADS } from './tokens';
+import { MEDIA_LIBRARY, MEDIA_STORAGE, MEDIA_TUS, MEDIA_UPLOADS } from './tokens';
+
+export interface MediaTusOptions {
+  disk: string;
+  basePath?: string;
+  maxSize?: number;
+  keyFor?: (filename: string, token: string, metadata: Record<string, string>) => string;
+}
 
 export interface MediaModuleOptions extends StorageManagerOptions {
   /** Enable the media-library layer (camada 2) by providing a persistence store. */
@@ -20,6 +29,8 @@ export interface MediaModuleOptions extends StorageManagerOptions {
   /** Enable resumable (proxy) uploads by providing a session store. */
   uploadSessions?: UploadSessionStore;
   uploadTmpPrefix?: string;
+  /** Mount the tus HTTP controller (requires uploadSessions). */
+  tus?: MediaTusOptions;
 }
 
 export interface MediaModuleAsyncOptions {
@@ -50,20 +61,38 @@ function buildUploads(
   });
 }
 
+function buildTus(
+  uploads: ResumableUploadManager | null,
+  options: MediaModuleOptions,
+): TusUploadHandler | null {
+  if (!uploads || !options.tus) return null;
+  return new TusUploadHandler({
+    manager: uploads,
+    disk: options.tus.disk,
+    ...(options.tus.basePath ? { basePath: options.tus.basePath } : { basePath: '/media/uploads' }),
+    ...(options.tus.maxSize ? { maxSize: options.tus.maxSize } : {}),
+    ...(options.tus.keyFor ? { keyFor: options.tus.keyFor } : {}),
+  });
+}
+
 @Global()
 @Module({})
 export class MediaModule {
   static forRoot(options: MediaModuleOptions): DynamicModule {
     const manager = new StorageManager(options);
+    const uploads = buildUploads(manager, options);
+    const tus = buildTus(uploads, options);
     return {
       module: MediaModule,
       providers: [
         { provide: MEDIA_STORAGE, useValue: manager },
         { provide: MEDIA_LIBRARY, useValue: buildLibrary(manager, options) },
-        { provide: MEDIA_UPLOADS, useValue: buildUploads(manager, options) },
+        { provide: MEDIA_UPLOADS, useValue: uploads },
+        { provide: MEDIA_TUS, useValue: tus },
         MediaService,
       ],
-      exports: [MediaService, MEDIA_STORAGE, MEDIA_LIBRARY, MEDIA_UPLOADS],
+      controllers: tus ? [MediaUploadController] : [],
+      exports: [MediaService, MEDIA_STORAGE, MEDIA_LIBRARY, MEDIA_UPLOADS, MEDIA_TUS],
     };
   }
 
@@ -86,13 +115,19 @@ export class MediaModule {
         useFactory: async (manager: StorageManager, ...args: any[]) =>
           buildUploads(manager, await options.useFactory(...args)),
       },
+      {
+        provide: MEDIA_TUS,
+        inject: [MEDIA_UPLOADS, ...(options.inject ?? [])],
+        useFactory: async (uploads: ResumableUploadManager | null, ...args: any[]) =>
+          buildTus(uploads, await options.useFactory(...args)),
+      },
       MediaService,
     ];
     return {
       module: MediaModule,
       imports: options.imports ?? [],
       providers,
-      exports: [MediaService, MEDIA_STORAGE, MEDIA_LIBRARY, MEDIA_UPLOADS],
+      exports: [MediaService, MEDIA_STORAGE, MEDIA_LIBRARY, MEDIA_UPLOADS, MEDIA_TUS],
     };
   }
 }
