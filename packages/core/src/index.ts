@@ -8,4 +8,5 @@ export * from './image-processor';
 export * from './upload-mode';
 export * from './diagnostics';
 export * from './resumable-upload';
+export * from './tus';
 export * from './media-library';
