@@ -5,4 +5,5 @@ export * from './media-record';
 export * from './media-store';
 export * from './media-collection';
 export * from './image-processor';
+export * from './upload-mode';
 export * from './media-library';
