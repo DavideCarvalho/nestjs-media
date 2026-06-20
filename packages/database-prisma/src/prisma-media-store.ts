@@ -1,29 +1,25 @@
 import type { MediaRecord, MediaStore } from '@dudousxd/nestjs-media-core';
 
-/**
- * Structural subset of the generated Prisma `media` delegate. Declared here so the
- * adapter never imports `@prisma/client` (§3.10: prisma schema is consumer-managed).
- * The consumer's model must expose these fields (map `order` to a `position` column
- * if desired via `@map`).
- */
+// Prisma's per-model query args are generated generics; left as `any` at this single
+// boundary so a real, generated `PrismaClient` delegate is structurally assignable to
+// `PrismaClientLike` (matches the canonical ecosystem prisma adapter). The adapter
+// never imports `@prisma/client` (§3.10: the prisma schema is consumer-managed).
+type Args = any;
+
+/** Structural subset of the generated Prisma `media` delegate the store relies on. */
 export interface PrismaMediaDelegate {
-  upsert(args: {
-    where: { id: string };
-    create: MediaRecord;
-    update: MediaRecord;
-  }): Promise<unknown>;
-  findUnique(args: { where: { id: string } }): Promise<MediaRecord | null>;
-  findMany(args: {
-    where: { ownerType: string; ownerId: string; collection?: string };
-    orderBy: { order: 'asc' | 'desc' };
-  }): Promise<MediaRecord[]>;
-  deleteMany(args: { where: { id: string } }): Promise<unknown>;
-  aggregate(args: {
-    where: { ownerType: string; ownerId: string; collection: string };
-    _max: { order: true };
-  }): Promise<{ _max: { order: number | null } }>;
+  upsert(args: Args): Promise<MediaRecord>;
+  findUnique(args: Args): Promise<MediaRecord | null>;
+  findMany(args: Args): Promise<MediaRecord[]>;
+  deleteMany(args: Args): Promise<{ count: number }>;
+  aggregate(args: Args): Promise<{ _max: { order: number | null } }>;
 }
 
+/**
+ * Pass your `PrismaClient` after adding the `Media` model from the documented schema
+ * (map the `order` field to a `position` column via `@map`). Schema + migrations are
+ * consumer-managed.
+ */
 export interface PrismaClientLike {
   media: PrismaMediaDelegate;
 }

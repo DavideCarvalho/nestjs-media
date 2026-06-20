@@ -19,6 +19,9 @@
   "devDependencies": {
     "@dudousxd/nestjs-media-core": "workspace:*",
     "@dudousxd/nestjs-media-testing": "workspace:*",
+    "@prisma/client": "6.2.1",
+    "@testcontainers/postgresql": "10.18.0",
+    "prisma": "6.2.1",
     "tsup": "8.3.5",
     "typescript": "5.9.3"
   }

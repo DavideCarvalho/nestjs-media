@@ -1,0 +1,33 @@
+// Test-only schema: generates a Postgres client into the gitignored generated/pg-client
+// so the db.spec can exercise PrismaMediaStore against a real PrismaClient + Postgres.
+// This is NOT shipped — consumers own their own schema; this just documents the model shape.
+generator client {
+  provider = "prisma-client-js"
+  output   = "../generated/pg-client"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("PRISMA_PG_URL")
+}
+
+model Media {
+  id               String   @id
+  ownerType        String
+  ownerId          String
+  collection       String
+  name             String
+  fileName         String
+  mimeType         String
+  size             Int
+  disk             String
+  path             String
+  order            Int      @map("position")
+  customProperties Json
+  conversions      Json
+  createdAt        DateTime
+  updatedAt        DateTime
+
+  @@index([ownerType, ownerId, collection])
+  @@map("media")
+}
