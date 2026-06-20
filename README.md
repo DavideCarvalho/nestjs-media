@@ -106,8 +106,12 @@ against a shared conformance suite, uploadMode resolution, `nestjs:media:*` diag
 resumable tus upload (engine + HTTP handler + Nest controller), telescope watcher,
 codegen extension, React client, and full NestJS wiring.
 
+Integration (`pnpm test:db`, testcontainers): S3 driver on MinIO; TypeORM, MikroORM,
+and Prisma stores on real Postgres (Prisma generates a real client at test time).
+Drizzle is sqlite-only by design — matching the canonical ecosystem Drizzle adapter.
+
 Future (per the design doc): gcs driver, video/pdf thumbnails, responsive srcset,
-antivirus hook, and real-DB integration `*.db.spec.ts` for the ORM stores.
+antivirus hook.
 
 See `docs/superpowers/specs/2026-06-20-nestjs-media-design.md` for the full design.
 
