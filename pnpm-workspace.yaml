@@ -4,6 +4,8 @@ allowBuilds:
   '@biomejs/biome': true
   '@nestjs/core': false
   '@swc/core': true
+  cpu-features: false
   esbuild: true
+  ssh2: false
 minimumReleaseAgeExclude:
   - '@dudousxd/*'
