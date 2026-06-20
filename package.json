@@ -16,7 +16,10 @@
     "test:watch": "vitest",
     "typecheck": "turbo run typecheck",
     "lint": "biome check .",
-    "lint:fix": "biome check --write ."
+    "lint:fix": "biome check --write .",
+    "changeset": "changeset",
+    "version-packages": "changeset version && biome check --write .",
+    "release": "pnpm --filter './packages/*' build && changeset publish"
   },
   "devDependencies": {
     "@biomejs/biome": "1.9.4",
