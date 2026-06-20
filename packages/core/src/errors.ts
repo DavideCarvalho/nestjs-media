@@ -53,3 +53,22 @@ export class ImageProcessorMissingError extends Error {
     this.name = 'ImageProcessorMissingError';
   }
 }
+
+export class UploadSessionNotFoundError extends Error {
+  readonly code = 'MEDIA_UPLOAD_SESSION_NOT_FOUND';
+  constructor(id: string) {
+    super(`Upload session not found: ${id}`);
+    this.name = 'UploadSessionNotFoundError';
+  }
+}
+
+export class UploadOffsetConflictError extends Error {
+  readonly code = 'MEDIA_UPLOAD_OFFSET_CONFLICT';
+  constructor(
+    readonly expected: number,
+    readonly received: number,
+  ) {
+    super(`Upload offset conflict: expected ${expected}, received ${received}`);
+    this.name = 'UploadOffsetConflictError';
+  }
+}

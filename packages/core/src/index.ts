@@ -7,4 +7,5 @@ export * from './media-collection';
 export * from './image-processor';
 export * from './upload-mode';
 export * from './diagnostics';
+export * from './resumable-upload';
 export * from './media-library';
