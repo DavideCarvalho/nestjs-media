@@ -25,7 +25,8 @@ Two layers, one package:
 | `@dudousxd/nestjs-media-image-sharp` | sharp-backed image processor |
 | `@dudousxd/nestjs-media-telescope` | Telescope watcher consuming `nestjs:media:*` |
 | `@dudousxd/nestjs-media-codegen` | Codegen extension emitting a typed media client |
-| `@dudousxd/nestjs-media-react` | `useMediaUpload` hook + `MediaUploader` (resumable tus) |
+| `@dudousxd/nestjs-media-client` | framework-agnostic browser client (`uploadMedia` tus + `mediaUrl`) |
+| `@dudousxd/nestjs-media-react` | `useMediaUpload` hook + `MediaUploader` (wraps the client) |
 | `@dudousxd/nestjs-media-testing` | in-memory driver/store/upload-session + conformance suites |
 
 ## Quick start
@@ -98,7 +99,7 @@ implemented end to end: `ResumableUploadManager` engine → framework-agnostic
 
 ## Status
 
-v1 implemented & tested (125 tests, 16 packages): storage (local/s3/in-memory),
+v1 implemented & tested (126 tests, 14 packages): storage (local/s3/in-memory),
 media-library (collections, single-file replace, MIME validation, delete, urls),
 conversions (sharp, lazy + eager), all four ORM stores (typeorm/mikro-orm/drizzle/prisma)
 against a shared conformance suite, uploadMode resolution, `nestjs:media:*` diagnostics,
