@@ -84,6 +84,21 @@ importers:
         specifier: 5.9.3
         version: 5.9.3
 
+  packages/database-prisma:
+    devDependencies:
+      '@dudousxd/nestjs-media-core':
+        specifier: workspace:*
+        version: link:../core
+      '@dudousxd/nestjs-media-testing':
+        specifier: workspace:*
+        version: link:../testing
+      tsup:
+        specifier: 8.3.5
+        version: 8.3.5(@swc/core@1.15.41)(postcss@8.5.15)(typescript@5.9.3)(yaml@2.9.0)
+      typescript:
+        specifier: 5.9.3
+        version: 5.9.3
+
   packages/database-typeorm:
     devDependencies:
       '@dudousxd/nestjs-media-core':
