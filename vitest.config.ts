@@ -18,6 +18,7 @@ export default defineConfig({
       '@dudousxd/nestjs-media-database-prisma': pkg('database-prisma'),
       '@dudousxd/nestjs-media-telescope': pkg('telescope'),
       '@dudousxd/nestjs-media-codegen': pkg('codegen'),
+      '@dudousxd/nestjs-media-react': pkg('react'),
       '@dudousxd/nestjs-media-testing': pkg('testing'),
       '@dudousxd/nestjs-media': pkg('nestjs'),
     },
