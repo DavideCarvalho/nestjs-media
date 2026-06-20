@@ -29,7 +29,7 @@ export interface MediaTusOptions {
 }
 
 export interface MediaModuleOptions extends StorageManagerOptions {
-  /** Enable the media-library layer (camada 2) by providing a persistence store. */
+  /** Enable the media-library layer (layer 2) by providing a persistence store. */
   store?: MediaStore;
   collections?: MediaCollectionConfig[];
   imageProcessor?: ImageProcessor;

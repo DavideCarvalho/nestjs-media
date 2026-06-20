@@ -42,6 +42,18 @@ export interface AttachInput {
   disk?: string;
 }
 
+/**
+ * An owning entity bound to the library, so collection operations don't repeat
+ * `ownerType`/`ownerId`. This is the table-model equivalent of spatie's
+ * `HasMedia`/`InteractsWithMedia` — you get it from {@link MediaLibrary.for}.
+ */
+export interface OwnerMediaBinding {
+  /** Attach a file to one of this owner's collections. */
+  attach(input: Omit<AttachInput, 'ownerType' | 'ownerId'>): Promise<MediaRecord>;
+  /** List this owner's media — all collections, or one. */
+  list(collection?: string): Promise<MediaRecord[]>;
+}
+
 export class MediaLibrary {
   private readonly storage: StorageManager;
   private readonly store: MediaStore;
@@ -163,6 +175,19 @@ export class MediaLibrary {
 
   list(ownerType: string, ownerId: string, collection?: string): Promise<MediaRecord[]> {
     return this.store.listByOwner(ownerType, ownerId, collection);
+  }
+
+  /**
+   * Bind an owning entity so collection operations don't repeat its type/id:
+   * `const m = media.library.for('Post', post.id); await m.attach({ collection, ... })`.
+   * The id is coerced to a string to match how stores key owners.
+   */
+  for(ownerType: string, ownerId: string | number): OwnerMediaBinding {
+    const ownerId_ = String(ownerId);
+    return {
+      attach: (input) => this.attach({ ...input, ownerType, ownerId: ownerId_ }),
+      list: (collection) => this.list(ownerType, ownerId_, collection),
+    };
   }
 
   async delete(id: string): Promise<void> {

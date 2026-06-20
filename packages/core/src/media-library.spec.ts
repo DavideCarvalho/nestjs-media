@@ -113,4 +113,20 @@ describe('MediaLibrary', () => {
     expect(await store.find(media.id)).toBeNull();
     expect(await disk.exists(media.path)).toBe(false);
   });
+
+  it('for() binds an owner so attach/list omit ownerType/ownerId', async () => {
+    const lib = makeLibrary();
+    const post = lib.for('Post', 42); // numeric id is coerced to a string
+    const media = await post.attach({
+      collection: 'gallery',
+      fileName: 'a.png',
+      mimeType: 'image/png',
+      contents: Buffer.from('z'),
+    });
+
+    expect(media.ownerType).toBe('Post');
+    expect(media.ownerId).toBe('42');
+    expect((await post.list('gallery')).map((r) => r.id)).toEqual([media.id]);
+    expect((await post.list()).map((r) => r.id)).toEqual([media.id]);
+  });
 });

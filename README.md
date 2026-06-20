@@ -7,8 +7,8 @@ import `@dudousxd/nestjs-media/storage`.
 
 Two layers, one package:
 
-- **Camada 1 — Storage:** disk-agnostic `put/get/url/temporaryUrl/stream/delete`.
-- **Camada 2 — Media-library:** attach files to entities, collections, image conversions.
+- **Layer 1 — Storage:** disk-agnostic `put/get/url/temporaryUrl/stream/delete`.
+- **Layer 2 — Media-library:** attach files to entities, collections, image conversions.
 
 ## Packages
 
@@ -67,7 +67,7 @@ export class PhotosService {
   constructor(private readonly media: MediaService) {}
 
   async upload(postId: string, file: { buffer: Buffer; mimetype: string; originalname: string }) {
-    // Camada 2 — attach to an entity
+    // Layer 2 — attach to an entity
     return this.media.library.attach({
       ownerType: 'Post',
       ownerId: postId,
@@ -82,7 +82,7 @@ export class PhotosService {
     return this.media.library.url(mediaId, 'thumb'); // generated lazily on first call
   }
 
-  // Camada 1 — raw storage
+  // Layer 1 — raw storage
   putRaw(path: string, data: Buffer) {
     return this.media.disk('s3').put(path, data);
   }
