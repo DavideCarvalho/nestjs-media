@@ -10,6 +10,7 @@
   "scripts": {
     "build": "turbo run build",
     "test": "vitest run",
+    "test:db": "vitest run --config vitest.db.config.ts",
     "test:watch": "vitest",
     "typecheck": "turbo run typecheck",
     "lint": "biome check .",
