@@ -16,6 +16,7 @@ export default defineConfig({
       '@dudousxd/nestjs-media-database-mikro-orm': pkg('database-mikro-orm'),
       '@dudousxd/nestjs-media-database-drizzle': pkg('database-drizzle'),
       '@dudousxd/nestjs-media-database-prisma': pkg('database-prisma'),
+      '@dudousxd/nestjs-media-telescope': pkg('telescope'),
       '@dudousxd/nestjs-media-testing': pkg('testing'),
       '@dudousxd/nestjs-media': pkg('nestjs'),
     },

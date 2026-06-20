@@ -213,6 +213,21 @@ importers:
         specifier: 5.9.3
         version: 5.9.3
 
+  packages/telescope:
+    devDependencies:
+      '@dudousxd/nestjs-media-core':
+        specifier: workspace:*
+        version: link:../core
+      '@dudousxd/nestjs-telescope':
+        specifier: 1.11.2
+        version: 1.11.2(@nestjs/common@11.0.0(reflect-metadata@0.2.2)(rxjs@7.8.1))(@nestjs/core@11.0.0(@nestjs/common@11.0.0(reflect-metadata@0.2.2)(rxjs@7.8.1))(reflect-metadata@0.2.2)(rxjs@7.8.1))(reflect-metadata@0.2.2)(rxjs@7.8.1)
+      tsup:
+        specifier: 8.3.5
+        version: 8.3.5(@swc/core@1.15.41)(postcss@8.5.15)(typescript@5.9.3)(yaml@2.9.0)
+      typescript:
+        specifier: 5.9.3
+        version: 5.9.3
+
   packages/testing:
     devDependencies:
       '@dudousxd/nestjs-media-core':
@@ -460,6 +475,19 @@ packages:
     engines: {node: '>=14.21.3'}
     cpu: [x64]
     os: [win32]
+
+  '@dudousxd/nestjs-telescope@1.11.2':
+    resolution: {integrity: sha512-88QyZPgzJy7EVriUIBf8x1T1a+CpFhDd0e88JApuQeFVk4w7eWp2XgF9SDkkiov/In4lkXkkkdP3WTxr/JU0yQ==}
+    engines: {node: '>=20'}
+    peerDependencies:
+      '@dudousxd/nestjs-context': '>=0.1.0'
+      '@nestjs/common': '>=10.0.0'
+      '@nestjs/core': '>=10.0.0'
+      reflect-metadata: '>=0.1.13'
+      rxjs: '>=7.0.0'
+    peerDependenciesMeta:
+      '@dudousxd/nestjs-context':
+        optional: true
 
   '@emnapi/runtime@1.11.1':
     resolution: {integrity: sha512-vgj7R3y3Wgx24IQaGPA/R6YFXLHVMOZ0uVEyIQPaWs+rd1AzfEMXlAC22FYwO1XkKR6NPsq7mUandH8oIRdZFw==}
@@ -2945,6 +2973,10 @@ packages:
   util-deprecate@1.0.2:
     resolution: {integrity: sha512-EPD5q1uXyFxJpCrLnCc1nHnq3gOa6DZBocAIiI2TaSCA7VCJ1UJDMagCzIkXNsUYfD1daK//LTEQ8xiIbrHtcw==}
 
+  uuid@11.1.1:
+    resolution: {integrity: sha512-vIYxrBCC/N/K+Js3qSN88go7kIfNPssr/hHCesKCQNAjmgvYS2oqr69kIufEG+O4+PfezOH4EbIeHCfFov8ZgQ==}
+    hasBin: true
+
   uuid@9.0.1:
     resolution: {integrity: sha512-b+1eJOlsR9K8HJpow9Ok3fiWOWSIcIzXodvv0rQjVoOVNpWMpxf1wZNpt4y9h10odCNrqnYp1OBzRktckBe3sA==}
     deprecated: uuid@10 and below is no longer supported.  For ESM codebases, update to uuid@latest.  For CommonJS codebases, use uuid@11 (but be aware this version will likely be deprecated in 2028).
@@ -3073,6 +3105,9 @@ packages:
   zip-stream@6.0.1:
     resolution: {integrity: sha512-zK7YHHz4ZXpW89AHXUPbQVGKI7uvkd3hzusTdotCg1UxyaVtg0zFJSTfW/Dq5f7OBBVnq6cZIaC8Ti4hb6dtCA==}
     engines: {node: '>= 14'}
+
+  zod@3.25.76:
+    resolution: {integrity: sha512-gzUt/qt81nXsFGKIFcC3YnfEAx5NkunCfnDlvuBSSFS02bcXu4Lmea0AFIUwbLWxWPx3d9p8S5QoaujKcNQxcQ==}
 
 snapshots:
 
@@ -3637,6 +3672,16 @@ snapshots:
 
   '@biomejs/cli-win32-x64@1.9.4':
     optional: true
+
+  '@dudousxd/nestjs-telescope@1.11.2(@nestjs/common@11.0.0(reflect-metadata@0.2.2)(rxjs@7.8.1))(@nestjs/core@11.0.0(@nestjs/common@11.0.0(reflect-metadata@0.2.2)(rxjs@7.8.1))(reflect-metadata@0.2.2)(rxjs@7.8.1))(reflect-metadata@0.2.2)(rxjs@7.8.1)':
+    dependencies:
+      '@nestjs/common': 11.0.0(reflect-metadata@0.2.2)(rxjs@7.8.1)
+      '@nestjs/core': 11.0.0(@nestjs/common@11.0.0(reflect-metadata@0.2.2)(rxjs@7.8.1))(reflect-metadata@0.2.2)(rxjs@7.8.1)
+      better-sqlite3: 11.8.1
+      reflect-metadata: 0.2.2
+      rxjs: 7.8.1
+      uuid: 11.1.1
+      zod: 3.25.76
 
   '@emnapi/runtime@1.11.1':
     dependencies:
@@ -5888,6 +5933,8 @@ snapshots:
 
   util-deprecate@1.0.2: {}
 
+  uuid@11.1.1: {}
+
   uuid@9.0.1: {}
 
   vite-node@2.1.9(@types/node@22.19.20):
@@ -6028,3 +6075,5 @@ snapshots:
       archiver-utils: 5.0.2
       compress-commons: 6.0.2
       readable-stream: 4.7.0
+
+  zod@3.25.76: {}
