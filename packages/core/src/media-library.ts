@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import type { Readable } from 'node:stream';
+import { publishMedia } from './diagnostics';
 import {
   ConversionNotDefinedError,
   ImageProcessorMissingError,
@@ -18,6 +19,8 @@ export interface MediaLibraryOptions {
   collections?: MediaCollectionConfig[];
   /** Engine for image conversions. Required only if collections define conversions. */
   imageProcessor?: ImageProcessor;
+  /** Emit `nestjs:media:*` diagnostics events (default true). */
+  emitDiagnostics?: boolean;
   /** Injectable for deterministic tests. Defaults to `randomUUID`. */
   idGenerator?: () => string;
   /** Injectable for deterministic tests. Defaults to `() => new Date()`. */
@@ -44,6 +47,7 @@ export class MediaLibrary {
   private readonly store: MediaStore;
   private readonly collections: MediaCollectionRegistry;
   private readonly imageProcessor: ImageProcessor | undefined;
+  private readonly emitDiagnostics: boolean;
   private readonly newId: () => string;
   private readonly now: () => Date;
 
@@ -52,8 +56,13 @@ export class MediaLibrary {
     this.store = options.store;
     this.collections = new MediaCollectionRegistry(options.collections ?? []);
     this.imageProcessor = options.imageProcessor;
+    this.emitDiagnostics = options.emitDiagnostics ?? true;
     this.newId = options.idGenerator ?? (() => randomUUID());
     this.now = options.clock ?? (() => new Date());
+  }
+
+  private emit(event: 'attach' | 'delete' | 'conversion', payload: unknown): void {
+    if (this.emitDiagnostics) publishMedia(event, payload);
   }
 
   async attach(input: AttachInput): Promise<MediaRecord> {
@@ -100,6 +109,17 @@ export class MediaLibrary {
       updatedAt: timestamp,
     });
 
+    this.emit('attach', {
+      id: saved.id,
+      ownerType: saved.ownerType,
+      ownerId: saved.ownerId,
+      collection: saved.collection,
+      disk: saved.disk,
+      path: saved.path,
+      size: saved.size,
+      mimeType: saved.mimeType,
+    });
+
     // Eager presets are generated synchronously now (the durable/bullmq dispatcher
     // is a later phase; sync is the baseline fallback).
     const eager = (config.conversions ?? []).filter((p) => p.eager);
@@ -129,7 +149,7 @@ export class MediaLibrary {
       contentType: result.contentType,
     });
 
-    return this.store.save({
+    const updated = await this.store.save({
       ...record,
       conversions: {
         ...record.conversions,
@@ -137,6 +157,8 @@ export class MediaLibrary {
       },
       updatedAt: this.now(),
     });
+    this.emit('conversion', { id, conversion: conversionName, path: conversionPath });
+    return updated;
   }
 
   list(ownerType: string, ownerId: string, collection?: string): Promise<MediaRecord[]> {
@@ -151,6 +173,7 @@ export class MediaLibrary {
       await this.storage.disk(conversion.disk).delete(conversion.path);
     }
     await this.store.delete(id);
+    this.emit('delete', { id, ownerType: record.ownerType, ownerId: record.ownerId });
   }
 
   /**
