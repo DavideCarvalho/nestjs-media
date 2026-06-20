@@ -1,6 +1,6 @@
 {
   "name": "@dudousxd/nestjs-media-client",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Framework-agnostic browser client for nestjs-media (resumable tus upload + url helper)",
   "license": "MIT",
   "type": "module",

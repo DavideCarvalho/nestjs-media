@@ -1,6 +1,6 @@
 {
   "name": "@dudousxd/nestjs-media-codegen",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Codegen extension for nestjs-media (emits a typed media client)",
   "license": "MIT",
   "type": "module",
