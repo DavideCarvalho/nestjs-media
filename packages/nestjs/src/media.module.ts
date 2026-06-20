@@ -1,4 +1,5 @@
 import {
+  AttachmentManager,
   type ImageProcessor,
   type MediaCollectionConfig,
   MediaLibrary,
@@ -12,7 +13,13 @@ import {
 import { type DynamicModule, Global, Module, type Provider } from '@nestjs/common';
 import { MediaUploadController } from './media-upload.controller';
 import { MediaService } from './media.service';
-import { MEDIA_LIBRARY, MEDIA_STORAGE, MEDIA_TUS, MEDIA_UPLOADS } from './tokens';
+import {
+  MEDIA_ATTACHMENTS,
+  MEDIA_LIBRARY,
+  MEDIA_STORAGE,
+  MEDIA_TUS,
+  MEDIA_UPLOADS,
+} from './tokens';
 
 export interface MediaTusOptions {
   disk: string;
@@ -45,6 +52,13 @@ function buildLibrary(manager: StorageManager, options: MediaModuleOptions): Med
     storage: manager,
     store: options.store,
     ...(options.collections ? { collections: options.collections } : {}),
+    ...(options.imageProcessor ? { imageProcessor: options.imageProcessor } : {}),
+  });
+}
+
+function buildAttachments(manager: StorageManager, options: MediaModuleOptions): AttachmentManager {
+  return new AttachmentManager({
+    storage: manager,
     ...(options.imageProcessor ? { imageProcessor: options.imageProcessor } : {}),
   });
 }
@@ -89,10 +103,18 @@ export class MediaModule {
         { provide: MEDIA_LIBRARY, useValue: buildLibrary(manager, options) },
         { provide: MEDIA_UPLOADS, useValue: uploads },
         { provide: MEDIA_TUS, useValue: tus },
+        { provide: MEDIA_ATTACHMENTS, useValue: buildAttachments(manager, options) },
         MediaService,
       ],
       controllers: tus ? [MediaUploadController] : [],
-      exports: [MediaService, MEDIA_STORAGE, MEDIA_LIBRARY, MEDIA_UPLOADS, MEDIA_TUS],
+      exports: [
+        MediaService,
+        MEDIA_STORAGE,
+        MEDIA_LIBRARY,
+        MEDIA_UPLOADS,
+        MEDIA_TUS,
+        MEDIA_ATTACHMENTS,
+      ],
     };
   }
 
@@ -121,13 +143,26 @@ export class MediaModule {
         useFactory: async (uploads: ResumableUploadManager | null, ...args: any[]) =>
           buildTus(uploads, await options.useFactory(...args)),
       },
+      {
+        provide: MEDIA_ATTACHMENTS,
+        inject: [MEDIA_STORAGE, ...(options.inject ?? [])],
+        useFactory: async (manager: StorageManager, ...args: any[]) =>
+          buildAttachments(manager, await options.useFactory(...args)),
+      },
       MediaService,
     ];
     return {
       module: MediaModule,
       imports: options.imports ?? [],
       providers,
-      exports: [MediaService, MEDIA_STORAGE, MEDIA_LIBRARY, MEDIA_UPLOADS, MEDIA_TUS],
+      exports: [
+        MediaService,
+        MEDIA_STORAGE,
+        MEDIA_LIBRARY,
+        MEDIA_UPLOADS,
+        MEDIA_TUS,
+        MEDIA_ATTACHMENTS,
+      ],
     };
   }
 }

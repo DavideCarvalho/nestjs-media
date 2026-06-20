@@ -1,11 +1,12 @@
 import type {
+  AttachmentManager,
   MediaLibrary,
   ResumableUploadManager,
   StorageDriver,
   StorageManager,
 } from '@dudousxd/nestjs-media-core';
 import { Inject, Injectable } from '@nestjs/common';
-import { MEDIA_LIBRARY, MEDIA_STORAGE, MEDIA_UPLOADS } from './tokens';
+import { MEDIA_ATTACHMENTS, MEDIA_LIBRARY, MEDIA_STORAGE, MEDIA_UPLOADS } from './tokens';
 
 @Injectable()
 export class MediaService {
@@ -13,7 +14,13 @@ export class MediaService {
     @Inject(MEDIA_STORAGE) private readonly manager: StorageManager,
     @Inject(MEDIA_LIBRARY) private readonly mediaLibrary: MediaLibrary | null,
     @Inject(MEDIA_UPLOADS) private readonly uploadManager: ResumableUploadManager | null,
+    @Inject(MEDIA_ATTACHMENTS) private readonly attachmentManager: AttachmentManager,
   ) {}
+
+  /** Attachment-as-column API (adonis-attachment style): `media.attachments.createFromFile(...)`. */
+  get attachments(): AttachmentManager {
+    return this.attachmentManager;
+  }
 
   /** Storage layer (camada 1): `media.disk('s3').put(...)`. */
   disk(name?: string): StorageDriver {
