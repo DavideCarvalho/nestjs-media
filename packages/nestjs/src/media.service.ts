@@ -1,12 +1,18 @@
-import type { MediaLibrary, StorageDriver, StorageManager } from '@dudousxd/nestjs-media-core';
+import type {
+  MediaLibrary,
+  ResumableUploadManager,
+  StorageDriver,
+  StorageManager,
+} from '@dudousxd/nestjs-media-core';
 import { Inject, Injectable } from '@nestjs/common';
-import { MEDIA_LIBRARY, MEDIA_STORAGE } from './tokens';
+import { MEDIA_LIBRARY, MEDIA_STORAGE, MEDIA_UPLOADS } from './tokens';
 
 @Injectable()
 export class MediaService {
   constructor(
     @Inject(MEDIA_STORAGE) private readonly manager: StorageManager,
     @Inject(MEDIA_LIBRARY) private readonly mediaLibrary: MediaLibrary | null,
+    @Inject(MEDIA_UPLOADS) private readonly uploadManager: ResumableUploadManager | null,
   ) {}
 
   /** Storage layer (camada 1): `media.disk('s3').put(...)`. */
@@ -22,5 +28,15 @@ export class MediaService {
       );
     }
     return this.mediaLibrary;
+  }
+
+  /** Resumable (proxy) uploads. Throws if no upload session store was configured. */
+  get uploads(): ResumableUploadManager {
+    if (!this.uploadManager) {
+      throw new Error(
+        'Resumable uploads are not configured. Pass `uploadSessions` to MediaModule.forRoot to enable them.',
+      );
+    }
+    return this.uploadManager;
   }
 }
