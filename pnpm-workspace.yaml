@@ -1,0 +1,9 @@
+packages:
+  - "packages/*"
+allowBuilds:
+  '@biomejs/biome': true
+  '@nestjs/core': false
+  '@swc/core': true
+  esbuild: true
+minimumReleaseAgeExclude:
+  - '@dudousxd/*'
