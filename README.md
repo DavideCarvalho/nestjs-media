@@ -14,13 +14,19 @@ Two layers, one package:
 
 | Package | Role |
 |---|---|
-| `@dudousxd/nestjs-media-core` | StorageDriver SPI, StorageManager, MediaStore SPI, MediaLibrary, ImageProcessor SPI |
-| `@dudousxd/nestjs-media` | NestJS `MediaModule` + `MediaService` (+ `/storage` subpath) |
+| `@dudousxd/nestjs-media-core` | StorageDriver SPI, StorageManager, MediaStore SPI, MediaLibrary, ImageProcessor SPI, uploadMode, diagnostics, resumable-upload engine, tus handler |
+| `@dudousxd/nestjs-media` | NestJS `MediaModule` + `MediaService` + tus controller (+ `/storage` subpath) |
 | `@dudousxd/nestjs-media-disk-local` | local filesystem driver |
 | `@dudousxd/nestjs-media-disk-s3` | S3 driver (presign + multipart-capable) |
 | `@dudousxd/nestjs-media-database-typeorm` | TypeORM media store (non-destructive auto-schema) |
+| `@dudousxd/nestjs-media-database-mikro-orm` | MikroORM media store (safe auto-schema) |
+| `@dudousxd/nestjs-media-database-drizzle` | Drizzle media store (sqlite, migration-first) |
+| `@dudousxd/nestjs-media-database-prisma` | Prisma media store (consumer-managed schema) |
 | `@dudousxd/nestjs-media-image-sharp` | sharp-backed image processor |
-| `@dudousxd/nestjs-media-testing` | in-memory driver/store + conformance suites |
+| `@dudousxd/nestjs-media-telescope` | Telescope watcher consuming `nestjs:media:*` |
+| `@dudousxd/nestjs-media-codegen` | Codegen extension emitting a typed media client |
+| `@dudousxd/nestjs-media-react` | `useMediaUpload` hook + `MediaUploader` (resumable tus) |
+| `@dudousxd/nestjs-media-testing` | in-memory driver/store/upload-session + conformance suites |
 
 ## Quick start
 
@@ -84,17 +90,24 @@ export class PhotosService {
 
 ## Upload modes (multipart)
 
-Drivers advertise `capabilities = { presign, multipart, publicUrls }`. The planned
-`uploadMode: 'auto' | 'proxy' | 'direct'` (global → per-disk → per-call) uses this to
-pick proxied (resumable **tus**) vs direct (presigned S3 multipart). Driver capabilities
-are in place; the tus server + Uppy client land in a later phase.
+Drivers advertise `capabilities = { presign, multipart, publicUrls }`. `resolveUploadMode`
+(`'auto' | 'proxy' | 'direct'`, resolved global → per-disk → per-call) uses this to pick
+proxied (resumable **tus**) vs direct (presigned S3 multipart). The proxy path is
+implemented end to end: `ResumableUploadManager` engine → framework-agnostic
+`TusUploadHandler` → NestJS `MediaUploadController` → React `useMediaUpload`/`MediaUploader`.
 
 ## Status
 
-Implemented & tested: storage layer (local/s3/in-memory), media-library (collections,
-single-file replace, MIME validation, delete), image conversions (sharp, lazy + eager),
-TypeORM store with non-destructive auto-schema, NestJS wiring. See
-`docs/superpowers/specs/2026-06-20-nestjs-media-design.md` for the full design and the
-remaining roadmap (tus multipart, mikro/prisma/drizzle stores, codegen/telescope/react).
+v1 implemented & tested (125 tests, 16 packages): storage (local/s3/in-memory),
+media-library (collections, single-file replace, MIME validation, delete, urls),
+conversions (sharp, lazy + eager), all four ORM stores (typeorm/mikro-orm/drizzle/prisma)
+against a shared conformance suite, uploadMode resolution, `nestjs:media:*` diagnostics,
+resumable tus upload (engine + HTTP handler + Nest controller), telescope watcher,
+codegen extension, React client, and full NestJS wiring.
+
+Future (per the design doc): gcs driver, video/pdf thumbnails, responsive srcset,
+antivirus hook, and real-DB integration `*.db.spec.ts` for the ORM stores.
+
+See `docs/superpowers/specs/2026-06-20-nestjs-media-design.md` for the full design.
 
 Build: `pnpm install && pnpm test && pnpm typecheck`.
