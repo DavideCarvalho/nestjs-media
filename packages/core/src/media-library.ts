@@ -1,6 +1,12 @@
 import { randomUUID } from 'node:crypto';
 import type { Readable } from 'node:stream';
-import { MediaNotFoundError, MimeNotAllowedError } from './errors';
+import {
+  ConversionNotDefinedError,
+  ImageProcessorMissingError,
+  MediaNotFoundError,
+  MimeNotAllowedError,
+} from './errors';
+import type { ConversionPreset, ImageProcessor } from './image-processor';
 import { type MediaCollectionConfig, MediaCollectionRegistry } from './media-collection';
 import type { MediaRecord } from './media-record';
 import type { MediaStore } from './media-store';
@@ -10,6 +16,8 @@ export interface MediaLibraryOptions {
   storage: StorageManager;
   store: MediaStore;
   collections?: MediaCollectionConfig[];
+  /** Engine for image conversions. Required only if collections define conversions. */
+  imageProcessor?: ImageProcessor;
   /** Injectable for deterministic tests. Defaults to `randomUUID`. */
   idGenerator?: () => string;
   /** Injectable for deterministic tests. Defaults to `() => new Date()`. */
@@ -35,6 +43,7 @@ export class MediaLibrary {
   private readonly storage: StorageManager;
   private readonly store: MediaStore;
   private readonly collections: MediaCollectionRegistry;
+  private readonly imageProcessor: ImageProcessor | undefined;
   private readonly newId: () => string;
   private readonly now: () => Date;
 
@@ -42,6 +51,7 @@ export class MediaLibrary {
     this.storage = options.storage;
     this.store = options.store;
     this.collections = new MediaCollectionRegistry(options.collections ?? []);
+    this.imageProcessor = options.imageProcessor;
     this.newId = options.idGenerator ?? (() => randomUUID());
     this.now = options.clock ?? (() => new Date());
   }
@@ -72,7 +82,7 @@ export class MediaLibrary {
     const order = await this.store.nextOrder(input.ownerType, input.ownerId, input.collection);
     const timestamp = this.now();
 
-    return this.store.save({
+    const saved = await this.store.save({
       id,
       ownerType: input.ownerType,
       ownerId: input.ownerId,
@@ -88,6 +98,44 @@ export class MediaLibrary {
       conversions: {},
       createdAt: timestamp,
       updatedAt: timestamp,
+    });
+
+    // Eager presets are generated synchronously now (the durable/bullmq dispatcher
+    // is a later phase; sync is the baseline fallback).
+    const eager = (config.conversions ?? []).filter((p) => p.eager);
+    if (eager.length === 0) return saved;
+    let current = saved;
+    for (const preset of eager) current = await this.ensureConversion(saved.id, preset.name);
+    return current;
+  }
+
+  /** Generate (if absent) and persist a named conversion; returns the updated record. Lazy entry point. */
+  async ensureConversion(id: string, conversionName: string): Promise<MediaRecord> {
+    const record = await this.store.find(id);
+    if (!record) throw new MediaNotFoundError(id);
+    if (record.conversions[conversionName]) return record;
+
+    const preset = (this.collections.get(record.collection).conversions ?? []).find(
+      (p) => p.name === conversionName,
+    );
+    if (!preset) throw new ConversionNotDefinedError(record.collection, conversionName);
+    if (!this.imageProcessor) throw new ImageProcessorMissingError();
+
+    const original = await this.storage.disk(record.disk).get(record.path);
+    const result = await this.imageProcessor.convert(original, preset);
+    const dir = record.path.slice(0, record.path.lastIndexOf('/'));
+    const conversionPath = `${dir}/conversions/${conversionName}.${result.format}`;
+    await this.storage.disk(record.disk).put(conversionPath, result.data, {
+      contentType: result.contentType,
+    });
+
+    return this.store.save({
+      ...record,
+      conversions: {
+        ...record.conversions,
+        [conversionName]: { path: conversionPath, disk: record.disk },
+      },
+      updatedAt: this.now(),
     });
   }
 
@@ -105,15 +153,19 @@ export class MediaLibrary {
     await this.store.delete(id);
   }
 
-  /** Public/temporary URL for a media record or one of its conversions. */
+  /**
+   * Public URL for a media record or one of its conversions. When a conversion is
+   * requested and not yet generated, it is produced lazily (and cached) first.
+   */
   async url(id: string, conversion?: string): Promise<string> {
-    const record = await this.store.find(id);
-    if (!record) throw new MediaNotFoundError(id);
     if (conversion) {
+      const record = await this.ensureConversion(id, conversion);
       const variant = record.conversions[conversion];
       if (!variant) throw new MediaNotFoundError(`${id}#${conversion}`);
       return this.storage.disk(variant.disk).url(variant.path);
     }
+    const record = await this.store.find(id);
+    if (!record) throw new MediaNotFoundError(id);
     return this.storage.disk(record.disk).url(record.path);
   }
 }

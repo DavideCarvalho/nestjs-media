@@ -1,3 +1,5 @@
+import type { ConversionPreset } from './image-processor';
+
 export interface MediaCollectionConfig {
   name: string;
   /** Single-file collection: attaching replaces any existing media. */
@@ -6,6 +8,8 @@ export interface MediaCollectionConfig {
   disk?: string;
   /** Allowed MIME types; when set, other types are rejected on attach. */
   acceptsMimeTypes?: string[];
+  /** Image conversion presets available for this collection. */
+  conversions?: ConversionPreset[];
 }
 
 export class MediaCollectionRegistry {

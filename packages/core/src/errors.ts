@@ -37,3 +37,19 @@ export class MediaNotFoundError extends Error {
     this.name = 'MediaNotFoundError';
   }
 }
+
+export class ConversionNotDefinedError extends Error {
+  readonly code = 'MEDIA_CONVERSION_NOT_DEFINED';
+  constructor(collection: string, conversion: string) {
+    super(`Conversion "${conversion}" is not defined for collection "${collection}"`);
+    this.name = 'ConversionNotDefinedError';
+  }
+}
+
+export class ImageProcessorMissingError extends Error {
+  readonly code = 'MEDIA_IMAGE_PROCESSOR_MISSING';
+  constructor() {
+    super('No ImageProcessor was configured; conversions are unavailable');
+    this.name = 'ImageProcessorMissingError';
+  }
+}

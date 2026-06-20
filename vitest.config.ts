@@ -11,6 +11,7 @@ export default defineConfig({
       '@dudousxd/nestjs-media-core': pkg('core'),
       '@dudousxd/nestjs-media-disk-local': pkg('disk-local'),
       '@dudousxd/nestjs-media-disk-s3': pkg('disk-s3'),
+      '@dudousxd/nestjs-media-image-sharp': pkg('image-sharp'),
       '@dudousxd/nestjs-media-testing': pkg('testing'),
       '@dudousxd/nestjs-media': pkg('nestjs'),
     },
