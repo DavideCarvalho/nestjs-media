@@ -63,3 +63,9 @@ export async function uploadMedia(
 
   return { location };
 }
+
+/** Build a media URL by id, optionally for a named conversion. */
+export function mediaUrl(id: string, conversion?: string): string {
+  const query = conversion ? `?conversion=${encodeURIComponent(conversion)}` : '';
+  return `/media/${encodeURIComponent(id)}${query}`;
+}

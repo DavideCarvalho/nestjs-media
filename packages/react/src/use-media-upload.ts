@@ -1,5 +1,5 @@
+import { type UploadMediaResult, uploadMedia } from '@dudousxd/nestjs-media-client';
 import { useCallback, useState } from 'react';
-import { type UploadMediaResult, uploadMedia } from './tus-upload';
 
 export interface UseMediaUploadOptions {
   basePath?: string;

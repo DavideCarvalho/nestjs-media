@@ -69,7 +69,7 @@ function buildTus(
   return new TusUploadHandler({
     manager: uploads,
     disk: options.tus.disk,
-    ...(options.tus.basePath ? { basePath: options.tus.basePath } : { basePath: '/media/uploads' }),
+    basePath: options.tus.basePath ?? '/media/uploads',
     ...(options.tus.maxSize ? { maxSize: options.tus.maxSize } : {}),
     ...(options.tus.keyFor ? { keyFor: options.tus.keyFor } : {}),
   });

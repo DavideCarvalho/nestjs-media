@@ -9,6 +9,7 @@ export default defineConfig({
   resolve: {
     alias: {
       '@dudousxd/nestjs-media-core': pkg('core'),
+      '@dudousxd/nestjs-media-client': pkg('client'),
       '@dudousxd/nestjs-media-disk-local': pkg('disk-local'),
       '@dudousxd/nestjs-media-disk-s3': pkg('disk-s3'),
       '@dudousxd/nestjs-media-image-sharp': pkg('image-sharp'),

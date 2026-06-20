@@ -1,5 +1,6 @@
 export * from './types';
 export * from './errors';
+export * from './stream';
 export * from './storage-manager';
 export * from './media-record';
 export * from './media-store';

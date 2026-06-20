@@ -8,6 +8,7 @@ import {
   type PutOptions,
   type StorageDriver,
   UnsupportedOperationError,
+  collectStream,
 } from '@dudousxd/nestjs-media-core';
 import { resolveWithinRoot } from './path-safety';
 
@@ -34,7 +35,7 @@ export class LocalDriver implements StorageDriver {
   async put(path: string, contents: Buffer | Readable, _options?: PutOptions): Promise<void> {
     const abs = this.abs(path);
     await mkdir(dirname(abs), { recursive: true });
-    const data = Buffer.isBuffer(contents) ? contents : await toBuffer(contents);
+    const data = Buffer.isBuffer(contents) ? contents : await collectStream(contents);
     await writeFile(abs, data);
   }
 
@@ -94,10 +95,4 @@ export class LocalDriver implements StorageDriver {
   async temporaryUrl(_path: string, _expiresInSeconds: number): Promise<string> {
     throw new UnsupportedOperationError('local', 'temporaryUrl');
   }
-}
-
-async function toBuffer(stream: Readable): Promise<Buffer> {
-  const chunks: Buffer[] = [];
-  for await (const chunk of stream) chunks.push(Buffer.from(chunk));
-  return Buffer.concat(chunks);
 }

@@ -1,7 +1,5 @@
 import { defineConfig } from 'tsup';
 
-const external = ['react', 'react/jsx-runtime', '@dudousxd/nestjs-media-client'];
-
 export default defineConfig([
   {
     entry: ['src/index.ts'],
@@ -11,7 +9,6 @@ export default defineConfig([
     splitting: false,
     sourcemap: true,
     outDir: 'dist',
-    external,
   },
   {
     entry: ['src/index.ts'],
@@ -21,6 +18,5 @@ export default defineConfig([
     splitting: false,
     sourcemap: true,
     outDir: 'dist',
-    external,
   },
 ]);

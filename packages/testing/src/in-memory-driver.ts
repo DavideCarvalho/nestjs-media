@@ -5,6 +5,7 @@ import {
   type PutOptions,
   type StorageDriver,
   UnsupportedOperationError,
+  collectStream,
 } from '@dudousxd/nestjs-media-core';
 
 export class InMemoryDriver implements StorageDriver {
@@ -16,7 +17,7 @@ export class InMemoryDriver implements StorageDriver {
   private readonly files = new Map<string, Buffer>();
 
   async put(path: string, contents: Buffer | Readable, _options?: PutOptions): Promise<void> {
-    this.files.set(path, Buffer.isBuffer(contents) ? contents : await toBuffer(contents));
+    this.files.set(path, Buffer.isBuffer(contents) ? contents : await collectStream(contents));
   }
 
   async get(path: string): Promise<Buffer> {
@@ -57,10 +58,4 @@ export class InMemoryDriver implements StorageDriver {
   async temporaryUrl(_path: string, _expiresInSeconds: number): Promise<string> {
     throw new UnsupportedOperationError('memory', 'temporaryUrl');
   }
-}
-
-async function toBuffer(stream: Readable): Promise<Buffer> {
-  const chunks: Buffer[] = [];
-  for await (const chunk of stream) chunks.push(Buffer.from(chunk));
-  return Buffer.concat(chunks);
 }

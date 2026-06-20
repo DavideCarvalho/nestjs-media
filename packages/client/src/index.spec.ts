@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { uploadMedia } from './tus-upload';
+import { mediaUrl, uploadMedia } from './index';
 
 function mockFetch() {
   return vi.fn(async (_url: string, init: RequestInit) => {
@@ -26,8 +26,7 @@ describe('uploadMedia', () => {
     });
 
     expect(result.location).toBe('/media/uploads/s1');
-    // 1 POST + ceil(5/2)=3 PATCH
-    expect(fetchImpl).toHaveBeenCalledTimes(4);
+    expect(fetchImpl).toHaveBeenCalledTimes(4); // 1 POST + ceil(5/2)=3 PATCH
     expect(progress.at(-1)).toBe(1);
     const post = fetchImpl.mock.calls[0]?.[1] as RequestInit;
     expect((post.headers as Record<string, string>)['Upload-Length']).toBe('5');
@@ -41,5 +40,12 @@ describe('uploadMedia', () => {
         fetchImpl: fetchImpl as unknown as typeof fetch,
       }),
     ).rejects.toThrow(/Location/);
+  });
+});
+
+describe('mediaUrl', () => {
+  it('builds id and conversion URLs', () => {
+    expect(mediaUrl('abc')).toBe('/media/abc');
+    expect(mediaUrl('a b', 'thumb')).toBe('/media/a%20b?conversion=thumb');
   });
 });
