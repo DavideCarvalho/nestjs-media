@@ -1,6 +1,6 @@
 {
   "name": "@dudousxd/nestjs-media",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "Filesystem + media-library for NestJS — one package",
   "license": "MIT",
   "type": "module",
@@ -9,16 +9,33 @@
   "types": "./dist/index.d.ts",
   "exports": {
     ".": {
-      "import": { "types": "./dist/index.d.ts", "default": "./dist/index.js" },
-      "require": { "types": "./dist/index.d.cts", "default": "./dist/index.cjs" }
+      "import": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      },
+      "require": {
+        "types": "./dist/index.d.cts",
+        "default": "./dist/index.cjs"
+      }
     },
     "./storage": {
-      "import": { "types": "./dist/storage.d.ts", "default": "./dist/storage.js" },
-      "require": { "types": "./dist/storage.d.cts", "default": "./dist/storage.cjs" }
+      "import": {
+        "types": "./dist/storage.d.ts",
+        "default": "./dist/storage.js"
+      },
+      "require": {
+        "types": "./dist/storage.d.cts",
+        "default": "./dist/storage.cjs"
+      }
     }
   },
-  "files": ["dist"],
-  "scripts": { "build": "tsup", "typecheck": "tsc -p tsconfig.json --noEmit" },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
   "peerDependencies": {
     "@dudousxd/nestjs-media-core": "workspace:*",
     "@nestjs/common": "^10.0.0 || ^11.0.0",

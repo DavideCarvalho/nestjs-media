@@ -6,7 +6,9 @@
   "license": "MIT",
   "author": "Davide Carvalho",
   "packageManager": "pnpm@11.5.0",
-  "engines": { "node": ">=20" },
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
     "build": "turbo run build",
     "test": "vitest run",
@@ -18,12 +20,13 @@
   },
   "devDependencies": {
     "@biomejs/biome": "1.9.4",
+    "@changesets/cli": "^2.31.0",
+    "@swc/core": "1.15.41",
     "@types/node": "22.19.20",
     "reflect-metadata": "0.2.2",
     "turbo": "2.9.17",
     "typescript": "5.9.3",
     "unplugin-swc": "1.5.9",
-    "@swc/core": "1.15.41",
     "vitest": "2.1.9"
   }
 }
