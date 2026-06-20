@@ -24,6 +24,8 @@
     "@dudousxd/nestjs-media-testing": "workspace:*",
     "@mikro-orm/better-sqlite": "6.4.2",
     "@mikro-orm/core": "6.4.2",
+    "@mikro-orm/postgresql": "6.4.2",
+    "testcontainers": "10.18.0",
     "tsup": "8.3.5",
     "typescript": "5.9.3"
   }

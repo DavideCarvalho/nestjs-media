@@ -23,6 +23,8 @@
     "@dudousxd/nestjs-media-core": "workspace:*",
     "@dudousxd/nestjs-media-testing": "workspace:*",
     "better-sqlite3": "11.8.1",
+    "pg": "8.13.1",
+    "testcontainers": "10.18.0",
     "tsup": "8.3.5",
     "typeorm": "0.3.20",
     "typescript": "5.9.3"
