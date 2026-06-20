@@ -1,8 +1,14 @@
 import { subscribe, unsubscribe } from 'node:diagnostics_channel';
-import { InMemoryDriver, InMemoryMediaStore } from '@dudousxd/nestjs-media-testing';
+import {
+  InMemoryDriver,
+  InMemoryMediaStore,
+  InMemoryUploadSessionStore,
+} from '@dudousxd/nestjs-media-testing';
 import { afterEach, describe, expect, it } from 'vitest';
+import { AttachmentManager } from './attachment';
 import type { MediaDiagnosticEnvelope } from './diagnostics';
 import { MediaLibrary } from './media-library';
+import { ResumableUploadManager } from './resumable-upload';
 import { StorageManager } from './storage-manager';
 
 function library(emitDiagnostics = true) {
@@ -65,5 +71,72 @@ describe('media diagnostics channels', () => {
     const events = listen('nestjs:media:attach');
     await library(false).attach(attachInput);
     expect(events).toHaveLength(0);
+  });
+});
+
+describe('resumable upload diagnostics', () => {
+  function uploads() {
+    const disk = new InMemoryDriver();
+    return new ResumableUploadManager({
+      storage: new StorageManager({ default: 'local', disks: { local: disk } }),
+      sessions: new InMemoryUploadSessionStore(),
+      idGenerator: () => 'up-1',
+    });
+  }
+
+  it('publishes start, progress, and complete across an upload lifecycle', async () => {
+    const start = listen('nestjs:media:upload.start');
+    const progress = listen('nestjs:media:upload.progress');
+    const complete = listen('nestjs:media:upload.complete');
+
+    const mgr = uploads();
+    const session = await mgr.createUpload({ disk: 'local', key: 'out.bin', size: 4 });
+    await mgr.writeChunk(session.id, 0, Buffer.from('ab'));
+    await mgr.writeChunk(session.id, 2, Buffer.from('cd'));
+    await mgr.complete(session.id);
+
+    expect(start[0]?.payload).toMatchObject({ id: 'up-1', disk: 'local', key: 'out.bin', size: 4 });
+    expect(progress.map((e) => (e.payload as { offset: number }).offset)).toEqual([2, 4]);
+    expect(complete[0]?.payload).toMatchObject({ id: 'up-1', key: 'out.bin', size: 4 });
+  });
+
+  it('publishes abort when a session is discarded', async () => {
+    const aborted = listen('nestjs:media:upload.abort');
+    const mgr = uploads();
+    const session = await mgr.createUpload({ disk: 'local', key: 'out.bin' });
+    await mgr.abort(session.id);
+    expect(aborted[0]?.payload).toMatchObject({ id: 'up-1' });
+  });
+});
+
+describe('attachment diagnostics', () => {
+  function attachments() {
+    const disk = new InMemoryDriver();
+    return new AttachmentManager({
+      storage: new StorageManager({ default: 'local', disks: { local: disk } }),
+      idGenerator: () => 'att-1',
+    });
+  }
+
+  it('publishes attachment.create and attachment.delete', async () => {
+    const created = listen('nestjs:media:attachment.create');
+    const deleted = listen('nestjs:media:attachment.delete');
+
+    const mgr = attachments();
+    const att = await mgr.createFromFile({
+      fileName: 'me.png',
+      mimeType: 'image/png',
+      contents: Buffer.from('bytes'),
+    });
+    await mgr.delete(att);
+
+    expect(created[0]?.payload).toMatchObject({
+      disk: 'local',
+      path: 'attachments/att-1/me.png',
+      mimeType: 'image/png',
+      name: 'me.png',
+      variants: [],
+    });
+    expect(deleted[0]?.payload).toMatchObject({ disk: 'local', path: 'attachments/att-1/me.png' });
   });
 });

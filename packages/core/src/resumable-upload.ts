@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { publishMedia } from './diagnostics';
 import { UploadOffsetConflictError, UploadSessionNotFoundError } from './errors';
 import type { StorageManager } from './storage-manager';
 
@@ -37,6 +38,8 @@ export interface ResumableUploadManagerOptions {
   /** Prefix for temporary chunk parts on the target disk. Default `.uploads`. */
   tmpPrefix?: string;
   idGenerator?: () => string;
+  /** Emit `nestjs:media:upload.*` diagnostics events (default true). */
+  emitDiagnostics?: boolean;
 }
 
 /**
@@ -50,12 +53,14 @@ export class ResumableUploadManager {
   private readonly sessions: UploadSessionStore;
   private readonly tmpPrefix: string;
   private readonly newId: () => string;
+  private readonly emitDiagnostics: boolean;
 
   constructor(options: ResumableUploadManagerOptions) {
     this.storage = options.storage;
     this.sessions = options.sessions;
     this.tmpPrefix = options.tmpPrefix ?? '.uploads';
     this.newId = options.idGenerator ?? (() => randomUUID());
+    this.emitDiagnostics = options.emitDiagnostics ?? true;
   }
 
   private partKey(session: UploadSession, part: number): string {
@@ -63,7 +68,7 @@ export class ResumableUploadManager {
   }
 
   async createUpload(input: CreateUploadInput): Promise<UploadSession> {
-    return this.sessions.create({
+    const session = await this.sessions.create({
       id: this.newId(),
       disk: input.disk,
       key: input.key,
@@ -72,6 +77,14 @@ export class ResumableUploadManager {
       offset: 0,
       parts: 0,
     });
+    this.emit('upload.start', {
+      id: session.id,
+      disk: session.disk,
+      key: session.key,
+      size: session.size,
+      contentType: session.contentType,
+    });
+    return session;
   }
 
   /** Append a chunk at `offset` (must equal the session's current offset). Returns the new offset. */
@@ -84,6 +97,12 @@ export class ResumableUploadManager {
     session.parts += 1;
     session.offset += chunk.byteLength;
     await this.sessions.update(session);
+    this.emit('upload.progress', {
+      id: session.id,
+      offset: session.offset,
+      parts: session.parts,
+      size: session.size,
+    });
     return { offset: session.offset };
   }
 
@@ -110,6 +129,12 @@ export class ResumableUploadManager {
 
     await this.cleanup(session);
     await this.sessions.delete(id);
+    this.emit('upload.complete', {
+      id: session.id,
+      disk: session.disk,
+      key: session.key,
+      size: body.byteLength,
+    });
     return { key: session.key, disk: session.disk, size: body.byteLength };
   }
 
@@ -118,6 +143,14 @@ export class ResumableUploadManager {
     if (!session) return;
     await this.cleanup(session);
     await this.sessions.delete(id);
+    this.emit('upload.abort', { id: session.id });
+  }
+
+  private emit<E extends 'upload.start' | 'upload.progress' | 'upload.complete' | 'upload.abort'>(
+    event: E,
+    payload: Parameters<typeof publishMedia<E>>[1],
+  ): void {
+    if (this.emitDiagnostics) publishMedia(event, payload);
   }
 
   private async cleanup(session: UploadSession): Promise<void> {

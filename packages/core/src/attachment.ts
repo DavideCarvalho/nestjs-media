@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import type { Readable } from 'node:stream';
+import { publishMedia } from './diagnostics';
 import type { ConversionPreset, ImageProcessor } from './image-processor';
 import type { StorageManager } from './storage-manager';
 
@@ -86,6 +87,8 @@ export interface AttachmentManagerOptions {
   imageProcessor?: ImageProcessor;
   keyPrefix?: string;
   idGenerator?: () => string;
+  /** Emit `nestjs:media:attachment.*` diagnostics events (default true). */
+  emitDiagnostics?: boolean;
 }
 
 /**
@@ -98,12 +101,14 @@ export class AttachmentManager {
   private readonly imageProcessor: ImageProcessor | undefined;
   private readonly keyPrefix: string;
   private readonly newId: () => string;
+  private readonly emitDiagnostics: boolean;
 
   constructor(options: AttachmentManagerOptions) {
     this.storage = options.storage;
     this.imageProcessor = options.imageProcessor;
     this.keyPrefix = options.keyPrefix ?? 'attachments';
     this.newId = options.idGenerator ?? (() => randomUUID());
+    this.emitDiagnostics = options.emitDiagnostics ?? true;
   }
 
   async createFromFile(
@@ -143,7 +148,7 @@ export class AttachmentManager {
       }
     }
 
-    return new Attachment({
+    const attachment = new Attachment({
       name: options.name ?? input.fileName,
       disk,
       path,
@@ -152,6 +157,18 @@ export class AttachmentManager {
       variants,
       meta: options.meta ?? {},
     });
+
+    if (this.emitDiagnostics) {
+      publishMedia('attachment.create', {
+        disk,
+        path,
+        size,
+        mimeType: attachment.mimeType,
+        name: attachment.name,
+        variants: Object.keys(variants),
+      });
+    }
+    return attachment;
   }
 
   /** Public URL for the attachment, or a named variant. */
@@ -175,6 +192,13 @@ export class AttachmentManager {
     await this.storage.disk(attachment.disk).delete(attachment.path);
     for (const variant of Object.values(attachment.variants)) {
       await this.storage.disk(variant.disk).delete(variant.path);
+    }
+    if (this.emitDiagnostics) {
+      publishMedia('attachment.delete', {
+        disk: attachment.disk,
+        path: attachment.path,
+        variants: Object.keys(attachment.variants),
+      });
     }
   }
 

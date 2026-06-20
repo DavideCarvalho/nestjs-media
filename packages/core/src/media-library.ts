@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import type { Readable } from 'node:stream';
-import { publishMedia } from './diagnostics';
+import { type MediaDiagnosticPayloads, publishMedia } from './diagnostics';
 import {
   ConversionNotDefinedError,
   ImageProcessorMissingError,
@@ -73,7 +73,10 @@ export class MediaLibrary {
     this.now = options.clock ?? (() => new Date());
   }
 
-  private emit(event: 'attach' | 'delete' | 'conversion', payload: unknown): void {
+  private emit<E extends 'attach' | 'delete' | 'conversion'>(
+    event: E,
+    payload: MediaDiagnosticPayloads[E],
+  ): void {
     if (this.emitDiagnostics) publishMedia(event, payload);
   }
 

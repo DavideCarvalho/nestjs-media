@@ -12,6 +12,7 @@ Adds the **[attachment column model](/docs/concepts/attachments)** (adonis-attac
 - **Attachments** (layer 2, column model): the `Attachment` value object + `AttachmentManager` (`createFromFile` / `url` / `temporaryUrl` / `delete`, eager image variants), exposed as `media.attachments`.
 - **ORM column integration**: TypeORM `@AttachmentColumn()`, MikroORM `AttachmentType`, Prisma `toAttachmentJson` / `fromAttachmentJson`, Drizzle `attachment()` — all storing the same portable JSON shape.
 - **Owner binding**: `media.library.for(ownerType, id)` so `attach` / `list` no longer repeat the owner — the table-model take on spatie's `HasMedia`/`InteractsWithMedia`.
+- **Lifecycle diagnostics**: resumable uploads now emit `upload.start` / `upload.progress` / `upload.complete` / `upload.abort`, and attachments emit `attachment.create` / `attachment.delete` — all typed, all on `nestjs:media:*` channels (`MEDIA_DIAGNOSTIC_EVENTS` exported). The Telescope watcher records every milestone (skipping per-chunk progress).
 
 ## 0.1.0
 
