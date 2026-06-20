@@ -21,3 +21,19 @@ export class UnsupportedOperationError extends Error {
     this.name = 'UnsupportedOperationError';
   }
 }
+
+export class MimeNotAllowedError extends Error {
+  readonly code = 'MEDIA_MIME_NOT_ALLOWED';
+  constructor(collection: string, mimeType: string) {
+    super(`MIME type "${mimeType}" is not allowed in collection "${collection}"`);
+    this.name = 'MimeNotAllowedError';
+  }
+}
+
+export class MediaNotFoundError extends Error {
+  readonly code = 'MEDIA_RECORD_NOT_FOUND';
+  constructor(id: string) {
+    super(`Media record not found: ${id}`);
+    this.name = 'MediaNotFoundError';
+  }
+}
