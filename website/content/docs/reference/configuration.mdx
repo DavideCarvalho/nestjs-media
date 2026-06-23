@@ -29,6 +29,13 @@ interface MediaModuleOptions {
     maxSize?: number;                       // reject larger creations (bytes)
     keyFor?: (filename: string, token: string, metadata: Record<string, string>) => string;
   };
+
+  // ── direct (presigned multipart) uploads — needs an S3-capable disk ──
+  direct?: {                                // mounts the direct upload controller
+    disk: string;
+    basePath?: string;
+    partSize?: number;                      // default 8 MiB
+  };
 }
 ```
 
@@ -42,6 +49,7 @@ interface MediaModuleOptions {
 | `uploadSessions` | — | Enables `media.uploads` (the resumable engine) |
 | `uploadTmpPrefix` | — | Where in-progress chunks are staged on the disk |
 | `tus` | — | Mounts `MediaUploadController` (needs `uploadSessions`) |
+| `direct` | — | Enables `media.directUploads` + mounts `MediaDirectUploadController` (needs a presign/multipart disk, e.g. S3) |
 
 ## `MediaModule.forRootAsync(options)`
 
@@ -82,14 +90,15 @@ interface ConversionPreset {
 
 ```ts
 class MediaService {
-  disk(name?: string): StorageDriver;   // layer 1
-  get library(): MediaLibrary;          // layer 2 — throws if no store configured
-  get uploads(): ResumableUploadManager;// resumable — throws if no uploadSessions configured
+  disk(name?: string): StorageDriver;       // layer 1
+  get library(): MediaLibrary;              // layer 2 — throws if no store configured
+  get uploads(): ResumableUploadManager;    // resumable proxy — throws if no uploadSessions configured
+  get directUploads(): DirectUploadManager; // direct multipart — throws if no direct configured
 }
 ```
 
 <Callout type="info" title="Why the getters throw">
-`library` and `uploads` throw a clear, actionable error when their feature wasn't configured, rather than handing you `undefined`. The boundary is explicit: if you didn't pass a `store`, `media.library` tells you so by name.
+`library`, `uploads`, and `directUploads` throw a clear, actionable error when their feature wasn't configured, rather than handing you `undefined`. The boundary is explicit: if you didn't pass a `store`, `media.library` tells you so by name.
 </Callout>
 
 ## `MediaLibrary`
@@ -115,7 +124,7 @@ interface AttachInput {
 For advanced wiring, the module also exports tokens you can inject directly:
 
 ```ts
-import { MEDIA_STORAGE, MEDIA_LIBRARY, MEDIA_UPLOADS, MEDIA_TUS } from '@dudousxd/nestjs-media';
+import { MEDIA_STORAGE, MEDIA_LIBRARY, MEDIA_UPLOADS, MEDIA_TUS, MEDIA_DIRECT } from '@dudousxd/nestjs-media';
 ```
 
 | Token | Resolves to |
@@ -124,6 +133,7 @@ import { MEDIA_STORAGE, MEDIA_LIBRARY, MEDIA_UPLOADS, MEDIA_TUS } from '@dudousx
 | `MEDIA_LIBRARY` | `MediaLibrary \| null` |
 | `MEDIA_UPLOADS` | `ResumableUploadManager \| null` |
 | `MEDIA_TUS` | `TusUploadHandler \| null` |
+| `MEDIA_DIRECT` | `DirectUploadManager \| null` |
 
 ## Error codes
 

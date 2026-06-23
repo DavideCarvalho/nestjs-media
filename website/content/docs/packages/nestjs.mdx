@@ -9,15 +9,16 @@ import { Callout } from 'fumadocs-ui/components/callout';
 
 ## `MediaModule`
 
-`forRoot` / `forRootAsync` register a `@Global()` module. It always provides the storage layer; pass `store` for the media-library, `uploadSessions` for resumable uploads, and `tus` to mount the HTTP controller. See [Reference → Configuration](/docs/reference/configuration) for every option.
+`forRoot` / `forRootAsync` register a `@Global()` module. It always provides the storage layer; pass `store` for the media-library, `uploadSessions` for resumable uploads, `tus` to mount the proxy HTTP controller, and `direct` to mount the direct presigned-multipart controller. See [Reference → Configuration](/docs/reference/configuration) for every option.
 
 ```ts
 MediaModule.forRoot({
   default: 'local',
   disks: { local },
-  store,                 // → media.library
-  uploadSessions,        // → media.uploads
-  tus: { disk: 'local' },// → mounts MediaUploadController
+  store,                  // → media.library
+  uploadSessions,         // → media.uploads
+  tus: { disk: 'local' }, // → mounts MediaUploadController
+  direct: { disk: 's3' }, // → mounts MediaDirectUploadController (S3)
 });
 ```
 
@@ -30,7 +31,8 @@ class MediaService {
   disk(name?: string): StorageDriver;        // layer 1
   get library(): MediaLibrary;               // layer 2, table model (throws if no store)
   get attachments(): AttachmentManager;      // layer 2, column model (always available)
-  get uploads(): ResumableUploadManager;     // resumable (throws if no uploadSessions)
+  get uploads(): ResumableUploadManager;     // resumable proxy (throws if no uploadSessions)
+  get directUploads(): DirectUploadManager;  // direct presigned multipart (throws if no direct)
 }
 ```
 
@@ -52,6 +54,14 @@ When `tus` is configured, `MediaUploadController` is mounted at `media/uploads`,
 app.use('/media/uploads', express.raw({ type: 'application/offset+octet-stream' }));
 ```
 
+## Direct upload controller
+
+When `direct` is configured (with a presign/multipart-capable disk like S3), `MediaDirectUploadController` is mounted at `media/uploads/direct`, orchestrating browser-to-S3 [presigned multipart uploads](/docs/concepts/uploads#direct-presigned-multipart-server) over `DirectUploadManager` (`media.directUploads`). It exposes `initiate` / per-part presign / `complete` / `abort` — no raw-body parser is needed, since the bytes go straight to S3.
+
+```ts
+direct: { disk: 's3', partSize: 8 * 1024 * 1024 } // partSize optional, default 8 MiB
+```
+
 ## The `/storage` subpath
 
 For consumers that want only the filesystem facade, without the media-library layer:
@@ -63,11 +73,13 @@ import { StorageManager, type StorageDriver } from '@dudousxd/nestjs-media/stora
 ## Injection tokens
 
 ```ts
-import { MEDIA_STORAGE, MEDIA_LIBRARY, MEDIA_ATTACHMENTS, MEDIA_UPLOADS, MEDIA_TUS } from '@dudousxd/nestjs-media';
+import {
+  MEDIA_STORAGE, MEDIA_LIBRARY, MEDIA_ATTACHMENTS, MEDIA_UPLOADS, MEDIA_TUS, MEDIA_DIRECT,
+} from '@dudousxd/nestjs-media';
 ```
 
 <Callout type="info">
-Inject `MediaService` for normal use; reach for the tokens only when you need the raw `StorageManager`/`MediaLibrary`/`ResumableUploadManager` (e.g. wiring a custom controller).
+Inject `MediaService` for normal use; reach for the tokens only when you need the raw `StorageManager`/`MediaLibrary`/`ResumableUploadManager`/`DirectUploadManager` (e.g. wiring a custom controller).
 </Callout>
 
 ## Peer dependencies

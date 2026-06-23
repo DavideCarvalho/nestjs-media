@@ -111,3 +111,103 @@ export class PostPhotosController {
 ## Forcing the path
 
 On an S3 disk, `uploadMode` defaults to `direct` (presigned). To run *this* flow through the backend instead — say, to virus-scan on the way in — force `proxy` per the [uploads concept](/docs/concepts/uploads); the same React client works unchanged.
+
+## True direct-to-S3: presigned multipart
+
+The tus flow above is *resumable proxy* — the bytes still pass through Nest. For the highest throughput, skip the backend entirely: the browser PUTs each part straight to S3 against a **presigned multipart** URL. Your server only orchestrates the upload; it never sees the bytes, so it never becomes the bandwidth bottleneck.
+
+<Steps>
+
+<Step>
+
+### Enable the direct controller
+
+Pass the `direct` option an S3 disk. This mounts `MediaDirectUploadController` at `media/uploads/direct` and exposes the orchestrator as `media.directUploads`:
+
+```ts title="app.module.ts"
+MediaModule.forRoot({
+  default: 's3',
+  disks: { s3 },
+  direct: {
+    disk: 's3',
+    partSize: 8 * 1024 * 1024, // optional — default 8 MiB
+  },
+});
+```
+
+No raw-body parser, no session store: S3 holds the in-progress multipart upload keyed by the `uploadId` it returns.
+
+</Step>
+
+<Step>
+
+### Initiate, PUT each part, complete (browser)
+
+`initiate` returns one presigned URL per part. The browser PUTs each slice directly to S3, collects the `ETag` header from each response, then tells the server to assemble them. This is plain browser code:
+
+```ts title="direct-upload.ts"
+async function directUpload(file: File) {
+  // 1. Initiate — server opens the multipart upload and presigns each part
+  const init = await fetch('/media/uploads/direct/initiate', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ key: `videos/${file.name}`, contentType: file.type, size: file.size }),
+  }).then((r) => r.json()); // → { uploadId, key, disk, partSize, parts: [{ partNumber, url }] }
+
+  // 2. PUT each part straight to S3, capturing the ETag it returns
+  const parts = await Promise.all(
+    init.parts.map(async ({ partNumber, url }) => {
+      const start = (partNumber - 1) * init.partSize;
+      const blob = file.slice(start, start + init.partSize);
+      const res = await fetch(url, { method: 'PUT', body: blob });
+      return { partNumber, etag: res.headers.get('etag')! };
+    }),
+  );
+
+  // 3. Complete — S3 stitches the parts into the final object
+  await fetch(`/media/uploads/direct/${init.uploadId}/complete`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ key: init.key, parts }),
+  });
+
+  return init.key;
+}
+```
+
+If a presigned URL expires mid-upload, mint a fresh one for that single part with `POST /media/uploads/direct/:uploadId/parts/:partNumber?key=…`; abandon the whole upload with `DELETE /media/uploads/direct/:uploadId?key=…`.
+
+</Step>
+
+<Step>
+
+### Attach the finished object
+
+The bytes are already at `key` on the disk once `complete` returns — record it against your entity exactly as in the proxy flow, or drive the manager yourself from a service:
+
+```ts title="videos.controller.ts"
+import { Body, Controller, Param, Post } from '@nestjs/common';
+import { MediaService } from '@dudousxd/nestjs-media';
+
+@Controller('posts/:id/videos')
+export class PostVideosController {
+  constructor(private readonly media: MediaService) {}
+
+  @Post('finalize')
+  finalize(@Param('id') postId: string, @Body() body: { key: string; fileName: string; mimeType: string }) {
+    return this.media.library.attach({
+      ownerType: 'Post', ownerId: postId, collection: 'videos',
+      fileName: body.fileName, mimeType: body.mimeType, disk: 's3',
+      contents: this.media.disk('s3').stream(body.key),
+    });
+  }
+}
+```
+
+</Step>
+
+</Steps>
+
+<Callout type="info" title="proxy vs direct, in one line">
+Use **proxy/tus** when you need to touch the bytes (virus-scan, transcode, watermark) or support disks that can't presign; use **direct multipart** when raw throughput matters and the disk is S3. See [Uploads & multipart](/docs/concepts/uploads) for the full comparison and the `DirectUploadManager` engine.
+</Callout>

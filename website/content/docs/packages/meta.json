@@ -15,6 +15,7 @@
     "telescope",
     "codegen",
     "react",
+    "upload-redis",
     "testing"
   ]
 }

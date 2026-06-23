@@ -5,6 +5,24 @@ description: Release history for the nestjs-media packages.
 
 All packages are versioned together via [changesets](https://github.com/changesets/changesets).
 
+## 0.5.0
+
+Adds the **direct (presigned multipart) upload path** end-to-end: the browser PUTs each part straight to S3 while the backend only orchestrates.
+
+- **`DirectUploadManager`** (core): `createUpload` / `presignPart` / `completeUpload` / `abortUpload` over a presign/multipart-capable disk, exposed as `media.directUploads`. Configurable `defaultPartSize` (8 MiB) and `presignExpirySeconds` (3600).
+- **Multipart driver surface**: the optional `MultipartUploadDriver` add-on (`createMultipartUpload` / `presignUploadPart` / `completeMultipartUpload` / `abortMultipartUpload`), implemented by the S3 driver and gated by `capabilities.multipart`.
+- **`MediaModule.direct` option** + `MediaDirectUploadController` mounted at `media/uploads/direct` (`initiate` / per-part presign / `complete` / `abort`). New `MEDIA_DIRECT` token.
+- **Redis session store**: [`@dudousxd/nestjs-media-upload-redis`](/docs/packages/upload-redis) ships `RedisUploadSessionStore` so resumable (proxy/tus) sessions survive across instances, with `keyPrefix` + sliding `ttlSeconds` (24h default).
+
+## 0.4.0
+
+Media lifecycle events now flow through **[`@dudousxd/nestjs-diagnostics`](/docs/concepts/diagnostics)** — auto-captured by the generic Telescope bridge with no per-event wiring.
+
+## 0.3.0
+
+- **`list()`** added to the `StorageDriver` SPI (folders + paginated file entries, with an optional cross-bucket override), implemented for local, S3 (`ListObjectsV2`), and the in-memory testing driver.
+- **MikroORM 7** supported as a peer alongside v6.
+
 ## 0.2.0
 
 Adds the **[attachment column model](/docs/concepts/attachments)** (adonis-attachment style) alongside the existing media table, and an owner-binding ergonomic for the table model.

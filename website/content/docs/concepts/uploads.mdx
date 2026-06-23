@@ -117,3 +117,52 @@ const { key } = await media.uploads.complete(session.id); // assembles + cleans 
 ```
 
 Each chunk is written immediately as a *part* on the target disk (under `uploadTmpPrefix`), so resuming needs no in-memory buffering and a half-finished upload survives a process restart. `complete` concatenates the parts into the final object and removes them. Reach `media.uploads` directly when you want to drive uploads from your own protocol or a non-HTTP transport.
+
+## Direct (presigned multipart) server
+
+The `direct` path inverts the data flow: the browser PUTs each part straight to S3 against a **presigned URL**, and your backend only orchestrates — it never sees a byte. Enable it with the `direct` option (it needs a presign/multipart-capable disk, i.e. S3):
+
+```ts
+MediaModule.forRoot({
+  default: 's3',
+  disks: { s3 },
+  direct: {
+    disk: 's3',
+    partSize: 8 * 1024 * 1024, // optional, default 8 MiB
+  },
+});
+```
+
+This mounts `MediaDirectUploadController` at `media/uploads/direct` and provides `DirectUploadManager` as `media.directUploads`. The lifecycle is four calls:
+
+| Step | HTTP | Manager method |
+| --- | --- | --- |
+| **initiate** | `POST media/uploads/direct/initiate` | `createUpload` — opens an S3 multipart upload and returns one presigned URL per part |
+| **presign a part** | `POST media/uploads/direct/:uploadId/parts/:partNumber` | `presignPart` — mint a fresh URL for a single part (e.g. retry an expired one) |
+| **complete** | `POST media/uploads/direct/:uploadId/complete` | `completeUpload` — assemble the parts (S3 stitches them server-side) |
+| **abort** | `DELETE media/uploads/direct/:uploadId` | `abortUpload` — discard the multipart upload and its parts |
+
+`initiate` takes `{ key, contentType?, size?, partSize?, disk? }`. When `size` is known it returns `ceil(size / partSize)` presigned part URLs up front; otherwise it returns a single URL and you mint the rest on demand via the `parts` endpoint. Presigned URLs expire after `presignExpirySeconds` (default 3600). No raw-body parser is needed — the bytes never touch Nest.
+
+<Callout type="info" title="No session store required">
+The direct path is stateless on your side: S3 holds the in-progress multipart upload, keyed by the `uploadId` it returns. The `UploadSessionStore` (and its Redis adapter) is only for the **proxy/tus** path, where your backend tracks the resume offset.
+</Callout>
+
+### The engine underneath
+
+Both the controller and any custom transport sit on `DirectUploadManager` (framework-agnostic, also reachable as `media.directUploads`):
+
+```ts
+const { uploadId, parts, partSize } = await media.directUploads.createUpload({
+  disk: 's3', key: 'videos/clip.mp4', contentType: 'video/mp4', size,
+}); // parts: [{ partNumber, url }, …]
+
+// browser PUTs each part to its url, collects the returned ETag, then:
+await media.directUploads.completeUpload({
+  key: 'videos/clip.mp4', uploadId,
+  parts: [{ partNumber: 1, etag: '"abc…"' }, /* … */],
+});
+// media.directUploads.abortUpload({ key, uploadId }) to cancel
+```
+
+`createUpload` throws `UnsupportedOperationError` if the target disk can't presign multipart — so forcing `direct` fails loudly rather than silently degrading.

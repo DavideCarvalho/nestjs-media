@@ -22,12 +22,25 @@ new S3Driver({
 ## Capabilities
 
 ```ts
-{ presign: true, multipart: true, publicUrls: !!publicBaseUrl }
+{ presign: true, multipart: true, publicUrls: !!publicBaseUrl, list: true }
 ```
 
 - `temporaryUrl(path, ttl)` returns a signed GET URL (via `@aws-sdk/s3-request-presigner`).
 - `url(path)` returns `${publicBaseUrl}/${key}` when set, else throws.
 - `presign + multipart` are what [`uploadMode: 'auto'`](/docs/concepts/uploads) reads to choose the **direct** (presigned multipart) upload path.
+
+## Multipart presign surface
+
+Because `capabilities.multipart` is `true`, the driver also implements the optional `MultipartUploadDriver` add-on that backs [direct-to-S3 presigned multipart uploads](/docs/concepts/uploads#direct-presigned-multipart-server):
+
+```ts
+createMultipartUpload(path, options?): Promise<{ uploadId: string }>;
+presignUploadPart(path, uploadId, partNumber, expiresInSeconds): Promise<string>; // PUT URL
+completeMultipartUpload(path, uploadId, parts): Promise<void>;                     // parts: { partNumber, etag }[]
+abortMultipartUpload(path, uploadId): Promise<void>;
+```
+
+You rarely call these directly — `DirectUploadManager` (and the `MediaModule.direct` controller) drives them. `createMultipartUpload` maps to S3's `CreateMultipartUpload`, `presignUploadPart` signs an `UploadPart` command, and `completeMultipartUpload` stitches the collected `ETag`s server-side.
 
 ## S3-compatible endpoints
 

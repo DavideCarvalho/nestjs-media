@@ -1,0 +1,72 @@
+---
+title: '@dudousxd/nestjs-media-upload-redis'
+description: A Redis-backed UploadSessionStore — share resumable (tus/proxy) upload sessions across instances.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+A Redis adapter for the [`UploadSessionStore`](/docs/concepts/uploads) SPI. The bundled `InMemoryUploadSessionStore` is fine for a single process, but behind a load balancer a resumed chunk can land on a different node than the one that created the session. Back the sessions with Redis and any instance can pick up where another left off.
+
+<Callout type="info" title="Proxy path only">
+This store is for the **resumable proxy (tus)** path, where your backend tracks each upload's resume offset. The **direct presigned-multipart** path is stateless on your side (S3 holds the in-progress upload), so it needs no session store.
+</Callout>
+
+## Install & wire
+
+```ts title="app.module.ts"
+import { MediaModule } from '@dudousxd/nestjs-media';
+import { RedisUploadSessionStore } from '@dudousxd/nestjs-media-upload-redis';
+import Redis from 'ioredis';
+
+const redis = new Redis(process.env.REDIS_URL);
+
+MediaModule.forRoot({
+  default: 's3',
+  disks: { s3 },
+  uploadSessions: new RedisUploadSessionStore(redis),
+  tus: { disk: 's3', basePath: '/media/uploads' },
+});
+```
+
+`forRootAsync` keeps the Redis client in DI — resolve it from a provider rather than constructing it inline:
+
+```ts title="app.module.ts"
+MediaModule.forRootAsync({
+  inject: ['REDIS'],
+  useFactory: (redis: Redis) => ({
+    default: 's3',
+    disks: { s3 },
+    uploadSessions: new RedisUploadSessionStore(redis, { keyPrefix: 'app:upload', ttlSeconds: 3600 }),
+    tus: { disk: 's3' },
+  }),
+});
+```
+
+## The client contract
+
+The store accepts any object satisfying the minimal `MinimalRedis` shape, so it works with `ioredis`, `redis` (node-redis v4), or a thin wrapper — no specific client is a dependency:
+
+```ts
+interface MinimalRedis {
+  get(key: string): Promise<string | null>;
+  set(key: string, value: string, ...args: unknown[]): Promise<unknown>;
+  del(key: string): Promise<unknown>;
+}
+```
+
+Sessions are stored as JSON under `${keyPrefix}:${id}` and written with an `EX` TTL on every `create`/`update`, so abandoned uploads expire on their own.
+
+## Options
+
+```ts
+new RedisUploadSessionStore(redis, {
+  keyPrefix: 'media:upload:session', // default
+  ttlSeconds: 86400,                 // default — 24h sliding expiry, refreshed on each write
+});
+```
+
+`get` validates the stored shape before returning it (`null` on a corrupt or missing entry), so a manually-flushed key never crashes a resume.
+
+## Peer dependencies
+
+`@dudousxd/nestjs-media-core` only — your Redis client is yours to provide.
