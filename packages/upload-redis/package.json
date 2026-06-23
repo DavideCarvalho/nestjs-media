@@ -33,5 +33,8 @@
     "@dudousxd/nestjs-media-core": "workspace:*",
     "tsup": "8.3.5",
     "typescript": "5.9.3"
+  },
+  "publishConfig": {
+    "access": "public"
   }
 }
