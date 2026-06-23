@@ -8,6 +8,35 @@ export interface PutOptions {
   metadata?: Record<string, string>;
 }
 
+export interface ListOptions {
+  /** Delimiter that rolls deeper keys up into folder prefixes. Default '/'. */
+  delimiter?: string;
+  /** Opaque pagination cursor from a previous ListResult. */
+  cursor?: string;
+  /** Max entries per page. */
+  limit?: number;
+  /** Override the driver's configured bucket/root (admin cross-bucket browse). Ignored by drivers without a bucket concept. */
+  bucket?: string;
+}
+
+export interface ListEntry {
+  /** Full key relative to the bucket/root. */
+  key: string;
+  /** Last path segment (file or folder name, no trailing slash). */
+  name: string;
+  sizeBytes: number | null;
+  lastModified: Date | null;
+}
+
+export interface ListResult {
+  /** Sub-folder prefixes (each ends in the delimiter), from CommonPrefixes. */
+  folders: string[];
+  /** File entries directly under the prefix. */
+  files: ListEntry[];
+  /** Present when the result is truncated; pass back as ListOptions.cursor. */
+  cursor?: string;
+}
+
 export interface DriverCapabilities {
   /** Can issue signed, time-limited URLs (temporaryUrl). */
   presign: boolean;
@@ -15,6 +44,8 @@ export interface DriverCapabilities {
   multipart: boolean;
   /** Can serve stable public URLs (url). */
   publicUrls: boolean;
+  /** Can enumerate keys under a prefix (list). */
+  list: boolean;
 }
 
 export interface StorageDriver {
@@ -29,4 +60,5 @@ export interface StorageDriver {
   size(path: string): Promise<number>;
   url(path: string): Promise<string>;
   temporaryUrl(path: string, expiresInSeconds: number): Promise<string>;
+  list(prefix: string, options?: ListOptions): Promise<ListResult>;
 }
