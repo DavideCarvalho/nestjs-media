@@ -1,5 +1,16 @@
 # @dudousxd/nestjs-media-disk-s3
 
+## 0.4.0
+
+### Minor Changes
+
+- be47230: Media diagnostics now publish through `@dudousxd/nestjs-diagnostics` (`aviary:media:*`), so any app using `@dudousxd/nestjs-diagnostics-telescope`'s generic watcher auto-captures media events (upload/attach/conversion/delete) with zero per-lib wiring. The standalone `MediaWatcher` is superseded by that bridge but kept for standalone use.
+
+### Patch Changes
+
+- Updated dependencies [be47230]
+  - @dudousxd/nestjs-media-core@0.4.0
+
 ## 0.3.0
 
 ### Minor Changes

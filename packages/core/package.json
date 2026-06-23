@@ -1,6 +1,6 @@
 {
   "name": "@dudousxd/nestjs-media-core",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "nestjs-media core — storage driver SPI and facade",
   "license": "MIT",
   "type": "module",
