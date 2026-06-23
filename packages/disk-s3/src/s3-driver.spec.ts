@@ -4,6 +4,7 @@ import {
   DeleteObjectCommand,
   GetObjectCommand,
   HeadObjectCommand,
+  ListObjectsV2Command,
   PutObjectCommand,
   S3Client,
 } from '@aws-sdk/client-s3';
@@ -33,11 +34,12 @@ afterEach(() => {
 });
 
 describe('S3Driver', () => {
-  it('advertises presign + multipart capabilities; publicUrls follows publicBaseUrl', () => {
+  it('advertises presign + multipart + list capabilities; publicUrls follows publicBaseUrl', () => {
     expect(new S3Driver({ client, bucket: 'b' }).capabilities).toEqual({
       presign: true,
       multipart: true,
       publicUrls: false,
+      list: true,
     });
     expect(
       new S3Driver({ client, bucket: 'b', publicBaseUrl: 'https://cdn.test' }).capabilities
@@ -130,5 +132,45 @@ describe('S3Driver', () => {
     const url = await d.temporaryUrl('a/b.png', 120);
     expect(url).toContain('X-Amz-Signature=');
     expect(url).toContain('X-Amz-Expires=120');
+  });
+
+  it('list returns folders from CommonPrefixes and files from Contents', async () => {
+    mock.on(ListObjectsV2Command).resolves({
+      CommonPrefixes: [{ Prefix: 'docs/sub/' }],
+      Contents: [
+        { Key: 'docs/a.txt', Size: 10, LastModified: new Date('2024-01-01') },
+        { Key: 'docs/b.txt', Size: 20, LastModified: new Date('2024-01-02') },
+      ],
+      IsTruncated: false,
+    });
+    const d = new S3Driver({ client, bucket: 'b' });
+    const result = await d.list('docs/', { delimiter: '/' });
+    expect(result.folders).toEqual(['docs/sub/']);
+    expect(result.files).toHaveLength(2);
+    expect(result.files[0]).toMatchObject({ key: 'docs/a.txt', name: 'a.txt', sizeBytes: 10 });
+    expect(result.files[1]).toMatchObject({ key: 'docs/b.txt', name: 'b.txt', sizeBytes: 20 });
+    expect(result.cursor).toBeUndefined();
+  });
+
+  it('list passes cursor and limit and returns next cursor when truncated', async () => {
+    mock.on(ListObjectsV2Command).resolves({
+      CommonPrefixes: [],
+      Contents: [{ Key: 'docs/a.txt', Size: 5, LastModified: new Date() }],
+      IsTruncated: true,
+      NextContinuationToken: 'tok-next',
+    });
+    const d = new S3Driver({ client, bucket: 'b' });
+    const result = await d.list('docs/', { cursor: 'tok-prev', limit: 1 });
+    const calls = mock.commandCalls(ListObjectsV2Command);
+    expect(calls[0]?.args[0].input).toMatchObject({ ContinuationToken: 'tok-prev', MaxKeys: 1 });
+    expect(result.cursor).toBe('tok-next');
+  });
+
+  it('list uses bucket override from options', async () => {
+    mock.on(ListObjectsV2Command).resolves({ CommonPrefixes: [], Contents: [], IsTruncated: false });
+    const d = new S3Driver({ client, bucket: 'default-bucket' });
+    await d.list('docs/', { bucket: 'other-bucket' });
+    const calls = mock.commandCalls(ListObjectsV2Command);
+    expect(calls[0]?.args[0].input).toMatchObject({ Bucket: 'other-bucket' });
   });
 });
