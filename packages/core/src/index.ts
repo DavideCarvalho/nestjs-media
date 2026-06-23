@@ -10,6 +10,7 @@ export * from './image-processor';
 export * from './upload-mode';
 export * from './diagnostics';
 export * from './resumable-upload';
+export * from './direct-upload';
 export * from './tus';
 export * from './attachment';
 export * from './media-library';
