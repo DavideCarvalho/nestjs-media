@@ -1,6 +1,15 @@
-import { channel } from 'node:diagnostics_channel';
+import { emit } from '@dudousxd/nestjs-diagnostics';
 
-/** Standard ecosystem envelope: `nestjs:<lib>:<event>` channels carry this shape. */
+/**
+ * Standard ecosystem envelope shape for media diagnostics. Events now flow on
+ * `aviary:media:*` channels via `@dudousxd/nestjs-diagnostics` — the canonical
+ * envelope is {@link import('@dudousxd/nestjs-diagnostics').DiagnosticEvent}, and
+ * the generic telescope bridge auto-captures every `aviary:media:*` event without
+ * any per-event wiring.
+ *
+ * This type is kept for backwards-compatibility with any code that types a received
+ * message as `MediaDiagnosticEnvelope`; prefer `DiagnosticEvent` for new observers.
+ */
 export interface MediaDiagnosticEnvelope<P = unknown> {
   ts: number;
   lib: 'media';
@@ -9,9 +18,11 @@ export interface MediaDiagnosticEnvelope<P = unknown> {
 }
 
 /**
- * Every event the library publishes on a `nestjs:media:<event>` channel. Subscribe to
- * one (via `node:diagnostics_channel`) to run code on upload start/finish, attaches,
- * conversions, etc.; the [Telescope watcher](../../telescope) records them automatically.
+ * Every event the library publishes on an `aviary:media:<event>` channel. Subscribe
+ * to one (via `node:diagnostics_channel` + `channelName('media', event)` from
+ * `@dudousxd/nestjs-diagnostics`) to run code on upload start/finish, attaches,
+ * conversions, etc.; the [Telescope watcher](../../telescope) records them
+ * automatically.
  */
 export type MediaDiagnosticEvent =
   // media-library (table model)
@@ -111,13 +122,15 @@ export interface MediaDiagnosticPayloads {
   'attachment.delete': AttachmentDeletePayload;
 }
 
-/** Publish a media event to its diagnostics channel (no-op when nobody is subscribed). */
+/**
+ * Publish a media event via `@dudousxd/nestjs-diagnostics` on
+ * `aviary:media:<event>` (no-op when nobody is subscribed). The generic telescope
+ * bridge auto-subscribes to every registered `aviary:*` channel, so media events
+ * are captured without any per-event wiring.
+ */
 export function publishMedia<E extends MediaDiagnosticEvent>(
   event: E,
   payload: MediaDiagnosticPayloads[E],
 ): void {
-  const ch = channel(`nestjs:media:${event}`);
-  if (ch.hasSubscribers) {
-    ch.publish({ ts: Date.now(), lib: 'media', event, payload } satisfies MediaDiagnosticEnvelope);
-  }
+  emit('media', event, payload);
 }

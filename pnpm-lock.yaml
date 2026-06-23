@@ -58,6 +58,10 @@ importers:
         version: 5.9.3
 
   packages/core:
+    dependencies:
+      '@dudousxd/nestjs-diagnostics':
+        specifier: 0.6.0
+        version: 0.6.0(@nestjs/common@11.0.0(reflect-metadata@0.2.2)(rxjs@7.8.1))(@nestjs/core@11.0.0(@nestjs/common@11.0.0(reflect-metadata@0.2.2)(rxjs@7.8.1))(reflect-metadata@0.2.2)(rxjs@7.8.1))(reflect-metadata@0.2.2)
     devDependencies:
       tsup:
         specifier: 8.3.5
@@ -288,6 +292,9 @@ importers:
 
   packages/telescope:
     devDependencies:
+      '@dudousxd/nestjs-diagnostics':
+        specifier: 0.6.0
+        version: 0.6.0(@nestjs/common@11.0.0(reflect-metadata@0.2.2)(rxjs@7.8.1))(@nestjs/core@11.0.0(@nestjs/common@11.0.0(reflect-metadata@0.2.2)(rxjs@7.8.1))(reflect-metadata@0.2.2)(rxjs@7.8.1))(reflect-metadata@0.2.2)
       '@dudousxd/nestjs-media-core':
         specifier: workspace:*
         version: link:../core
@@ -659,6 +666,21 @@ packages:
       '@nestjs/common':
         optional: true
       tsx:
+        optional: true
+
+  '@dudousxd/nestjs-diagnostics@0.6.0':
+    resolution: {integrity: sha512-M6SxB8ICy3pmtxmBpS5DTfWcZE4eKnuQ0s8FrwwU6WXl6Wn+7NLzMfL/DMHyZcPpbOC8wotF6rHQ0BoRxDd7BA==}
+    engines: {node: '>=20'}
+    peerDependencies:
+      '@nestjs/common': ^10 || ^11
+      '@nestjs/core': ^10 || ^11
+      reflect-metadata: ^0.2
+    peerDependenciesMeta:
+      '@nestjs/common':
+        optional: true
+      '@nestjs/core':
+        optional: true
+      reflect-metadata:
         optional: true
 
   '@dudousxd/nestjs-telescope@1.11.2':
@@ -4467,6 +4489,12 @@ snapshots:
       typescript: 5.9.3
     optionalDependencies:
       '@nestjs/common': 11.0.0(reflect-metadata@0.2.2)(rxjs@7.8.1)
+
+  '@dudousxd/nestjs-diagnostics@0.6.0(@nestjs/common@11.0.0(reflect-metadata@0.2.2)(rxjs@7.8.1))(@nestjs/core@11.0.0(@nestjs/common@11.0.0(reflect-metadata@0.2.2)(rxjs@7.8.1))(reflect-metadata@0.2.2)(rxjs@7.8.1))(reflect-metadata@0.2.2)':
+    optionalDependencies:
+      '@nestjs/common': 11.0.0(reflect-metadata@0.2.2)(rxjs@7.8.1)
+      '@nestjs/core': 11.0.0(@nestjs/common@11.0.0(reflect-metadata@0.2.2)(rxjs@7.8.1))(reflect-metadata@0.2.2)(rxjs@7.8.1)
+      reflect-metadata: 0.2.2
 
   '@dudousxd/nestjs-telescope@1.11.2(@nestjs/common@11.0.0(reflect-metadata@0.2.2)(rxjs@7.8.1))(@nestjs/core@11.0.0(@nestjs/common@11.0.0(reflect-metadata@0.2.2)(rxjs@7.8.1))(reflect-metadata@0.2.2)(rxjs@7.8.1))(reflect-metadata@0.2.2)(rxjs@7.8.1)':
     dependencies:

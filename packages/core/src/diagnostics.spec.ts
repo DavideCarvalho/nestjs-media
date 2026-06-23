@@ -1,4 +1,6 @@
 import { subscribe, unsubscribe } from 'node:diagnostics_channel';
+import { channelName } from '@dudousxd/nestjs-diagnostics';
+import type { DiagnosticEvent } from '@dudousxd/nestjs-diagnostics';
 import {
   InMemoryDriver,
   InMemoryMediaStore,
@@ -6,7 +8,6 @@ import {
 } from '@dudousxd/nestjs-media-testing';
 import { afterEach, describe, expect, it } from 'vitest';
 import { AttachmentManager } from './attachment';
-import type { MediaDiagnosticEnvelope } from './diagnostics';
 import { MediaLibrary } from './media-library';
 import { ResumableUploadManager } from './resumable-upload';
 import { StorageManager } from './storage-manager';
@@ -32,9 +33,9 @@ const attachInput = {
 };
 
 const listeners: Array<{ name: string; fn: (m: unknown) => void }> = [];
-function listen(channel: string): MediaDiagnosticEnvelope[] {
-  const received: MediaDiagnosticEnvelope[] = [];
-  const fn = (m: unknown) => received.push(m as MediaDiagnosticEnvelope);
+function listen(channel: string): DiagnosticEvent[] {
+  const received: DiagnosticEvent[] = [];
+  const fn = (m: unknown) => received.push(m as DiagnosticEvent);
   subscribe(channel, fn);
   listeners.push({ name: channel, fn });
   return received;
@@ -48,8 +49,8 @@ afterEach(() => {
 });
 
 describe('media diagnostics channels', () => {
-  it('publishes nestjs:media:attach with the standard envelope', async () => {
-    const events = listen('nestjs:media:attach');
+  it('publishes aviary:media:attach with the standard envelope via @dudousxd/nestjs-diagnostics', async () => {
+    const events = listen(channelName('media', 'attach'));
     await library().attach(attachInput);
     expect(events).toHaveLength(1);
     expect(events[0]?.lib).toBe('media');
@@ -58,8 +59,8 @@ describe('media diagnostics channels', () => {
     expect(events[0]?.payload).toMatchObject({ id: 'id-1', collection: 'gallery', disk: 'local' });
   });
 
-  it('publishes nestjs:media:delete', async () => {
-    const events = listen('nestjs:media:delete');
+  it('publishes aviary:media:delete', async () => {
+    const events = listen(channelName('media', 'delete'));
     const lib = library();
     await lib.attach(attachInput);
     await lib.delete('id-1');
@@ -68,7 +69,7 @@ describe('media diagnostics channels', () => {
   });
 
   it('does not publish when emitDiagnostics is false', async () => {
-    const events = listen('nestjs:media:attach');
+    const events = listen(channelName('media', 'attach'));
     await library(false).attach(attachInput);
     expect(events).toHaveLength(0);
   });
@@ -85,9 +86,9 @@ describe('resumable upload diagnostics', () => {
   }
 
   it('publishes start, progress, and complete across an upload lifecycle', async () => {
-    const start = listen('nestjs:media:upload.start');
-    const progress = listen('nestjs:media:upload.progress');
-    const complete = listen('nestjs:media:upload.complete');
+    const start = listen(channelName('media', 'upload.start'));
+    const progress = listen(channelName('media', 'upload.progress'));
+    const complete = listen(channelName('media', 'upload.complete'));
 
     const mgr = uploads();
     const session = await mgr.createUpload({ disk: 'local', key: 'out.bin', size: 4 });
@@ -101,7 +102,7 @@ describe('resumable upload diagnostics', () => {
   });
 
   it('publishes abort when a session is discarded', async () => {
-    const aborted = listen('nestjs:media:upload.abort');
+    const aborted = listen(channelName('media', 'upload.abort'));
     const mgr = uploads();
     const session = await mgr.createUpload({ disk: 'local', key: 'out.bin' });
     await mgr.abort(session.id);
@@ -119,8 +120,8 @@ describe('attachment diagnostics', () => {
   }
 
   it('publishes attachment.create and attachment.delete', async () => {
-    const created = listen('nestjs:media:attachment.create');
-    const deleted = listen('nestjs:media:attachment.delete');
+    const created = listen(channelName('media', 'attachment.create'));
+    const deleted = listen(channelName('media', 'attachment.delete'));
 
     const mgr = attachments();
     const att = await mgr.createFromFile({

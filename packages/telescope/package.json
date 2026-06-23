@@ -27,10 +27,12 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "peerDependencies": {
+    "@dudousxd/nestjs-diagnostics": "^0.6.0",
     "@dudousxd/nestjs-media-core": "workspace:*",
     "@dudousxd/nestjs-telescope": "^1.0.0"
   },
   "devDependencies": {
+    "@dudousxd/nestjs-diagnostics": "0.6.0",
     "@dudousxd/nestjs-media-core": "workspace:*",
     "@dudousxd/nestjs-telescope": "1.11.2",
     "tsup": "8.3.5",

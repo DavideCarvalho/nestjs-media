@@ -1,9 +1,7 @@
 import { subscribe, unsubscribe } from 'node:diagnostics_channel';
-import {
-  MEDIA_DIAGNOSTIC_EVENTS,
-  type MediaDiagnosticEnvelope,
-  type MediaDiagnosticEvent,
-} from '@dudousxd/nestjs-media-core';
+import { channelName } from '@dudousxd/nestjs-diagnostics';
+import type { DiagnosticEvent } from '@dudousxd/nestjs-diagnostics';
+import { MEDIA_DIAGNOSTIC_EVENTS, type MediaDiagnosticEvent } from '@dudousxd/nestjs-media-core';
 import type { Watcher, WatcherContext } from '@dudousxd/nestjs-telescope';
 
 // Record every milestone, but not per-chunk `upload.progress` — that would flood the
@@ -14,8 +12,15 @@ const EVENTS: MediaDiagnosticEvent[] = MEDIA_DIAGNOSTIC_EVENTS.filter(
 
 /**
  * Telescope watcher that records a `media` entry for every milestone
- * `nestjs:media:*` diagnostics event the library emits — zero coupling: media
- * publishes, this subscribes. Register it with the telescope module's watcher list.
+ * `aviary:media:*` diagnostics event the library emits — zero coupling: media
+ * publishes via `@dudousxd/nestjs-diagnostics`, this subscribes.
+ *
+ * **Superseded by `@dudousxd/nestjs-diagnostics-telescope`'s generic watcher,**
+ * which auto-captures every `aviary:media:*` channel registered in the diagnostics
+ * registry — prefer that when the generic bridge is already in use. This watcher is
+ * kept for standalone use without the diagnostics telescope bridge.
+ *
+ * Register it with the telescope module's watcher list.
  */
 export class MediaWatcher implements Watcher {
   readonly type = 'media';
@@ -23,9 +28,9 @@ export class MediaWatcher implements Watcher {
 
   register(ctx: WatcherContext): void {
     for (const event of EVENTS) {
-      const channel = `nestjs:media:${event}`;
+      const channel = channelName('media', event);
       const onMessage = (message: unknown) => {
-        const envelope = message as MediaDiagnosticEnvelope<Record<string, unknown>>;
+        const envelope = message as DiagnosticEvent<Record<string, unknown>>;
         ctx.record({
           type: this.type,
           content: { event: envelope.event, ...envelope.payload },
