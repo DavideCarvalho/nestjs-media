@@ -1,10 +1,13 @@
 import { createReadStream } from 'node:fs';
-import { copyFile, mkdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
+import { copyFile, mkdir, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import type { Readable } from 'node:stream';
 import {
   type DriverCapabilities,
   FileNotFoundError,
+  type ListEntry,
+  type ListOptions,
+  type ListResult,
   type PutOptions,
   type StorageDriver,
   UnsupportedOperationError,
@@ -25,7 +28,7 @@ export class LocalDriver implements StorageDriver {
   constructor(options: LocalDriverOptions) {
     this.root = options.root;
     this.baseUrl = options.baseUrl;
-    this.capabilities = { presign: false, multipart: false, publicUrls: !!options.baseUrl };
+    this.capabilities = { presign: false, multipart: false, publicUrls: !!options.baseUrl, list: true };
   }
 
   private abs(path: string): string {
@@ -94,5 +97,31 @@ export class LocalDriver implements StorageDriver {
 
   async temporaryUrl(_path: string, _expiresInSeconds: number): Promise<string> {
     throw new UnsupportedOperationError('local', 'temporaryUrl');
+  }
+
+  async list(prefix: string, _options?: ListOptions): Promise<ListResult> {
+    const cleanPrefix = prefix.replace(/\/+$/, '');
+    const absDir = this.abs(cleanPrefix);
+    let dirents: import('node:fs').Dirent[];
+    try {
+      dirents = await readdir(absDir, { withFileTypes: true });
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+        return { folders: [], files: [] };
+      }
+      throw error;
+    }
+    const folders: string[] = [];
+    const files: ListEntry[] = [];
+    for (const dirent of dirents) {
+      const key = cleanPrefix ? `${cleanPrefix}/${dirent.name}` : dirent.name;
+      if (dirent.isDirectory()) {
+        folders.push(`${key}/`);
+      } else {
+        const stats = await stat(this.abs(key));
+        files.push({ key, name: dirent.name, sizeBytes: stats.size, lastModified: stats.mtime });
+      }
+    }
+    return { folders, files };
   }
 }

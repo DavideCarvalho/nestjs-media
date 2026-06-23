@@ -57,6 +57,7 @@ describe('LocalDriver', () => {
       presign: false,
       multipart: false,
       publicUrls: false,
+      list: true,
     });
     await expect(new LocalDriver({ root }).url('a.txt')).rejects.toBeInstanceOf(
       UnsupportedOperationError,
