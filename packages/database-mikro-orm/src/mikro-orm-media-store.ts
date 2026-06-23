@@ -7,7 +7,7 @@ import { MediaEntity } from './media.entity';
  * free via `updateSchema({ safe: true })` — it never drops or alters existing columns.
  */
 export async function ensureMediaSchema(orm: MikroORM): Promise<void> {
-  await orm.schema.updateSchema({ safe: true });
+  await orm.schema.update({ safe: true });
 }
 
 /**

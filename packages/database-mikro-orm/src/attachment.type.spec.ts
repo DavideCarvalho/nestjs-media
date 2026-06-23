@@ -1,5 +1,5 @@
 import { Attachment } from '@dudousxd/nestjs-media-core';
-import { EntitySchema, MikroORM } from '@mikro-orm/better-sqlite';
+import { EntitySchema, MikroORM } from '@mikro-orm/sqlite';
 import { afterEach, describe, expect, it } from 'vitest';
 import { AttachmentType } from './attachment.type';
 
@@ -28,7 +28,7 @@ async function makeOrm(): Promise<MikroORM> {
     entities: [UserEntity],
     allowGlobalContext: true,
   });
-  await orm.schema.updateSchema({ safe: true });
+  await orm.schema.update({ safe: true });
   orms.push(orm);
   return orm;
 }

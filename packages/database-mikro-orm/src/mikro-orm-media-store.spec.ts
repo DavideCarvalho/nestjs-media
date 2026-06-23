@@ -1,5 +1,5 @@
 import { runMediaStoreConformance } from '@dudousxd/nestjs-media-testing';
-import { MikroORM } from '@mikro-orm/better-sqlite';
+import { MikroORM } from '@mikro-orm/sqlite';
 import { afterEach, describe, expect, it } from 'vitest';
 import { MediaEntity } from './media.entity';
 import { MikroOrmMediaStore, ensureMediaSchema } from './mikro-orm-media-store';
