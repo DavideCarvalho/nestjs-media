@@ -1,6 +1,6 @@
 {
   "name": "@dudousxd/nestjs-media-database-mikro-orm",
-  "version": "0.2.0",
+  "version": "1.0.0",
   "description": "nestjs-media MikroORM media store",
   "license": "MIT",
   "type": "module",

@@ -1,0 +1,12 @@
+# @dudousxd/nestjs-media-disk-local
+
+## 1.0.0
+
+### Minor Changes
+
+- 99777bb: Add a driver-agnostic `list(prefix, options?)` to the `StorageDriver` contract (returns `{ folders, files, cursor? }`), implemented for the S3 (ListObjectsV2 with optional bucket override), local (readdir), and in-memory drivers, plus a `list` capability flag. The S3 `list` honours `options.bucket` for admin cross-bucket browsing. The MikroORM database adapter now supports MikroORM 7 (peer `^6 || ^7`).
+
+### Patch Changes
+
+- Updated dependencies [99777bb]
+  - @dudousxd/nestjs-media-core@0.3.0
