@@ -1,6 +1,9 @@
 import { Readable } from 'node:stream';
 import {
+  AbortMultipartUploadCommand,
+  CompleteMultipartUploadCommand,
   CopyObjectCommand,
+  CreateMultipartUploadCommand,
   DeleteObjectCommand,
   GetObjectCommand,
   HeadObjectCommand,
@@ -174,5 +177,66 @@ describe('S3Driver', () => {
     await d.list('docs/', { bucket: 'other-bucket' });
     const calls = mock.commandCalls(ListObjectsV2Command);
     expect(calls[0]?.args[0].input).toMatchObject({ Bucket: 'other-bucket' });
+  });
+
+  describe('multipart', () => {
+    it('createMultipartUpload returns the uploadId from S3', async () => {
+      mock.on(CreateMultipartUploadCommand).resolves({ UploadId: 'u1' });
+      const d = new S3Driver({ client, bucket: 'b' });
+      const result = await d.createMultipartUpload('video.mp4', { contentType: 'video/mp4' });
+      expect(result).toEqual({ uploadId: 'u1' });
+      expect(mock.commandCalls(CreateMultipartUploadCommand)[0]?.args[0].input).toMatchObject({
+        Bucket: 'b',
+        Key: 'video.mp4',
+        ContentType: 'video/mp4',
+      });
+    });
+
+    it('createMultipartUpload throws when S3 returns no UploadId', async () => {
+      mock.on(CreateMultipartUploadCommand).resolves({});
+      const d = new S3Driver({ client, bucket: 'b' });
+      await expect(d.createMultipartUpload('video.mp4')).rejects.toThrow(
+        'S3 did not return an UploadId',
+      );
+    });
+
+    it('presignUploadPart returns a non-empty signed URL string', async () => {
+      const d = new S3Driver({ client: makeClient(), bucket: 'b' });
+      const url = await d.presignUploadPart('video.mp4', 'u1', 1, 600);
+      expect(typeof url).toBe('string');
+      expect(url.length).toBeGreaterThan(0);
+      expect(url).toContain('X-Amz-Signature=');
+    });
+
+    it('completeMultipartUpload sends the command with mapped Parts and UploadId', async () => {
+      mock.on(CompleteMultipartUploadCommand).resolves({});
+      const d = new S3Driver({ client, bucket: 'b', keyPrefix: 'up' });
+      await d.completeMultipartUpload('video.mp4', 'u1', [
+        { partNumber: 1, etag: 'etag1' },
+        { partNumber: 2, etag: 'etag2' },
+      ]);
+      expect(mock.commandCalls(CompleteMultipartUploadCommand)[0]?.args[0].input).toMatchObject({
+        Bucket: 'b',
+        Key: 'up/video.mp4',
+        UploadId: 'u1',
+        MultipartUpload: {
+          Parts: [
+            { PartNumber: 1, ETag: 'etag1' },
+            { PartNumber: 2, ETag: 'etag2' },
+          ],
+        },
+      });
+    });
+
+    it('abortMultipartUpload sends AbortMultipartUploadCommand with UploadId', async () => {
+      mock.on(AbortMultipartUploadCommand).resolves({});
+      const d = new S3Driver({ client, bucket: 'b', keyPrefix: 'up' });
+      await d.abortMultipartUpload('video.mp4', 'u1');
+      expect(mock.commandCalls(AbortMultipartUploadCommand)[0]?.args[0].input).toMatchObject({
+        Bucket: 'b',
+        Key: 'up/video.mp4',
+        UploadId: 'u1',
+      });
+    });
   });
 });

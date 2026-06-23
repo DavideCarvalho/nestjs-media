@@ -1,12 +1,16 @@
 import type { Readable } from 'node:stream';
 import {
+  AbortMultipartUploadCommand,
+  CompleteMultipartUploadCommand,
   CopyObjectCommand,
+  CreateMultipartUploadCommand,
   DeleteObjectCommand,
   GetObjectCommand,
   HeadObjectCommand,
   ListObjectsV2Command,
   PutObjectCommand,
   type S3Client,
+  UploadPartCommand,
 } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import {
@@ -15,6 +19,8 @@ import {
   type ListEntry,
   type ListOptions,
   type ListResult,
+  type MultipartPart,
+  type MultipartUploadDriver,
   type PutOptions,
   type StorageDriver,
   UnsupportedOperationError,
@@ -34,7 +40,7 @@ function isNotFound(err: unknown): boolean {
   return e?.name === 'NoSuchKey' || e?.name === 'NotFound' || e?.$metadata?.httpStatusCode === 404;
 }
 
-export class S3Driver implements StorageDriver {
+export class S3Driver implements StorageDriver, MultipartUploadDriver {
   readonly capabilities: DriverCapabilities;
   private readonly client: S3Client;
   private readonly bucket: string;
@@ -185,5 +191,60 @@ export class S3Driver implements StorageDriver {
       result.cursor = out.NextContinuationToken;
     }
     return result;
+  }
+
+  async createMultipartUpload(path: string, options?: PutOptions): Promise<{ uploadId: string }> {
+    const out = await this.client.send(
+      new CreateMultipartUploadCommand({
+        Bucket: this.bucket,
+        Key: this.key(path),
+        ContentType: options?.contentType,
+      }),
+    );
+    if (!out.UploadId) throw new Error('S3 did not return an UploadId');
+    return { uploadId: out.UploadId };
+  }
+
+  async presignUploadPart(
+    path: string,
+    uploadId: string,
+    partNumber: number,
+    expiresInSeconds: number,
+  ): Promise<string> {
+    return getSignedUrl(
+      this.client,
+      new UploadPartCommand({
+        Bucket: this.bucket,
+        Key: this.key(path),
+        UploadId: uploadId,
+        PartNumber: partNumber,
+      }),
+      { expiresIn: expiresInSeconds },
+    );
+  }
+
+  async completeMultipartUpload(
+    path: string,
+    uploadId: string,
+    parts: MultipartPart[],
+  ): Promise<void> {
+    await this.client.send(
+      new CompleteMultipartUploadCommand({
+        Bucket: this.bucket,
+        Key: this.key(path),
+        UploadId: uploadId,
+        MultipartUpload: { Parts: parts.map((p) => ({ PartNumber: p.partNumber, ETag: p.etag })) },
+      }),
+    );
+  }
+
+  async abortMultipartUpload(path: string, uploadId: string): Promise<void> {
+    await this.client.send(
+      new AbortMultipartUploadCommand({
+        Bucket: this.bucket,
+        Key: this.key(path),
+        UploadId: uploadId,
+      }),
+    );
   }
 }

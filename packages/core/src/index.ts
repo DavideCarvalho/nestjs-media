@@ -1,4 +1,5 @@
 export * from './types';
+export * from './multipart';
 export * from './errors';
 export * from './stream';
 export * from './storage-manager';

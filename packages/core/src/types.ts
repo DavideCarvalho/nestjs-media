@@ -48,6 +48,24 @@ export interface DriverCapabilities {
   list: boolean;
 }
 
+export interface MultipartPart {
+  partNumber: number;
+  etag: string;
+}
+
+/** Optional add-on surface for drivers that support native multipart presign (S3). Gated by capabilities.multipart. */
+export interface MultipartUploadDriver {
+  createMultipartUpload(path: string, options?: PutOptions): Promise<{ uploadId: string }>;
+  presignUploadPart(
+    path: string,
+    uploadId: string,
+    partNumber: number,
+    expiresInSeconds: number,
+  ): Promise<string>;
+  completeMultipartUpload(path: string, uploadId: string, parts: MultipartPart[]): Promise<void>;
+  abortMultipartUpload(path: string, uploadId: string): Promise<void>;
+}
+
 export interface StorageDriver {
   readonly capabilities: DriverCapabilities;
   put(path: string, contents: Buffer | Readable, options?: PutOptions): Promise<void>;
