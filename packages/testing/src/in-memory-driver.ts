@@ -2,6 +2,9 @@ import { Readable } from 'node:stream';
 import {
   type DriverCapabilities,
   FileNotFoundError,
+  type ListOptions,
+  type ListEntry,
+  type ListResult,
   type PutOptions,
   type StorageDriver,
   UnsupportedOperationError,
@@ -13,6 +16,7 @@ export class InMemoryDriver implements StorageDriver {
     presign: false,
     multipart: false,
     publicUrls: false,
+    list: true,
   };
   private readonly files = new Map<string, Buffer>();
 
@@ -49,6 +53,23 @@ export class InMemoryDriver implements StorageDriver {
   async move(from: string, to: string): Promise<void> {
     await this.copy(from, to);
     this.files.delete(from);
+  }
+
+  async list(prefix: string, options?: ListOptions): Promise<ListResult> {
+    const delimiter = options?.delimiter ?? '/';
+    const folders = new Set<string>();
+    const files: ListEntry[] = [];
+    for (const [key, buffer] of this.files.entries()) {
+      if (!key.startsWith(prefix)) continue;
+      const rest = key.slice(prefix.length);
+      const delimiterIndex = rest.indexOf(delimiter);
+      if (delimiterIndex === -1) {
+        files.push({ key, name: rest, sizeBytes: buffer.length, lastModified: null });
+      } else {
+        folders.add(`${prefix}${rest.slice(0, delimiterIndex + 1)}`);
+      }
+    }
+    return { folders: Array.from(folders).sort(), files };
   }
 
   async url(_path: string): Promise<string> {
