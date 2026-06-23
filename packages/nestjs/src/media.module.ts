@@ -1,5 +1,6 @@
 import {
   AttachmentManager,
+  DirectUploadManager,
   type ImageProcessor,
   type MediaCollectionConfig,
   MediaLibrary,
@@ -11,10 +12,12 @@ import {
   type UploadSessionStore,
 } from '@dudousxd/nestjs-media-core';
 import { type DynamicModule, Global, Module, type Provider } from '@nestjs/common';
+import { MediaDirectUploadController } from './media-direct-upload.controller';
 import { MediaUploadController } from './media-upload.controller';
 import { MediaService } from './media.service';
 import {
   MEDIA_ATTACHMENTS,
+  MEDIA_DIRECT,
   MEDIA_LIBRARY,
   MEDIA_STORAGE,
   MEDIA_TUS,
@@ -28,6 +31,12 @@ export interface MediaTusOptions {
   keyFor?: (filename: string, token: string, metadata: Record<string, string>) => string;
 }
 
+export interface MediaDirectOptions {
+  disk: string;
+  basePath?: string;
+  partSize?: number;
+}
+
 export interface MediaModuleOptions extends StorageManagerOptions {
   /** Enable the media-library layer (layer 2) by providing a persistence store. */
   store?: MediaStore;
@@ -38,6 +47,8 @@ export interface MediaModuleOptions extends StorageManagerOptions {
   uploadTmpPrefix?: string;
   /** Mount the tus HTTP controller (requires uploadSessions). */
   tus?: MediaTusOptions;
+  /** Mount the direct (S3 multipart presign) upload controller. */
+  direct?: MediaDirectOptions;
 }
 
 export interface MediaModuleAsyncOptions {
@@ -89,6 +100,17 @@ function buildTus(
   });
 }
 
+function buildDirect(
+  manager: StorageManager,
+  options: MediaModuleOptions,
+): DirectUploadManager | null {
+  if (!options.direct) return null;
+  return new DirectUploadManager({
+    storage: manager,
+    ...(options.direct.partSize ? { defaultPartSize: options.direct.partSize } : {}),
+  });
+}
+
 @Global()
 @Module({})
 export class MediaModule {
@@ -96,6 +118,7 @@ export class MediaModule {
     const manager = new StorageManager(options);
     const uploads = buildUploads(manager, options);
     const tus = buildTus(uploads, options);
+    const direct = buildDirect(manager, options);
     return {
       module: MediaModule,
       providers: [
@@ -104,9 +127,13 @@ export class MediaModule {
         { provide: MEDIA_UPLOADS, useValue: uploads },
         { provide: MEDIA_TUS, useValue: tus },
         { provide: MEDIA_ATTACHMENTS, useValue: buildAttachments(manager, options) },
+        { provide: MEDIA_DIRECT, useValue: direct },
         MediaService,
       ],
-      controllers: tus ? [MediaUploadController] : [],
+      controllers: [
+        ...(tus ? [MediaUploadController] : []),
+        ...(direct ? [MediaDirectUploadController] : []),
+      ],
       exports: [
         MediaService,
         MEDIA_STORAGE,
@@ -114,6 +141,7 @@ export class MediaModule {
         MEDIA_UPLOADS,
         MEDIA_TUS,
         MEDIA_ATTACHMENTS,
+        MEDIA_DIRECT,
       ],
     };
   }
@@ -149,12 +177,19 @@ export class MediaModule {
         useFactory: async (manager: StorageManager, ...args: any[]) =>
           buildAttachments(manager, await options.useFactory(...args)),
       },
+      {
+        provide: MEDIA_DIRECT,
+        inject: [MEDIA_STORAGE, ...(options.inject ?? [])],
+        useFactory: async (manager: StorageManager, ...args: any[]) =>
+          buildDirect(manager, await options.useFactory(...args)),
+      },
       MediaService,
     ];
     return {
       module: MediaModule,
       imports: options.imports ?? [],
       providers,
+      controllers: [MediaUploadController, MediaDirectUploadController],
       exports: [
         MediaService,
         MEDIA_STORAGE,
@@ -162,6 +197,7 @@ export class MediaModule {
         MEDIA_UPLOADS,
         MEDIA_TUS,
         MEDIA_ATTACHMENTS,
+        MEDIA_DIRECT,
       ],
     };
   }

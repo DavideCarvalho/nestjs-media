@@ -5,6 +5,7 @@ import {
   Head,
   Headers,
   Inject,
+  NotImplementedException,
   Options,
   Param,
   Patch,
@@ -32,7 +33,7 @@ interface ReqLike {
  */
 @Controller('media/uploads')
 export class MediaUploadController {
-  constructor(@Inject(MEDIA_TUS) private readonly handler: TusUploadHandler) {}
+  constructor(@Inject(MEDIA_TUS) private readonly handler: TusUploadHandler | null) {}
 
   @Options()
   options(@Res() res: ResLike, @Headers() headers: Record<string, string>): Promise<void> {
@@ -76,6 +77,7 @@ export class MediaUploadController {
   }
 
   private async run(req: TusRequest, res: ResLike): Promise<void> {
+    if (!this.handler) throw new NotImplementedException('Tus uploads are not configured.');
     const result = await this.handler.handle(req);
     res.status(result.status);
     for (const [name, value] of Object.entries(result.headers)) res.setHeader(name, value);

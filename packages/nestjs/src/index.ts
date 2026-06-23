@@ -1,6 +1,7 @@
 export * from './media.module';
 export * from './media.service';
 export * from './media-upload.controller';
+export * from './media-direct-upload.controller';
 export * from './tokens';
 export type {
   AttachInput,
