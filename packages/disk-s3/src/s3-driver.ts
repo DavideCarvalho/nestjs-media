@@ -4,6 +4,7 @@ import {
   DeleteObjectCommand,
   GetObjectCommand,
   HeadObjectCommand,
+  ListObjectsV2Command,
   PutObjectCommand,
   type S3Client,
 } from '@aws-sdk/client-s3';
@@ -11,6 +12,9 @@ import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import {
   type DriverCapabilities,
   FileNotFoundError,
+  type ListEntry,
+  type ListOptions,
+  type ListResult,
   type PutOptions,
   type StorageDriver,
   UnsupportedOperationError,
@@ -42,7 +46,7 @@ export class S3Driver implements StorageDriver {
     this.bucket = options.bucket;
     this.keyPrefix = (options.keyPrefix ?? '').replace(/^\/+|\/+$/g, '');
     this.publicBaseUrl = options.publicBaseUrl;
-    this.capabilities = { presign: true, multipart: true, publicUrls: !!options.publicBaseUrl };
+    this.capabilities = { presign: true, multipart: true, publicUrls: !!options.publicBaseUrl, list: true };
   }
 
   /** Map a logical path to a fully-qualified S3 key. */
@@ -143,5 +147,38 @@ export class S3Driver implements StorageDriver {
       new GetObjectCommand({ Bucket: this.bucket, Key: this.key(path) }),
       { expiresIn: expiresInSeconds },
     );
+  }
+
+  async list(prefix: string, options?: ListOptions): Promise<ListResult> {
+    const bucket = options?.bucket ?? this.bucket;
+    const fullPrefix = this.key(prefix);
+    const out = await this.client.send(
+      new ListObjectsV2Command({
+        Bucket: bucket,
+        Prefix: fullPrefix,
+        Delimiter: options?.delimiter ?? '/',
+        MaxKeys: options?.limit,
+        ContinuationToken: options?.cursor,
+      }),
+    );
+    const folders = (out.CommonPrefixes ?? [])
+      .map((commonPrefix) => commonPrefix.Prefix)
+      .filter((value): value is string => typeof value === 'string');
+    const files: ListEntry[] = (out.Contents ?? [])
+      .filter((object) => object.Key !== undefined && object.Key !== fullPrefix)
+      .map((object) => {
+        const key = object.Key as string;
+        return {
+          key,
+          name: key.slice(fullPrefix.length),
+          sizeBytes: object.Size ?? null,
+          lastModified: object.LastModified ?? null,
+        };
+      });
+    const result: ListResult = { folders, files };
+    if (out.IsTruncated && out.NextContinuationToken !== undefined) {
+      result.cursor = out.NextContinuationToken;
+    }
+    return result;
   }
 }
