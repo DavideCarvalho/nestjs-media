@@ -51,5 +51,27 @@ export function runStorageDriverConformance(
       for await (const c of await d.stream('st')) chunks.push(Buffer.from(c));
       expect(Buffer.concat(chunks).toString()).toBe('streamed');
     });
+
+    describe('list', () => {
+      it('returns files directly under a prefix and rolls deeper keys into folders', async () => {
+        const driver = await makeDriver();
+        await driver.put('docs/a.txt', Buffer.from('a'));
+        await driver.put('docs/b.txt', Buffer.from('bb'));
+        await driver.put('docs/sub/c.txt', Buffer.from('ccc'));
+
+        const result = await driver.list('docs/', { delimiter: '/' });
+
+        const fileKeys = result.files.map((entry) => entry.key).sort();
+        expect(fileKeys).toEqual(['docs/a.txt', 'docs/b.txt']);
+        expect(result.folders).toEqual(['docs/sub/']);
+      });
+
+      it('lists root when prefix is empty', async () => {
+        const driver = await makeDriver();
+        await driver.put('top.txt', Buffer.from('x'));
+        const result = await driver.list('', { delimiter: '/' });
+        expect(result.files.map((entry) => entry.name)).toContain('top.txt');
+      });
+    });
   });
 }
