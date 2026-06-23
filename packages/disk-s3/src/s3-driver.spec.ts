@@ -167,7 +167,9 @@ describe('S3Driver', () => {
   });
 
   it('list uses bucket override from options', async () => {
-    mock.on(ListObjectsV2Command).resolves({ CommonPrefixes: [], Contents: [], IsTruncated: false });
+    mock
+      .on(ListObjectsV2Command)
+      .resolves({ CommonPrefixes: [], Contents: [], IsTruncated: false });
     const d = new S3Driver({ client, bucket: 'default-bucket' });
     await d.list('docs/', { bucket: 'other-bucket' });
     const calls = mock.commandCalls(ListObjectsV2Command);

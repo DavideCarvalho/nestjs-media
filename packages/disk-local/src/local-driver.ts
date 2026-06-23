@@ -28,7 +28,12 @@ export class LocalDriver implements StorageDriver {
   constructor(options: LocalDriverOptions) {
     this.root = options.root;
     this.baseUrl = options.baseUrl;
-    this.capabilities = { presign: false, multipart: false, publicUrls: !!options.baseUrl, list: true };
+    this.capabilities = {
+      presign: false,
+      multipart: false,
+      publicUrls: !!options.baseUrl,
+      list: true,
+    };
   }
 
   private abs(path: string): string {

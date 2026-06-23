@@ -2,8 +2,8 @@ import { Readable } from 'node:stream';
 import {
   type DriverCapabilities,
   FileNotFoundError,
-  type ListOptions,
   type ListEntry,
+  type ListOptions,
   type ListResult,
   type PutOptions,
   type StorageDriver,

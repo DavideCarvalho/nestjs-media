@@ -46,7 +46,12 @@ export class S3Driver implements StorageDriver {
     this.bucket = options.bucket;
     this.keyPrefix = (options.keyPrefix ?? '').replace(/^\/+|\/+$/g, '');
     this.publicBaseUrl = options.publicBaseUrl;
-    this.capabilities = { presign: true, multipart: true, publicUrls: !!options.publicBaseUrl, list: true };
+    this.capabilities = {
+      presign: true,
+      multipart: true,
+      publicUrls: !!options.publicBaseUrl,
+      list: true,
+    };
   }
 
   /** Map a logical path to a fully-qualified S3 key. */
