@@ -92,6 +92,7 @@ interface ConversionPreset {
 class MediaService {
   disk(name?: string): StorageDriver;       // layer 1
   get library(): MediaLibrary;              // layer 2 — throws if no store configured
+  get attachments(): AttachmentManager;     // attachment-as-column API — always available
   get uploads(): ResumableUploadManager;    // resumable proxy — throws if no uploadSessions configured
   get directUploads(): DirectUploadManager; // direct multipart — throws if no direct configured
 }
@@ -124,13 +125,14 @@ interface AttachInput {
 For advanced wiring, the module also exports tokens you can inject directly:
 
 ```ts
-import { MEDIA_STORAGE, MEDIA_LIBRARY, MEDIA_UPLOADS, MEDIA_TUS, MEDIA_DIRECT } from '@dudousxd/nestjs-media';
+import { MEDIA_STORAGE, MEDIA_LIBRARY, MEDIA_ATTACHMENTS, MEDIA_UPLOADS, MEDIA_TUS, MEDIA_DIRECT } from '@dudousxd/nestjs-media';
 ```
 
 | Token | Resolves to |
 |---|---|
 | `MEDIA_STORAGE` | `StorageManager` |
 | `MEDIA_LIBRARY` | `MediaLibrary \| null` |
+| `MEDIA_ATTACHMENTS` | `AttachmentManager` |
 | `MEDIA_UPLOADS` | `ResumableUploadManager \| null` |
 | `MEDIA_TUS` | `TusUploadHandler \| null` |
 | `MEDIA_DIRECT` | `DirectUploadManager \| null` |
