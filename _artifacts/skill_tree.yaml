@@ -1,0 +1,39 @@
+# Skill tree for @dudousxd/nestjs-media. Flat structure (skills/<name>/SKILL.md).
+# 5 skills across 2 packages; all type `core` (each package has <5 skills, so no
+# router skill). framework recorded under metadata, not top-level.
+
+skills:
+  - name: media-module-setup
+    package: "@dudousxd/nestjs-media"
+    path: packages/nestjs/skills/media-module-setup/SKILL.md
+    type: core
+    framework: nestjs
+    summary: Register MediaModule.forRoot / forRootAsync with disks, store, imageProcessor, collections, uploads.
+
+  - name: media-library-attachments
+    package: "@dudousxd/nestjs-media"
+    path: packages/nestjs/skills/media-library-attachments/SKILL.md
+    type: core
+    framework: nestjs
+    summary: Attach files to entities (collections + conversions) and the Attachment column model.
+
+  - name: raw-storage
+    package: "@dudousxd/nestjs-media"
+    path: packages/nestjs/skills/raw-storage/SKILL.md
+    type: core
+    framework: nestjs
+    summary: Disk-agnostic layer-1 storage via media.disk() and the /storage subpath.
+
+  - name: resumable-and-direct-uploads
+    package: "@dudousxd/nestjs-media"
+    path: packages/nestjs/skills/resumable-and-direct-uploads/SKILL.md
+    type: core
+    framework: nestjs
+    summary: tus proxy uploads vs presigned S3 multipart direct uploads, and uploadMode.
+
+  - name: react-media-uploader
+    package: "@dudousxd/nestjs-media-react"
+    path: packages/react/skills/react-media-uploader/SKILL.md
+    type: core
+    framework: react
+    summary: useMediaUpload hook, MediaUploader component, uploadMedia / mediaUrl client.

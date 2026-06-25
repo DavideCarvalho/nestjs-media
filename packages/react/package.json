@@ -20,7 +20,8 @@
     }
   },
   "files": [
-    "dist"
+    "dist",
+    "skills"
   ],
   "scripts": {
     "build": "tsup",
@@ -41,5 +42,8 @@
     "react-dom": "19.0.0",
     "tsup": "8.3.5",
     "typescript": "5.9.3"
-  }
+  },
+  "keywords": [
+    "tanstack-intent"
+  ]
 }
