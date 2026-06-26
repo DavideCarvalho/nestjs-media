@@ -1,6 +1,6 @@
 {
   "name": "@dudousxd/nestjs-media-react",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "React hook + uploader component for nestjs-media (resumable tus)",
   "license": "MIT",
   "type": "module",
