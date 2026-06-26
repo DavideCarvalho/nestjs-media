@@ -97,6 +97,10 @@ proxied (resumable **tus**) vs direct (presigned S3 multipart). The proxy path i
 implemented end to end: `ResumableUploadManager` engine → framework-agnostic
 `TusUploadHandler` → NestJS `MediaUploadController` → React `useMediaUpload`/`MediaUploader`.
 
+> **Security:** `MediaUploadController` (tus) and `MediaDirectUploadController` (direct)
+> ship with **no built-in auth guard** — protect `media/uploads` / `media/uploads/direct`
+> with your own NestJS guard (e.g. a global `APP_GUARD` or a route-scoped guard/middleware).
+
 ## Status
 
 v1 implemented & tested (126 tests, 14 packages): storage (local/s3/in-memory),

@@ -1,0 +1,87 @@
+# Domain map for @dudousxd/nestjs-media (one map for the whole monorepo)
+# Produced autonomously (no maintainer interview) from README, website/content/docs/**,
+# and packages/*/src. Interview-only knowledge is recorded under `gaps:`.
+
+library: nestjs-media
+one_liner: >-
+  Filesystem + media-library for NestJS (Laravel/spatie feel), in one umbrella
+  package. Two layers: disk-agnostic storage (put/get/url/temporaryUrl/stream)
+  and a media-library (attach files to entities, collections, image conversions),
+  plus resumable (tus proxy) and direct (presigned S3 multipart) uploads.
+
+primary_packages:
+  - name: "@dudousxd/nestjs-media"
+    dir: packages/nestjs
+    role: >-
+      The NestJS adapter consumers import. MediaModule.forRoot/forRootAsync,
+      MediaService (disk/library/attachments/uploads/directUploads), tus +
+      direct upload controllers, /storage subpath, injection tokens.
+    entry_exports:
+      - MediaModule (forRoot, forRootAsync)
+      - MediaService
+      - MediaUploadController
+      - MediaDirectUploadController
+      - tokens: MEDIA_STORAGE MEDIA_LIBRARY MEDIA_ATTACHMENTS MEDIA_UPLOADS MEDIA_TUS MEDIA_DIRECT
+  - name: "@dudousxd/nestjs-media-react"
+    dir: packages/react
+    role: >-
+      Browser client surface a frontend consumer imports: useMediaUpload hook,
+      MediaUploader component, re-exports uploadMedia/mediaUrl from the client.
+
+supporting_packages_used_in_examples:
+  # Plugged into MediaModule config; their constructors are real and grounded,
+  # but they get their own (uncovered) skills only if scope expands.
+  - "@dudousxd/nestjs-media-core"          # SPIs + framework-agnostic engines (StorageManager, MediaLibrary, AttachmentManager, ResumableUploadManager, DirectUploadManager, TusUploadHandler)
+  - "@dudousxd/nestjs-media-disk-local"    # LocalDriver({ root, baseUrl? })
+  - "@dudousxd/nestjs-media-disk-s3"       # S3Driver({ client, bucket, keyPrefix?, publicBaseUrl? })
+  - "@dudousxd/nestjs-media-image-sharp"   # SharpImageProcessor()
+  - "@dudousxd/nestjs-media-database-typeorm"   # TypeOrmMediaStore(dataSource, { autoCreateSchema? })
+  - "@dudousxd/nestjs-media-database-mikro-orm" # MikroOrmMediaStore(em)
+  - "@dudousxd/nestjs-media-database-drizzle"   # DrizzleMediaStore(db)
+  - "@dudousxd/nestjs-media-database-prisma"    # PrismaMediaStore(prisma)
+  - "@dudousxd/nestjs-media-upload-redis"  # RedisUploadSessionStore(redis, { keyPrefix?, ttlSeconds? })
+  - "@dudousxd/nestjs-media-client"        # uploadMedia, mediaUrl (framework-agnostic browser)
+  - "@dudousxd/nestjs-media-testing"       # InMemory driver/store/UploadSessionStore + conformance suites
+  - "@dudousxd/nestjs-media-telescope"     # diagnostics watcher
+  - "@dudousxd/nestjs-media-codegen"       # typed media client codegen
+
+concepts:
+  two_layers:
+    layer1_storage: "media.disk(name?).put/get/stream/exists/delete/copy/move/size/url/temporaryUrl/list"
+    layer2_library: "media.library.attach/list/url/delete/ensureConversion + library.for(ownerType, ownerId)"
+    column_model: "media.attachments.createFromFile(...) -> Attachment value object stored in a model column; Attachment.fromJSON to rehydrate"
+  collections:
+    config: MediaCollectionConfig { name, single?, disk?, acceptsMimeTypes?, conversions? }
+    single: "attaching replaces existing media in that collection"
+    mime_validation: "acceptsMimeTypes allow-list -> MimeNotAllowedError"
+  conversions:
+    preset: ConversionPreset { name, width?, height?, fit?, format?, quality?, eager? }
+    lazy: "generated + cached on first library.url(id, name) call"
+    eager: "generated synchronously during attach"
+    needs: "an imageProcessor (SharpImageProcessor) or ImageProcessorMissingError"
+  uploads:
+    modes: "resolveUploadMode: per-call > per-disk > global > auto; auto = direct if presign/multipart-capable else proxy"
+    proxy_tus: "uploadSessions + tus option mounts MediaUploadController at media/uploads; needs raw-body parser for application/offset+octet-stream"
+    direct: "direct option mounts MediaDirectUploadController at media/uploads/direct; needs presign/multipart disk (S3); no session store needed"
+  diagnostics:
+    channel: "emits aviary:media:* via @dudousxd/nestjs-diagnostics; telescope auto-captures"
+    events: "attach delete conversion upload.start upload.progress upload.complete upload.abort attachment.create attachment.delete"
+
+key_failure_modes:  # grounded in errors.ts + docs Troubleshooting/Callouts
+  - "media.library throws 'MediaLibrary is not configured' when no store passed"
+  - "media.uploads / media.directUploads throw when their option was omitted"
+  - "temporaryUrl on local disk fails (presign needs S3); url on local needs baseUrl"
+  - "tus PATCH bodies must be parsed raw (application/offset+octet-stream) or chunks never assemble — single most common mistake"
+  - "forcing uploadMode 'direct' on a non-presign disk throws UnsupportedOperationError (fails loud, not silent)"
+  - "requesting a conversion with no imageProcessor -> ImageProcessorMissingError; undefined preset -> ConversionNotDefinedError"
+  - "unknown disk name -> UnknownDiskError; default disk must exist in disks map"
+  - "UploadOffsetConflictError (409) when client PATCHes wrong Upload-Offset"
+
+gaps:  # what a maintainer interview would have answered; could NOT be derived from repo
+  - "Relative priority/usage ranking of the four ORM stores in production (which is canonical?)."
+  - "Whether eager-conversion sync generation is acceptable at production scale or if a durable/bullmq dispatcher is expected soon (code comment says 'later phase')."
+  - "Recommended production UploadSessionStore beyond Redis; TTL tuning guidance for partial uploads."
+  - "Whether keyFor / path layout is considered a stable public contract consumers may depend on."
+  - "Auth/authorization expectations on the mounted tus + direct controllers (no guard ships; left to consumer) — best-practice not documented."
+  - "AI-agent-specific footguns the maintainer has actually seen in the wild (no GitHub issues accessible in this environment)."
+  - "GCS driver / video+pdf thumbnails / responsive srcset / antivirus hook are 'Future' per README — not yet shippable, excluded from skills."

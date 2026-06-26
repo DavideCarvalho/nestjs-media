@@ -189,6 +189,11 @@ export class MediaModule {
       module: MediaModule,
       imports: options.imports ?? [],
       providers,
+      // Unlike `forRoot`, async options are resolved at runtime by `useFactory`,
+      // so we cannot know at module-build time whether `tus`/`direct` are configured
+      // and therefore cannot mount these controllers conditionally. Both are always
+      // mounted; each injects its nullable manager token (MEDIA_TUS / MEDIA_DIRECT)
+      // and cleanly responds 501 NotImplemented when its feature is unconfigured.
       controllers: [MediaUploadController, MediaDirectUploadController],
       exports: [
         MediaService,
