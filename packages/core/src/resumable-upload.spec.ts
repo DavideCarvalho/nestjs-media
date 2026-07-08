@@ -291,6 +291,20 @@ describe('ResumableUploadManager.writePart (parallel multipart)', () => {
     expect(recorded).toHaveLength(2);
   });
 
+  it('complete() reports the declared session size, not the (unmoved) offset', async () => {
+    const store = makeStore();
+    const completed: { parts?: Array<{ partNumber: number; etag: string }> } = {};
+    const partManager = makeMultipartManager(store, completed);
+    const session = await partManager.createUpload({ disk: 's3', key: 'k/obj.bin', size: 30 });
+
+    await partManager.writePart(session.id, 1, Buffer.alloc(15));
+    await partManager.writePart(session.id, 2, Buffer.alloc(15));
+
+    const result = await partManager.complete(session.id);
+    expect(result.size).toBe(30);
+    expect(result.size).not.toBe(0);
+  });
+
   it('writePart does not mutate session.offset or session.parts', async () => {
     const store = makeStore();
     const partManager = makeMultipartManager(store, {});

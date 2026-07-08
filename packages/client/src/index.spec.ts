@@ -93,6 +93,53 @@ describe('streamChunksParallel', () => {
     expect(lastCall[0]).toBe(25);
     expect(lastCall[1]).toBe(25);
   });
+
+  it('rejects with the real failure and stops starting new part PUTs once one part fails', async () => {
+    let putCount = 0;
+    const partCount = 100; // 1000 bytes @ 10-byte chunks
+    const fetchImpl = vi.fn(async (_url: string, init: RequestInit) => {
+      if (init.method === 'PUT') {
+        putCount += 1;
+        if (putCount === 1) throw new Error('boom: first part rejected');
+        return { ok: true, headers: new Map() } as unknown as Response;
+      }
+      return { ok: true, headers: new Map() } as unknown as Response;
+    });
+
+    await expect(
+      streamChunksParallel('/api/media/uploads/big', blobOf(partCount * 10), {
+        chunkSize: 10,
+        concurrency: 4,
+        retries: 1,
+        fetchImpl: fetchImpl as unknown as typeof fetch,
+      }),
+    ).rejects.toThrow('boom: first part rejected');
+
+    // Bounded by concurrency (a handful of in-flight parts), nowhere near the full file.
+    expect(putCount).toBeGreaterThan(0);
+    expect(putCount).toBeLessThan(partCount / 2);
+  });
+
+  it('forwards the abort signal into every part PUT and the complete POST', async () => {
+    const controller = new AbortController();
+    const signals: Array<AbortSignal | undefined> = [];
+    const fetchImpl = vi.fn(async (_url: string, init: RequestInit) => {
+      signals.push(init.signal ?? undefined);
+      return { ok: true, headers: new Map() } as unknown as Response;
+    });
+
+    await streamChunksParallel('/api/media/uploads/sig', blobOf(20), {
+      chunkSize: 10,
+      concurrency: 2,
+      signal: controller.signal,
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    });
+
+    expect(signals.length).toBeGreaterThan(0);
+    for (const signal of signals) {
+      expect(signal).toBeInstanceOf(AbortSignal);
+    }
+  });
 });
 
 describe('uploadMedia (back-compat)', () => {

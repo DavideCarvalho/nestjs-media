@@ -219,13 +219,17 @@ export class ResumableUploadManager {
 
     await this.cleanup(session);
     await this.sessions.delete(id);
+    // Parallel writePart() never advances session.offset (only writeChunk does), so on
+    // that path offset stays 0. Report the declared total when known; offset remains the
+    // correct value for the sequential path (where offset === size by construction).
+    const size = session.size ?? session.offset;
     this.emit('upload.complete', {
       id: session.id,
       disk: session.disk,
       key: session.key,
-      size: session.offset,
+      size,
     });
-    return { key: session.key, disk: session.disk, size: session.offset };
+    return { key: session.key, disk: session.disk, size };
   }
 
   async abort(id: string): Promise<void> {

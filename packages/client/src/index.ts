@@ -126,6 +126,7 @@ export async function streamChunks(
           ...(opts.headers ?? {}),
         },
         body: slice,
+        ...(opts.signal ? { signal: opts.signal } : {}),
       });
       if (!('ok' in res) || res.ok === false)
         throw new Error(`media upload: PATCH failed at offset ${offset}`);
@@ -153,27 +154,45 @@ export async function streamChunksParallel(
   let nextIndex = 0; // 0-based part index the next worker will claim
   let sent = 0;
 
+  // Aborted when ANY worker fails, so sibling workers stop claiming new parts instead
+  // of racing to upload a part whose sibling has already doomed the whole upload.
+  const pool = new AbortController();
+  const combinedSignal = opts.signal ? AbortSignal.any([opts.signal, pool.signal]) : pool.signal;
+
   const worker = async (): Promise<void> => {
-    while (true) {
-      if (opts.signal?.aborted) throw new Error('Upload aborted');
-      const index = nextIndex;
-      nextIndex += 1;
-      if (index >= partCount) return;
-      const start = index * chunkSize;
-      const end = Math.min(start + chunkSize, total);
-      const slice = data.slice(start, end);
-      const partNumber = index + 1; // S3 parts are 1-based
-      await withRetry(retries, async () => {
-        const res = await doFetch(`${location}/parts/${partNumber}`, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/offset+octet-stream', ...(opts.headers ?? {}) },
-          body: slice,
+    try {
+      while (true) {
+        if (opts.signal?.aborted) throw new Error('Upload aborted');
+        // A sibling worker already failed and aborted the pool: stop claiming new parts
+        // without throwing a second, unrelated rejection — the failing worker's own
+        // throw below is the one Promise.all should reject with.
+        if (pool.signal.aborted) return;
+        const index = nextIndex;
+        nextIndex += 1;
+        if (index >= partCount) return;
+        const start = index * chunkSize;
+        const end = Math.min(start + chunkSize, total);
+        const slice = data.slice(start, end);
+        const partNumber = index + 1; // S3 parts are 1-based
+        await withRetry(retries, async () => {
+          const res = await doFetch(`${location}/parts/${partNumber}`, {
+            method: 'PUT',
+            headers: {
+              'Content-Type': 'application/offset+octet-stream',
+              ...(opts.headers ?? {}),
+            },
+            body: slice,
+            signal: combinedSignal,
+          });
+          if (!('ok' in res) || res.ok === false)
+            throw new Error(`media upload: PUT part ${partNumber} failed`);
         });
-        if (!('ok' in res) || res.ok === false)
-          throw new Error(`media upload: PUT part ${partNumber} failed`);
-      });
-      sent += end - start;
-      opts.onProgress?.(sent, total);
+        sent += end - start;
+        opts.onProgress?.(sent, total);
+      }
+    } catch (error) {
+      pool.abort();
+      throw error;
     }
   };
 
@@ -182,6 +201,7 @@ export async function streamChunksParallel(
   const done = await doFetch(`${location}/complete`, {
     method: 'POST',
     headers: { ...(opts.headers ?? {}) },
+    signal: combinedSignal,
   });
   if (!('ok' in done) || done.ok === false) throw new Error('media upload: complete failed');
 }
