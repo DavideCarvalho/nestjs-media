@@ -1,5 +1,11 @@
 # @dudousxd/nestjs-media
 
+## 0.6.3
+
+### Patch Changes
+
+- c883286: Add `MediaService.diskNames()` (delegates to `StorageManager.diskNames()`), so hosts can enumerate configured disks through the injectable `MediaService` without the `MEDIA_STORAGE` token.
+
 ## 0.6.2
 
 ### Patch Changes
