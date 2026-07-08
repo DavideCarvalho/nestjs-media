@@ -35,6 +35,11 @@ export class MediaService {
     return this.manager.disk(name);
   }
 
+  /** Names of the configured disks (delegates to the storage manager). */
+  diskNames(): string[] {
+    return this.manager.diskNames();
+  }
+
   /** Media-library layer (layer 2). Throws if no store was configured. */
   get library(): MediaLibrary {
     if (!this.mediaLibrary) {
