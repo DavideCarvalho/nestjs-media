@@ -80,6 +80,7 @@ export class InMemoryDriver implements StorageDriver {
   async move(from: string, to: string): Promise<void> {
     await this.copy(from, to);
     this.files.delete(from);
+    this.metadata.delete(from);
   }
 
   async list(prefix: string, options?: ListOptions): Promise<ListResult> {

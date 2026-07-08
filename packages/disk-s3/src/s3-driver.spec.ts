@@ -281,4 +281,10 @@ describe('S3Driver.deleteMany', () => {
     await driver.deleteMany([]);
     expect(s3Mock.commandCalls(DeleteObjectsCommand).length).toBe(0);
   });
+
+  it('throws when DeleteObjects reports per-key errors (matches single delete)', async () => {
+    s3Mock.on(DeleteObjectsCommand).resolves({ Errors: [{ Key: 'k/0', Code: 'AccessDenied' }] });
+    const driver = new S3Driver({ client: new S3Client({ region: 'us-east-1' }), bucket: 'b' });
+    await expect(driver.deleteMany(['k/0'])).rejects.toThrow('deleteMany failed for keys: k/0');
+  });
 });

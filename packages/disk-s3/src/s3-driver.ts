@@ -154,12 +154,18 @@ export class S3Driver implements StorageDriver, MultipartUploadDriver {
     // S3 caps a DeleteObjects batch at 1000 keys.
     for (let start = 0; start < paths.length; start += 1000) {
       const batch = paths.slice(start, start + 1000);
-      await this.client.send(
+      const res = await this.client.send(
         new DeleteObjectsCommand({
           Bucket: this.bucket,
           Delete: { Objects: batch.map((path) => ({ Key: this.key(path) })) },
         }),
       );
+      // DeleteObjects returns 200 with a per-key Errors[] on partial failure;
+      // single delete() throws on failure, so match that instead of swallowing.
+      if (res.Errors && res.Errors.length > 0) {
+        const failed = res.Errors.map((error) => error.Key ?? '?').join(', ');
+        throw new Error(`deleteMany failed for keys: ${failed}`);
+      }
     }
   }
 
