@@ -1,6 +1,11 @@
 import { randomUUID } from 'node:crypto';
 import { publishMedia } from './diagnostics';
-import { UploadOffsetConflictError, UploadSessionNotFoundError } from './errors';
+import {
+  InvalidPartNumberError,
+  UnsupportedOperationError,
+  UploadOffsetConflictError,
+  UploadSessionNotFoundError,
+} from './errors';
 import { isMultipartCapable } from './multipart';
 import type { StorageManager } from './storage-manager';
 import type { MultipartPart } from './types';
@@ -29,6 +34,10 @@ export interface UploadSessionStore {
   get(id: string): Promise<UploadSession | null>;
   update(session: UploadSession): Promise<UploadSession>;
   delete(id: string): Promise<void>;
+  /** Atomically record one part's ETag, keyed by partNumber. Enables parallel `writePart`. */
+  addPart?(id: string, part: MultipartPart): Promise<void>;
+  /** All recorded parts for a session (unordered). Used by `complete()` + resume. */
+  listParts?(id: string): Promise<MultipartPart[]>;
 }
 
 export interface CreateUploadInput {
@@ -136,6 +145,45 @@ export class ResumableUploadManager {
     return { offset: session.offset };
   }
 
+  /**
+   * Upload ONE S3 multipart part by explicit number (the parallel path). Unlike
+   * `writeChunk` this does not touch `offset`/`parts` and does not auto-complete —
+   * the client uploads parts concurrently, then calls `complete()`. Requires a
+   * session store with atomic `addPart` (no read-modify-write fallback is safe
+   * under concurrency).
+   */
+  async writePart(id: string, partNumber: number, chunk: Buffer): Promise<MultipartPart> {
+    const session = await this.require(id);
+    const disk = this.storage.disk(session.disk);
+    if (!session.multipartUploadId || !isMultipartCapable(disk)) {
+      throw new UnsupportedOperationError(session.disk, 'parallel multipart upload');
+    }
+    if (!Number.isInteger(partNumber) || partNumber < 1 || partNumber > 10_000) {
+      throw new InvalidPartNumberError(partNumber);
+    }
+    if (typeof this.sessions.addPart !== 'function') {
+      throw new UnsupportedOperationError('session store', 'concurrent part writes');
+    }
+    const part = await disk.uploadPart(session.key, session.multipartUploadId, partNumber, chunk);
+    await this.sessions.addPart(id, part);
+    const recorded = (await this.sessions.listParts?.(id))?.length ?? 0;
+    this.emit('upload.progress', {
+      id: session.id,
+      offset: session.offset,
+      parts: recorded,
+      size: session.size,
+    });
+    return part;
+  }
+
+  /** All recorded parts for a session (parallel side store first, else the sequential session list). */
+  async listParts(id: string): Promise<MultipartPart[]> {
+    const session = await this.require(id);
+    const stored =
+      typeof this.sessions.listParts === 'function' ? await this.sessions.listParts(id) : [];
+    return [...(session.partETags ?? []), ...stored];
+  }
+
   async status(id: string): Promise<{ offset: number; size: number | undefined }> {
     const session = await this.require(id);
     return { offset: session.offset, size: session.size };
@@ -147,11 +195,16 @@ export class ResumableUploadManager {
     const disk = this.storage.disk(session.disk);
 
     if (session.multipartUploadId && isMultipartCapable(disk)) {
-      await disk.completeMultipartUpload(
-        session.key,
-        session.multipartUploadId,
-        session.partETags ?? [],
+      // Sequential tus writes go to session.partETags (in order); parallel writePart
+      // writes to the store's part side-index (out of order). One of the two is
+      // always empty for a given session — concatenate and sort ascending, which S3
+      // requires for completeMultipartUpload.
+      const stored =
+        typeof this.sessions.listParts === 'function' ? await this.sessions.listParts(id) : [];
+      const parts = [...(session.partETags ?? []), ...stored].sort(
+        (a, b) => a.partNumber - b.partNumber,
       );
+      await disk.completeMultipartUpload(session.key, session.multipartUploadId, parts);
     } else {
       const chunks: Buffer[] = [];
       for (let part = 0; part < session.parts; part += 1) {
@@ -166,13 +219,17 @@ export class ResumableUploadManager {
 
     await this.cleanup(session);
     await this.sessions.delete(id);
+    // Parallel writePart() never advances session.offset (only writeChunk does), so on
+    // that path offset stays 0. Report the declared total when known; offset remains the
+    // correct value for the sequential path (where offset === size by construction).
+    const size = session.size ?? session.offset;
     this.emit('upload.complete', {
       id: session.id,
       disk: session.disk,
       key: session.key,
-      size: session.offset,
+      size,
     });
-    return { key: session.key, disk: session.disk, size: session.offset };
+    return { key: session.key, disk: session.disk, size };
   }
 
   async abort(id: string): Promise<void> {

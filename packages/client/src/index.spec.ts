@@ -1,15 +1,18 @@
 import { describe, expect, it, vi } from 'vitest';
-import { mediaUrl, uploadMedia } from './index';
+import { mediaUrl, streamChunksParallel, uploadMedia } from './index';
 
 function mockFetch() {
   return vi.fn(async (_url: string, init: RequestInit) => {
     if (init.method === 'POST') {
-      return { headers: new Headers({ Location: '/media/uploads/s1' }) } as Response;
+      return { ok: true, headers: new Headers({ Location: '/media/uploads/s1' }) } as Response;
     }
     const headers = init.headers as Record<string, string>;
     const offset = Number(headers['Upload-Offset']);
     const body = init.body as Blob;
-    return { headers: new Headers({ 'Upload-Offset': String(offset + body.size) }) } as Response;
+    return {
+      ok: true,
+      headers: new Headers({ 'Upload-Offset': String(offset + body.size) }),
+    } as Response;
   });
 }
 
@@ -47,5 +50,112 @@ describe('mediaUrl', () => {
   it('builds id and conversion URLs', () => {
     expect(mediaUrl('abc')).toBe('/media/abc');
     expect(mediaUrl('a b', 'thumb')).toBe('/media/a%20b?conversion=thumb');
+  });
+});
+
+function blobOf(bytes: number): Blob {
+  return new Blob([new Uint8Array(bytes)]);
+}
+
+describe('streamChunksParallel', () => {
+  it('PUTs each part by number, respects the concurrency cap, then completes', async () => {
+    let inFlight = 0;
+    let maxInFlight = 0;
+    const calls: string[] = [];
+    const fetchImpl = vi.fn(async (url: string, init: any) => {
+      calls.push(`${init.method} ${url}`);
+      if (init.method === 'PUT') {
+        inFlight += 1;
+        maxInFlight = Math.max(maxInFlight, inFlight);
+        await new Promise((r) => setTimeout(r, 5));
+        inFlight -= 1;
+      }
+      return { ok: true, headers: new Map() } as any;
+    });
+
+    const onProgress = vi.fn();
+
+    // 25 bytes @ 10-byte chunks => 3 parts (1,2,3).
+    await streamChunksParallel('/api/media/uploads/xyz', blobOf(25), {
+      chunkSize: 10,
+      concurrency: 2,
+      fetchImpl: fetchImpl as any,
+      onProgress,
+    });
+
+    expect(calls).toContain('PUT /api/media/uploads/xyz/parts/1');
+    expect(calls).toContain('PUT /api/media/uploads/xyz/parts/2');
+    expect(calls).toContain('PUT /api/media/uploads/xyz/parts/3');
+    expect(calls).toContain('POST /api/media/uploads/xyz/complete');
+    expect(maxInFlight).toBe(2);
+    expect(onProgress).toHaveBeenCalled();
+    const lastCall = onProgress.mock.calls.at(-1) as [number, number];
+    expect(lastCall[0]).toBe(25);
+    expect(lastCall[1]).toBe(25);
+  });
+
+  it('rejects with the real failure and stops starting new part PUTs once one part fails', async () => {
+    let putCount = 0;
+    const partCount = 100; // 1000 bytes @ 10-byte chunks
+    const fetchImpl = vi.fn(async (_url: string, init: RequestInit) => {
+      if (init.method === 'PUT') {
+        putCount += 1;
+        if (putCount === 1) throw new Error('boom: first part rejected');
+        return { ok: true, headers: new Map() } as unknown as Response;
+      }
+      return { ok: true, headers: new Map() } as unknown as Response;
+    });
+
+    await expect(
+      streamChunksParallel('/api/media/uploads/big', blobOf(partCount * 10), {
+        chunkSize: 10,
+        concurrency: 4,
+        retries: 1,
+        fetchImpl: fetchImpl as unknown as typeof fetch,
+      }),
+    ).rejects.toThrow('boom: first part rejected');
+
+    // Bounded by concurrency (a handful of in-flight parts), nowhere near the full file.
+    expect(putCount).toBeGreaterThan(0);
+    expect(putCount).toBeLessThan(partCount / 2);
+  });
+
+  it('forwards the abort signal into every part PUT and the complete POST', async () => {
+    const controller = new AbortController();
+    const signals: Array<AbortSignal | undefined> = [];
+    const fetchImpl = vi.fn(async (_url: string, init: RequestInit) => {
+      signals.push(init.signal ?? undefined);
+      return { ok: true, headers: new Map() } as unknown as Response;
+    });
+
+    await streamChunksParallel('/api/media/uploads/sig', blobOf(20), {
+      chunkSize: 10,
+      concurrency: 2,
+      signal: controller.signal,
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    });
+
+    expect(signals.length).toBeGreaterThan(0);
+    for (const signal of signals) {
+      expect(signal).toBeInstanceOf(AbortSignal);
+    }
+  });
+});
+
+describe('uploadMedia (back-compat)', () => {
+  it('still creates a session then PATCHes sequentially', async () => {
+    const fetchImpl = vi.fn(async (_url: string, init: any) => ({
+      ok: true,
+      headers: new Map([
+        ['Location', '/media/uploads/abc'],
+        ['Upload-Offset', '10'],
+      ]),
+    })) as any;
+    const result = await uploadMedia(blobOf(10), {
+      filename: 'f.bin',
+      basePath: '/media/uploads',
+      fetchImpl,
+    });
+    expect(result.location).toBe('/media/uploads/abc');
   });
 });

@@ -1,4 +1,4 @@
-import type { UploadSession, UploadSessionStore } from '@dudousxd/nestjs-media-core';
+import type { MultipartPart, UploadSession, UploadSessionStore } from '@dudousxd/nestjs-media-core';
 
 export interface MinimalRedis {
   get(key: string): Promise<string | null>;
@@ -9,6 +9,12 @@ export interface MinimalRedis {
    * adapters keep compiling — only `list()` requires it.
    */
   scan?(cursor: string | number, ...args: unknown[]): Promise<[string, string[]]>;
+  /** Hash field set (ioredis signature). Optional — only `addPart` requires it. */
+  hset?(key: string, field: string, value: string): Promise<unknown>;
+  /** Read all hash fields (ioredis signature). Optional — only `listParts` requires it. */
+  hgetall?(key: string): Promise<Record<string, string>>;
+  /** Set a key TTL in seconds (ioredis signature). Optional — bounds orphaned part hashes. */
+  expire?(key: string, seconds: number): Promise<unknown>;
 }
 
 /** Optional filter for {@link RedisUploadSessionStore.list}. */
@@ -53,6 +59,10 @@ export class RedisUploadSessionStore implements UploadSessionStore {
 
   private key(id: string): string {
     return `${this.keyPrefix}:${id}`;
+  }
+
+  private partsKey(id: string): string {
+    return `${this.keyPrefix}:${id}:parts`;
   }
 
   async create(session: UploadSession): Promise<UploadSession> {
@@ -123,7 +133,35 @@ export class RedisUploadSessionStore implements UploadSessionStore {
     return { ...session };
   }
 
+  async addPart(id: string, part: MultipartPart): Promise<void> {
+    if (typeof this.redis.hset !== 'function') {
+      throw new Error(
+        'RedisUploadSessionStore.addPart() requires a redis client with `hset` (e.g. ioredis).',
+      );
+    }
+    const partsKey = this.partsKey(id);
+    await this.redis.hset(partsKey, String(part.partNumber), part.etag);
+    // Bound orphaned part hashes (a crashed upload never reaching delete()).
+    if (typeof this.redis.expire === 'function') {
+      await this.redis.expire(partsKey, this.ttlSeconds);
+    }
+  }
+
+  async listParts(id: string): Promise<MultipartPart[]> {
+    if (typeof this.redis.hgetall !== 'function') {
+      throw new Error(
+        'RedisUploadSessionStore.listParts() requires a redis client with `hgetall` (e.g. ioredis).',
+      );
+    }
+    const map = await this.redis.hgetall(this.partsKey(id));
+    return Object.entries(map ?? {}).map(([partNumber, etag]) => ({
+      partNumber: Number(partNumber),
+      etag,
+    }));
+  }
+
   async delete(id: string): Promise<void> {
     await this.redis.del(this.key(id));
+    await this.redis.del(this.partsKey(id));
   }
 }
