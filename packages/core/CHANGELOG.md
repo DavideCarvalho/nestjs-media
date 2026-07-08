@@ -1,5 +1,11 @@
 # @dudousxd/nestjs-media-core
 
+## 0.6.2
+
+### Patch Changes
+
+- 03d5b48: Add `StatResult` and optional `StorageDriver.stat()` / `StorageDriver.deleteMany()` members, plus `StorageManager.diskNames()`. Optional members keep this non-breaking.
+
 ## 0.6.1
 
 ### Patch Changes

@@ -1,5 +1,13 @@
 # @dudousxd/nestjs-media-testing
 
+## 0.5.2
+
+### Patch Changes
+
+- a5fc5d3: Implement `InMemoryDriver.stat()` / `deleteMany()` and add shared `StorageDriver` conformance coverage for `stat` and `deleteMany`.
+- Updated dependencies [03d5b48]
+  - @dudousxd/nestjs-media-core@0.6.2
+
 ## 0.5.1
 
 ### Patch Changes
