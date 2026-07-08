@@ -52,6 +52,26 @@ export function runStorageDriverConformance(
       expect(Buffer.concat(chunks).toString()).toBe('streamed');
     });
 
+    it('stat reports the size and a last-modified date', async () => {
+      const driver = await makeDriver();
+      if (!driver.stat) throw new Error('driver does not implement stat');
+      await driver.put('s/file.txt', Buffer.from('12345'));
+      const meta = await driver.stat('s/file.txt');
+      expect(meta.size).toBe(5);
+      expect(meta.lastModified).toBeInstanceOf(Date);
+    });
+
+    it('deleteMany removes every listed key and no-ops on []', async () => {
+      const driver = await makeDriver();
+      if (!driver.deleteMany) throw new Error('driver does not implement deleteMany');
+      await driver.put('m/a', Buffer.from('a'));
+      await driver.put('m/b', Buffer.from('b'));
+      await driver.deleteMany(['m/a', 'm/b']);
+      expect(await driver.exists('m/a')).toBe(false);
+      expect(await driver.exists('m/b')).toBe(false);
+      await expect(driver.deleteMany([])).resolves.toBeUndefined();
+    });
+
     describe('list', () => {
       it('returns files directly under a prefix and rolls deeper keys into folders', async () => {
         const driver = await makeDriver();
