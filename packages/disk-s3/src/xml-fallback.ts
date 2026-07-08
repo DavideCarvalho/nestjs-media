@@ -22,16 +22,41 @@ export interface SignedS3GetOptions {
   query?: Record<string, string | undefined>;
 }
 
-/** SigV4-signed raw GET against the regional S3 endpoint; returns the raw body.
- *  Bypasses the SDK's XML deserialization when fast-xml-parser rejects valid input. */
+/** RFC-3986 percent-encoding matching SigV4's canonical form (`@smithy/util-uri-escape`).
+ *  `URLSearchParams` encodes space as `+`, which S3 canonicalizes to a literal `+` and
+ *  the recomputed signature then mismatches — so encode the wire query ourselves. */
+function escapeUri(value: string): string {
+  return encodeURIComponent(value).replace(
+    /[!'()*]/g,
+    (char) => `%${char.charCodeAt(0).toString(16).toUpperCase()}`,
+  );
+}
+
+/** SigV4-signed raw GET against S3 (path-style); returns the raw body.
+ *  Bypasses the SDK's XML deserialization when fast-xml-parser rejects valid input.
+ *  Honors a configured `client.config.endpoint` (MinIO, Ceph, LocalStack, GovCloud/China
+ *  partitions) and falls back to the regional AWS host only when none is set. */
 export async function signedS3Get(
   client: S3Client,
   options: SignedS3GetOptions = {},
 ): Promise<string> {
   const credentials = await client.config.credentials();
   const region = await client.config.region();
-  const hostname = `s3.${region}.amazonaws.com`;
-  const pathname = options.bucket ? `/${options.bucket}/` : '/';
+
+  let protocol = 'https:';
+  let hostname = `s3.${region}.amazonaws.com`;
+  let port: number | undefined;
+  let basePath = '';
+  const endpointProvider = client.config.endpoint;
+  if (typeof endpointProvider === 'function') {
+    const endpoint = await endpointProvider();
+    protocol = endpoint.protocol;
+    hostname = endpoint.hostname;
+    port = endpoint.port;
+    basePath = endpoint.path === '/' ? '' : endpoint.path.replace(/\/+$/, '');
+  }
+  const hostHeader = port === undefined ? hostname : `${hostname}:${port}`;
+  const pathname = `${basePath}${options.bucket ? `/${options.bucket}/` : '/'}`;
 
   const cleanedQuery: Record<string, string> = {};
   for (const [name, value] of Object.entries(options.query ?? {})) {
@@ -41,17 +66,22 @@ export async function signedS3Get(
   const signer = new SignatureV4({ credentials, region, service: 's3', sha256: Sha256 });
   const request = new HttpRequest({
     method: 'GET',
-    protocol: 'https:',
+    protocol,
     hostname,
+    ...(port === undefined ? {} : { port }),
     path: pathname,
     query: cleanedQuery,
-    headers: { host: hostname },
+    headers: { host: hostHeader },
   });
   const signed = await signer.sign(request);
 
   const search =
-    Object.keys(cleanedQuery).length > 0 ? `?${new URLSearchParams(cleanedQuery).toString()}` : '';
-  const response = await fetch(`https://${hostname}${pathname}${search}`, {
+    Object.keys(cleanedQuery).length > 0
+      ? `?${Object.entries(cleanedQuery)
+          .map(([name, value]) => `${escapeUri(name)}=${escapeUri(value)}`)
+          .join('&')}`
+      : '';
+  const response = await fetch(`${protocol}//${hostHeader}${pathname}${search}`, {
     method: 'GET',
     headers: signed.headers,
   });
@@ -76,7 +106,7 @@ export function decodeXmlEntities(value: string): string {
 
 export interface ListObjectsV2Entry {
   key: string;
-  size: number;
+  size: number | null;
   lastModified: string | null;
 }
 
@@ -101,7 +131,7 @@ export function extractListObjectsV2FromXml(xml: string): ListObjectsV2FromXml {
       const lastModifiedMatch = block.match(/<LastModified>([\s\S]*?)<\/LastModified>/);
       return {
         key: keyMatch ? decodeXmlEntities(keyMatch[1] ?? '') : '',
-        size: sizeMatch ? Number(sizeMatch[1]) : 0,
+        size: sizeMatch ? Number(sizeMatch[1]) : null,
         lastModified: lastModifiedMatch ? decodeXmlEntities(lastModifiedMatch[1] ?? '') : null,
       };
     },
