@@ -9,13 +9,19 @@ interface SetCall {
   args: unknown[];
 }
 
-function makeFakeRedis(): MinimalRedis & { store: Map<string, string>; setCalls: SetCall[] } {
+function makeFakeRedis(): MinimalRedis & {
+  store: Map<string, string>;
+  setCalls: SetCall[];
+  hashes: Map<string, Map<string, string>>;
+} {
   const store = new Map<string, string>();
   const setCalls: SetCall[] = [];
+  const hashes = new Map<string, Map<string, string>>();
 
   return {
     store,
     setCalls,
+    hashes,
     async get(key: string): Promise<string | null> {
       return store.get(key) ?? null;
     },
@@ -26,6 +32,7 @@ function makeFakeRedis(): MinimalRedis & { store: Map<string, string>; setCalls:
     },
     async del(key: string): Promise<unknown> {
       store.delete(key);
+      hashes.delete(key);
       return 1;
     },
     async scan(cursor: string | number, ...args: unknown[]): Promise<[string, string[]]> {
@@ -37,6 +44,18 @@ function makeFakeRedis(): MinimalRedis & { store: Map<string, string>; setCalls:
       const keys = [...store.keys()].filter((key) => regex.test(key));
       // Single-pass fake: return every match with a terminal '0' cursor.
       return ['0', keys];
+    },
+    async hset(key: string, field: string, value: string): Promise<unknown> {
+      const hash = hashes.get(key) ?? new Map<string, string>();
+      hash.set(field, value);
+      hashes.set(key, hash);
+      return 1;
+    },
+    async hgetall(key: string): Promise<Record<string, string>> {
+      return Object.fromEntries(hashes.get(key) ?? new Map<string, string>());
+    },
+    async expire(): Promise<unknown> {
+      return 1;
     },
   };
 }
@@ -181,5 +200,24 @@ describe('RedisUploadSessionStore', () => {
     const result = await store.get('s1');
     expect(result?.multipartUploadId).toBe('mpu-1');
     expect(result?.partETags).toEqual([{ partNumber: 1, etag: 'etag-1' }]);
+  });
+});
+
+describe('RedisUploadSessionStore parts (HSET)', () => {
+  it('records parts to a per-session hash, lists them, and delete removes the hash', async () => {
+    const redis = makeFakeRedis();
+    const store = new RedisUploadSessionStore(redis);
+    await store.create(makeSession({ id: 'a', key: 'k/a', size: 30 }));
+    await store.addPart('a', { partNumber: 2, etag: 'e2' });
+    await store.addPart('a', { partNumber: 1, etag: 'e1' });
+
+    const parts = await store.listParts('a');
+    expect([...parts].sort((x, y) => x.partNumber - y.partNumber)).toEqual([
+      { partNumber: 1, etag: 'e1' },
+      { partNumber: 2, etag: 'e2' },
+    ]);
+
+    await store.delete('a');
+    expect(await store.listParts('a')).toEqual([]);
   });
 });
