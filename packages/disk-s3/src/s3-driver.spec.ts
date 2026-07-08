@@ -139,6 +139,17 @@ describe('S3Driver', () => {
     expect(url).toContain('X-Amz-Expires=120');
   });
 
+  it('temporaryUrl signs response content-type/disposition overrides into the URL', async () => {
+    const d = new S3Driver({ client: makeClient(), bucket: 'b' });
+    const url = await d.temporaryUrl('exports/db.sqlite', 300, {
+      responseContentType: 'application/vnd.sqlite3',
+      responseContentDisposition: 'attachment; filename="db.sqlite"',
+    });
+    expect(url).toContain('response-content-type=application%2Fvnd.sqlite3');
+    expect(url).toContain('response-content-disposition=attachment');
+    expect(url).toContain('X-Amz-Signature=');
+  });
+
   it('list returns folders from CommonPrefixes and files from Contents', async () => {
     mock.on(ListObjectsV2Command).resolves({
       CommonPrefixes: [{ Prefix: 'docs/sub/' }],

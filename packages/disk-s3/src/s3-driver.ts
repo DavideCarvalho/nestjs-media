@@ -25,6 +25,7 @@ import {
   type PutOptions,
   type StatResult,
   type StorageDriver,
+  type TemporaryUrlOptions,
   UnsupportedOperationError,
 } from '@dudousxd/nestjs-media-core';
 import {
@@ -194,10 +195,19 @@ export class S3Driver implements StorageDriver, MultipartUploadDriver {
     return `${this.publicBaseUrl.replace(/\/$/, '')}/${this.key(path)}`;
   }
 
-  async temporaryUrl(path: string, expiresInSeconds: number): Promise<string> {
+  async temporaryUrl(
+    path: string,
+    expiresInSeconds: number,
+    options?: TemporaryUrlOptions,
+  ): Promise<string> {
     return getSignedUrl(
       this.client,
-      new GetObjectCommand({ Bucket: this.bucket, Key: this.key(path) }),
+      new GetObjectCommand({
+        Bucket: this.bucket,
+        Key: this.key(path),
+        ResponseContentType: options?.responseContentType,
+        ResponseContentDisposition: options?.responseContentDisposition,
+      }),
       { expiresIn: expiresInSeconds },
     );
   }

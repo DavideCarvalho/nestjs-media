@@ -79,6 +79,14 @@ export interface StatResult {
   lastModified?: Date;
 }
 
+export interface TemporaryUrlOptions {
+  /** Overrides the `Content-Type` the response is served with (S3 `response-content-type`). */
+  responseContentType?: string;
+  /** Overrides the `Content-Disposition` the response is served with
+   *  (S3 `response-content-disposition`), e.g. to force a download filename. */
+  responseContentDisposition?: string;
+}
+
 export interface StorageDriver {
   readonly capabilities: DriverCapabilities;
   put(path: string, contents: Buffer | Readable, options?: PutOptions): Promise<void>;
@@ -96,6 +104,10 @@ export interface StorageDriver {
    *  An empty array is a no-op. */
   deleteMany?(paths: string[]): Promise<void>;
   url(path: string): Promise<string>;
-  temporaryUrl(path: string, expiresInSeconds: number): Promise<string>;
+  temporaryUrl(
+    path: string,
+    expiresInSeconds: number,
+    options?: TemporaryUrlOptions,
+  ): Promise<string>;
   list(prefix: string, options?: ListOptions): Promise<ListResult>;
 }
