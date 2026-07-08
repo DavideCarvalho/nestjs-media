@@ -88,7 +88,7 @@ describe('ResumableUploadManager.writePart (parallel multipart)', () => {
     const store = makeStore();
     const completed: { parts?: Array<{ partNumber: number; etag: string }> } = {};
     const manager = makeManager(store, completed);
-    const session = await manager.create({ disk: 's3', key: 'k/obj.bin', size: 30 });
+    const session = await manager.createUpload({ disk: 's3', key: 'k/obj.bin', size: 30 });
 
     // Upload parts out of order and concurrently.
     await Promise.all([
@@ -108,7 +108,7 @@ describe('ResumableUploadManager.writePart (parallel multipart)', () => {
   it('rejects a part number outside 1..10000', async () => {
     const store = makeStore();
     const manager = makeManager(store, {});
-    const session = await manager.create({ disk: 's3', key: 'k/o.bin', size: 10 });
+    const session = await manager.createUpload({ disk: 's3', key: 'k/o.bin', size: 10 });
     await expect(manager.writePart(session.id, 0, Buffer.alloc(1))).rejects.toBeInstanceOf(InvalidPartNumberError);
   });
 
@@ -116,7 +116,7 @@ describe('ResumableUploadManager.writePart (parallel multipart)', () => {
     const store = makeStore();
     delete (store as any).addPart;
     const manager = makeManager(store, {});
-    const session = await manager.create({ disk: 's3', key: 'k/o.bin', size: 10 });
+    const session = await manager.createUpload({ disk: 's3', key: 'k/o.bin', size: 10 });
     await expect(manager.writePart(session.id, 1, Buffer.alloc(1))).rejects.toThrow(/concurrent part writes/);
   });
 });
@@ -1255,7 +1255,7 @@ describe('parallel multipart round trip (MinIO)', () => {
     const part1 = Buffer.alloc(6 * MIB, 1);
     const part2 = Buffer.alloc(2 * MIB, 2);
     const key = 'k/parallel.bin';
-    const session = await manager.create({ disk: bucket, key, size: part1.length + part2.length });
+    const session = await manager.createUpload({ disk: bucket, key, size: part1.length + part2.length });
 
     // Upload out of order + concurrently.
     await Promise.all([
@@ -1274,7 +1274,7 @@ describe('parallel multipart round trip (MinIO)', () => {
 });
 ```
 
-> Note: `manager.create({ disk, key, size })` must set up the S3 multipart upload (it already does when the disk is multipart-capable — verify against Task 1's `create`). `storage.disk(name)` returns the S3Driver regardless of `name` in this harness. Confirm the `S3Driver` constructor arg shape against `s3-driver.db.spec.ts` and match it.
+> Note: `manager.createUpload({ disk, key, size })` must set up the S3 multipart upload (it already does when the disk is multipart-capable — verify against Task 1's `create`). `storage.disk(name)` returns the S3Driver regardless of `name` in this harness. Confirm the `S3Driver` constructor arg shape against `s3-driver.db.spec.ts` and match it.
 
 - [ ] **Step 2: Run the e2e**
 
