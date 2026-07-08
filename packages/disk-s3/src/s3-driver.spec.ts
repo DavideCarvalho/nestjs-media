@@ -5,6 +5,7 @@ import {
   CopyObjectCommand,
   CreateMultipartUploadCommand,
   DeleteObjectCommand,
+  DeleteObjectsCommand,
   GetObjectCommand,
   HeadObjectCommand,
   ListObjectsV2Command,
@@ -256,5 +257,28 @@ describe('S3Driver', () => {
         d.uploadPart('videos/clip.bin', 'upload-123', 1, Buffer.from('abc')),
       ).rejects.toThrow('S3 did not return an ETag for the uploaded part');
     });
+  });
+});
+
+const s3Mock = mockClient(S3Client);
+beforeEach(() => s3Mock.reset());
+
+describe('S3Driver.deleteMany', () => {
+  it('chunks into batches of 1000 DeleteObjects', async () => {
+    s3Mock.on(DeleteObjectsCommand).resolves({});
+    const driver = new S3Driver({ client: new S3Client({ region: 'us-east-1' }), bucket: 'b' });
+    const keys = Array.from({ length: 1001 }, (_, i) => `k/${i}`);
+    await driver.deleteMany(keys);
+    const calls = s3Mock.commandCalls(DeleteObjectsCommand);
+    expect(calls.length).toBe(2);
+    expect(calls[0].args[0].input.Delete?.Objects?.length).toBe(1000);
+    expect(calls[1].args[0].input.Delete?.Objects?.length).toBe(1);
+  });
+
+  it('is a no-op on an empty array', async () => {
+    s3Mock.on(DeleteObjectsCommand).resolves({});
+    const driver = new S3Driver({ client: new S3Client({ region: 'us-east-1' }), bucket: 'b' });
+    await driver.deleteMany([]);
+    expect(s3Mock.commandCalls(DeleteObjectsCommand).length).toBe(0);
   });
 });

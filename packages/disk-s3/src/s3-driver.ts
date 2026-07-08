@@ -5,6 +5,7 @@ import {
   CopyObjectCommand,
   CreateMultipartUploadCommand,
   DeleteObjectCommand,
+  DeleteObjectsCommand,
   GetObjectCommand,
   HeadObjectCommand,
   ListObjectsV2Command,
@@ -22,6 +23,7 @@ import {
   type MultipartPart,
   type MultipartUploadDriver,
   type PutOptions,
+  type StatResult,
   type StorageDriver,
   UnsupportedOperationError,
 } from '@dudousxd/nestjs-media-core';
@@ -128,8 +130,37 @@ export class S3Driver implements StorageDriver, MultipartUploadDriver {
     }
   }
 
+  async stat(path: string): Promise<StatResult> {
+    try {
+      const res = await this.client.send(
+        new HeadObjectCommand({ Bucket: this.bucket, Key: this.key(path) }),
+      );
+      return {
+        size: res.ContentLength ?? 0,
+        ...(res.ContentType ? { contentType: res.ContentType } : {}),
+        ...(res.LastModified ? { lastModified: res.LastModified } : {}),
+      };
+    } catch (err) {
+      if (isNotFound(err)) throw new FileNotFoundError(path);
+      throw err;
+    }
+  }
+
   async delete(path: string): Promise<void> {
     await this.client.send(new DeleteObjectCommand({ Bucket: this.bucket, Key: this.key(path) }));
+  }
+
+  async deleteMany(paths: string[]): Promise<void> {
+    // S3 caps a DeleteObjects batch at 1000 keys.
+    for (let start = 0; start < paths.length; start += 1000) {
+      const batch = paths.slice(start, start + 1000);
+      await this.client.send(
+        new DeleteObjectsCommand({
+          Bucket: this.bucket,
+          Delete: { Objects: batch.map((path) => ({ Key: this.key(path) })) },
+        }),
+      );
+    }
   }
 
   async copy(from: string, to: string): Promise<void> {
