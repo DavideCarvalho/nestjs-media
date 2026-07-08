@@ -1,5 +1,12 @@
 # @dudousxd/nestjs-media
 
+## 1.0.0
+
+### Patch Changes
+
+- Updated dependencies [b2f3d74]
+  - @dudousxd/nestjs-media-core@0.6.0
+
 ## 0.5.1
 
 ### Patch Changes

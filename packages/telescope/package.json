@@ -1,6 +1,6 @@
 {
   "name": "@dudousxd/nestjs-media-telescope",
-  "version": "0.5.0",
+  "version": "1.0.0",
   "description": "Telescope watcher for nestjs-media (consumes nestjs:media:* diagnostics)",
   "license": "MIT",
   "type": "module",
