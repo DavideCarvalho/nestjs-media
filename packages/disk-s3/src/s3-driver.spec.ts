@@ -16,7 +16,7 @@ import {
 import { FileNotFoundError, UnsupportedOperationError } from '@dudousxd/nestjs-media-core';
 import { sdkStreamMixin } from '@smithy/util-stream';
 import { type AwsClientStub, mockClient } from 'aws-sdk-client-mock';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { S3Driver } from './s3-driver';
 
 const makeClient = () =>
@@ -286,5 +286,49 @@ describe('S3Driver.deleteMany', () => {
     s3Mock.on(DeleteObjectsCommand).resolves({ Errors: [{ Key: 'k/0', Code: 'AccessDenied' }] });
     const driver = new S3Driver({ client: new S3Client({ region: 'us-east-1' }), bucket: 'b' });
     await expect(driver.deleteMany(['k/0'])).rejects.toThrow('deleteMany failed for keys: k/0');
+  });
+});
+
+describe('S3Driver.list fallback', () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('falls back to a signed GET when fast-xml-parser rejects the XML', async () => {
+    s3Mock.reset();
+    s3Mock
+      .on(ListObjectsV2Command)
+      .rejects(new Error('EntityReplacer: Invalid character in entity name'));
+    const xml =
+      '<ListBucketResult><CommonPrefixes><Prefix>sub/</Prefix></CommonPrefixes>' +
+      '<Contents><Key>sub/f.txt</Key><Size>3</Size><LastModified>2026-01-01T00:00:00.000Z</LastModified></Contents>' +
+      '<IsTruncated>false</IsTruncated></ListBucketResult>';
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        async () =>
+          ({
+            ok: true,
+            status: 200,
+            statusText: 'OK',
+            text: async () => xml,
+          }) as unknown as Response,
+      ),
+    );
+
+    const client = new S3Client({
+      region: 'us-east-1',
+      credentials: { accessKeyId: 'a', secretAccessKey: 'b' },
+    });
+    const driver = new S3Driver({ client, bucket: 'b' });
+    const result = await driver.list('sub/');
+    expect(result.folders).toEqual(['sub/']);
+    expect(result.files).toEqual([
+      {
+        key: 'sub/f.txt',
+        name: 'f.txt',
+        sizeBytes: 3,
+        lastModified: new Date('2026-01-01T00:00:00.000Z'),
+      },
+    ]);
+    expect(result.cursor).toBeUndefined();
   });
 });

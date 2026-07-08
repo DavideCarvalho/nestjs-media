@@ -27,6 +27,11 @@ import {
   type StorageDriver,
   UnsupportedOperationError,
 } from '@dudousxd/nestjs-media-core';
+import {
+  extractListObjectsV2FromXml,
+  isXmlEntityDeserializationError,
+  signedS3Get,
+} from './xml-fallback';
 
 export interface S3DriverOptions {
   client: S3Client;
@@ -200,34 +205,64 @@ export class S3Driver implements StorageDriver, MultipartUploadDriver {
   async list(prefix: string, options?: ListOptions): Promise<ListResult> {
     const bucket = options?.bucket ?? this.bucket;
     const fullPrefix = this.key(prefix);
-    const out = await this.client.send(
-      new ListObjectsV2Command({
-        Bucket: bucket,
-        Prefix: fullPrefix,
-        Delimiter: options?.delimiter ?? '/',
-        MaxKeys: options?.limit,
-        ContinuationToken: options?.cursor,
-      }),
-    );
-    const folders = (out.CommonPrefixes ?? [])
-      .map((commonPrefix) => commonPrefix.Prefix)
-      .filter((value): value is string => typeof value === 'string');
-    const files: ListEntry[] = (out.Contents ?? [])
-      .filter((object) => object.Key !== undefined && object.Key !== fullPrefix)
-      .map((object) => {
-        const key = object.Key as string;
-        return {
-          key,
-          name: key.slice(fullPrefix.length),
-          sizeBytes: object.Size ?? null,
-          lastModified: object.LastModified ?? null,
-        };
+    try {
+      const out = await this.client.send(
+        new ListObjectsV2Command({
+          Bucket: bucket,
+          Prefix: fullPrefix,
+          Delimiter: options?.delimiter ?? '/',
+          MaxKeys: options?.limit,
+          ContinuationToken: options?.cursor,
+        }),
+      );
+      const folders = (out.CommonPrefixes ?? [])
+        .map((commonPrefix) => commonPrefix.Prefix)
+        .filter((value): value is string => typeof value === 'string');
+      const files: ListEntry[] = (out.Contents ?? [])
+        .filter((object) => object.Key !== undefined && object.Key !== fullPrefix)
+        .map((object) => {
+          const key = object.Key as string;
+          return {
+            key,
+            name: key.slice(fullPrefix.length),
+            sizeBytes: object.Size ?? null,
+            lastModified: object.LastModified ?? null,
+          };
+        });
+      const result: ListResult = { folders, files };
+      if (out.IsTruncated && out.NextContinuationToken !== undefined) {
+        result.cursor = out.NextContinuationToken;
+      }
+      return result;
+    } catch (err) {
+      if (!isXmlEntityDeserializationError(err)) throw err;
+      // fast-xml-parser rejected valid entity refs in the ListObjectsV2 XML —
+      // re-issue a signed raw GET and parse it by hand into the same shape.
+      const xml = await signedS3Get(this.client, {
+        bucket,
+        query: {
+          'list-type': '2',
+          prefix: fullPrefix,
+          delimiter: options?.delimiter ?? '/',
+          'max-keys': options?.limit !== undefined ? String(options.limit) : undefined,
+          'continuation-token': options?.cursor,
+        },
       });
-    const result: ListResult = { folders, files };
-    if (out.IsTruncated && out.NextContinuationToken !== undefined) {
-      result.cursor = out.NextContinuationToken;
+      const parsed = extractListObjectsV2FromXml(xml);
+      const files: ListEntry[] = parsed.objects
+        .filter((object) => object.key !== fullPrefix)
+        .map((object) => ({
+          key: object.key,
+          name: object.key.slice(fullPrefix.length),
+          sizeBytes: object.size,
+          lastModified: object.lastModified ? new Date(object.lastModified) : null,
+        }));
+      const result: ListResult = { folders: parsed.folders, files };
+      if (parsed.isTruncated && parsed.nextContinuationToken) {
+        result.cursor = parsed.nextContinuationToken;
+      }
+      return result;
     }
-    return result;
   }
 
   async createMultipartUpload(path: string, options?: PutOptions): Promise<{ uploadId: string }> {
