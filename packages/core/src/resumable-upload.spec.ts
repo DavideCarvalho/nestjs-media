@@ -1,6 +1,10 @@
 import { InMemoryDriver, InMemoryUploadSessionStore } from '@dudousxd/nestjs-media-testing';
 import { beforeEach, describe, expect, it } from 'vitest';
-import { UploadOffsetConflictError, UploadSessionNotFoundError } from './errors';
+import {
+  InvalidPartNumberError,
+  UploadOffsetConflictError,
+  UploadSessionNotFoundError,
+} from './errors';
 import { ResumableUploadManager } from './resumable-upload';
 import { StorageManager } from './storage-manager';
 import type { MultipartPart, StorageDriver } from './types';
@@ -154,5 +158,118 @@ describe('ResumableUploadManager', () => {
     await multipartManager.writeChunk(session.id, 0, Buffer.from('AAAAA'));
     await multipartManager.abort(session.id);
     expect(multipartDisk.wasAborted()).toBe(true);
+  });
+});
+
+describe('ResumableUploadManager.writePart (parallel multipart)', () => {
+  interface FakeDisk {
+    capabilities: { multipart: boolean };
+    uploadPart: (
+      key: string,
+      uploadId: string,
+      partNumber: number,
+      chunk: Buffer,
+    ) => Promise<{ partNumber: number; etag: string }>;
+    completeMultipartUpload: (
+      key: string,
+      uploadId: string,
+      parts: Array<{ partNumber: number; etag: string }>,
+    ) => Promise<void>;
+    createMultipartUpload: (key: string) => Promise<{ uploadId: string }>;
+  }
+
+  function makeStore() {
+    const sessions = new Map<string, any>();
+    const parts = new Map<string, Map<number, string>>();
+    return {
+      sessions,
+      parts,
+      async create(s: any) {
+        sessions.set(s.id, { ...s });
+        return { ...s };
+      },
+      async get(id: string) {
+        const s = sessions.get(id);
+        return s ? { ...s } : null;
+      },
+      async update(s: any) {
+        sessions.set(s.id, { ...s });
+        return { ...s };
+      },
+      async delete(id: string) {
+        sessions.delete(id);
+        parts.delete(id);
+      },
+      async addPart(id: string, part: { partNumber: number; etag: string }) {
+        if (!parts.has(id)) parts.set(id, new Map());
+        parts.get(id)?.set(part.partNumber, part.etag);
+      },
+      async listParts(id: string) {
+        return [...(parts.get(id) ?? new Map()).entries()].map(([partNumber, etag]) => ({
+          partNumber,
+          etag,
+        }));
+      },
+    };
+  }
+
+  function makeMultipartManager(
+    store: any,
+    completed: { parts?: Array<{ partNumber: number; etag: string }> },
+  ) {
+    const multipartDisk: FakeDisk = {
+      capabilities: { multipart: true },
+      async createMultipartUpload() {
+        return { uploadId: 'mp-1' };
+      },
+      async uploadPart(_k, _u, partNumber) {
+        return { partNumber, etag: `etag-${partNumber}` };
+      },
+      async completeMultipartUpload(_k, _u, parts) {
+        completed.parts = parts;
+      },
+    };
+    const storage = { disk: () => multipartDisk } as any;
+    return new ResumableUploadManager({ storage, sessions: store, emitDiagnostics: false });
+  }
+
+  it('records concurrent, out-of-order parts and completes them sorted ascending', async () => {
+    const store = makeStore();
+    const completed: { parts?: Array<{ partNumber: number; etag: string }> } = {};
+    const partManager = makeMultipartManager(store, completed);
+    const session = await partManager.createUpload({ disk: 's3', key: 'k/obj.bin', size: 30 });
+
+    // Upload parts out of order and concurrently.
+    await Promise.all([
+      partManager.writePart(session.id, 3, Buffer.alloc(10)),
+      partManager.writePart(session.id, 1, Buffer.alloc(10)),
+      partManager.writePart(session.id, 2, Buffer.alloc(10)),
+    ]);
+    await partManager.complete(session.id);
+
+    expect(completed.parts).toEqual([
+      { partNumber: 1, etag: 'etag-1' },
+      { partNumber: 2, etag: 'etag-2' },
+      { partNumber: 3, etag: 'etag-3' },
+    ]);
+  });
+
+  it('rejects a part number outside 1..10000', async () => {
+    const store = makeStore();
+    const partManager = makeMultipartManager(store, {});
+    const session = await partManager.createUpload({ disk: 's3', key: 'k/o.bin', size: 10 });
+    await expect(partManager.writePart(session.id, 0, Buffer.alloc(1))).rejects.toBeInstanceOf(
+      InvalidPartNumberError,
+    );
+  });
+
+  it('throws when the store cannot record parts atomically (no addPart)', async () => {
+    const store = makeStore();
+    (store as any).addPart = undefined;
+    const partManager = makeMultipartManager(store, {});
+    const session = await partManager.createUpload({ disk: 's3', key: 'k/o.bin', size: 10 });
+    await expect(partManager.writePart(session.id, 1, Buffer.alloc(1))).rejects.toThrow(
+      /concurrent part writes/,
+    );
   });
 });
