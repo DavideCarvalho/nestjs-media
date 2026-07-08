@@ -28,6 +28,16 @@ function makeFakeRedis(): MinimalRedis & { store: Map<string, string>; setCalls:
       store.delete(key);
       return 1;
     },
+    async scan(cursor: string | number, ...args: unknown[]): Promise<[string, string[]]> {
+      const matchIndex = args.indexOf('MATCH');
+      const pattern = matchIndex >= 0 ? String(args[matchIndex + 1]) : '*';
+      const regex = new RegExp(
+        `^${pattern.replace(/[.+?^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*')}$`,
+      );
+      const keys = [...store.keys()].filter((key) => regex.test(key));
+      // Single-pass fake: return every match with a terminal '0' cursor.
+      return ['0', keys];
+    },
   };
 }
 
@@ -128,6 +138,34 @@ describe('RedisUploadSessionStore', () => {
     const session = makeSession({ id: 'key-check' });
     await store.create(session);
     expect(redis.store.has('media:upload:session:key-check')).toBe(true);
+  });
+
+  it('list() returns all stored sessions', async () => {
+    await store.create(makeSession({ id: 'a', disk: 'pribuy', key: 'pribuy/elms/1.sqlite' }));
+    await store.create(makeSession({ id: 'b', disk: 'files', key: 'reports/x.csv' }));
+    const all = await store.list();
+    expect(all.map((s) => s.id).sort()).toEqual(['a', 'b']);
+  });
+
+  it('list({ disk }) filters by disk', async () => {
+    await store.create(makeSession({ id: 'a', disk: 'pribuy', key: 'pribuy/elms/1.sqlite' }));
+    await store.create(makeSession({ id: 'b', disk: 'files', key: 'reports/x.csv' }));
+    const filesOnly = await store.list({ disk: 'files' });
+    expect(filesOnly.map((s) => s.id)).toEqual(['b']);
+  });
+
+  it('list({ disk, keyPrefix }) filters by disk and key prefix', async () => {
+    await store.create(makeSession({ id: 'a', disk: 'files', key: 'reports/2026/x.csv' }));
+    await store.create(makeSession({ id: 'b', disk: 'files', key: 'reports/2025/y.csv' }));
+    await store.create(makeSession({ id: 'c', disk: 'files', key: 'other/z.csv' }));
+    const scoped = await store.list({ disk: 'files', keyPrefix: 'reports/2026/' });
+    expect(scoped.map((s) => s.id)).toEqual(['a']);
+  });
+
+  it('list() throws when the redis client lacks scan', async () => {
+    const noScan = { ...redis, scan: undefined } as unknown as MinimalRedis;
+    const noScanStore = new RedisUploadSessionStore(noScan);
+    await expect(noScanStore.list()).rejects.toThrow(/scan/);
   });
 
   it('round-trips multipartUploadId and partETags through get()', async () => {

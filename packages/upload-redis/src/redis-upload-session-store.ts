@@ -4,6 +4,19 @@ export interface MinimalRedis {
   get(key: string): Promise<string | null>;
   set(key: string, value: string, ...args: unknown[]): Promise<unknown>;
   del(key: string): Promise<unknown>;
+  /**
+   * Cursor-based key scan (ioredis signature). Optional so existing minimal
+   * adapters keep compiling — only `list()` requires it.
+   */
+  scan?(cursor: string | number, ...args: unknown[]): Promise<[string, string[]]>;
+}
+
+/** Optional filter for {@link RedisUploadSessionStore.list}. */
+export interface UploadSessionListFilter {
+  /** Only sessions on this disk. */
+  disk?: string;
+  /** Only sessions whose `key` starts with this prefix. */
+  keyPrefix?: string;
 }
 
 export interface RedisUploadSessionStoreOptions {
@@ -47,9 +60,7 @@ export class RedisUploadSessionStore implements UploadSessionStore {
     return { ...session };
   }
 
-  async get(id: string): Promise<UploadSession | null> {
-    const raw = await this.redis.get(this.key(id));
-    if (!raw) return null;
+  private deserialize(raw: string): UploadSession | null {
     const parsed: unknown = JSON.parse(raw);
     if (!isUploadSession(parsed)) return null;
     const session: UploadSession = {
@@ -66,6 +77,45 @@ export class RedisUploadSessionStore implements UploadSessionStore {
       ...(parsed.partETags !== undefined ? { partETags: parsed.partETags } : {}),
     };
     return session;
+  }
+
+  async get(id: string): Promise<UploadSession | null> {
+    const raw = await this.redis.get(this.key(id));
+    if (!raw) return null;
+    return this.deserialize(raw);
+  }
+
+  /**
+   * List the currently-stored (in-progress) upload sessions, optionally
+   * filtered by disk and/or key prefix. Scans keys under `keyPrefix` — intended
+   * for low-frequency, admin-facing "uploads in progress" views, not a hot path.
+   * Requires the redis client to support `scan` (ioredis does).
+   */
+  async list(filter: UploadSessionListFilter = {}): Promise<UploadSession[]> {
+    if (typeof this.redis.scan !== 'function') {
+      throw new Error(
+        'RedisUploadSessionStore.list() requires a redis client with a `scan` method (e.g. ioredis).',
+      );
+    }
+    const match = `${this.keyPrefix}:*`;
+    const sessions: UploadSession[] = [];
+    let cursor = '0';
+    do {
+      const [next, keys] = await this.redis.scan(cursor, 'MATCH', match, 'COUNT', 100);
+      cursor = next;
+      for (const redisKey of keys) {
+        const raw = await this.redis.get(redisKey);
+        if (!raw) continue;
+        const session = this.deserialize(raw);
+        if (!session) continue;
+        if (filter.disk !== undefined && session.disk !== filter.disk) continue;
+        if (filter.keyPrefix !== undefined && !session.key.startsWith(filter.keyPrefix)) {
+          continue;
+        }
+        sessions.push(session);
+      }
+    } while (cursor !== '0');
+    return sessions;
   }
 
   async update(session: UploadSession): Promise<UploadSession> {
