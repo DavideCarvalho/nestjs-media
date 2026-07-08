@@ -13,6 +13,7 @@ import {
 } from '@dudousxd/nestjs-media-core';
 import { type DynamicModule, Global, Module, type Provider } from '@nestjs/common';
 import { MediaDirectUploadController } from './media-direct-upload.controller';
+import { MediaMultipartUploadController } from './media-multipart-upload.controller';
 import { MediaUploadController } from './media-upload.controller';
 import { MediaService } from './media.service';
 import {
@@ -132,6 +133,7 @@ export class MediaModule {
       ],
       controllers: [
         ...(tus ? [MediaUploadController] : []),
+        ...(uploads ? [MediaMultipartUploadController] : []),
         ...(direct ? [MediaDirectUploadController] : []),
       ],
       exports: [
@@ -191,10 +193,15 @@ export class MediaModule {
       providers,
       // Unlike `forRoot`, async options are resolved at runtime by `useFactory`,
       // so we cannot know at module-build time whether `tus`/`direct` are configured
-      // and therefore cannot mount these controllers conditionally. Both are always
-      // mounted; each injects its nullable manager token (MEDIA_TUS / MEDIA_DIRECT)
-      // and cleanly responds 501 NotImplemented when its feature is unconfigured.
-      controllers: [MediaUploadController, MediaDirectUploadController],
+      // and therefore cannot mount these controllers conditionally. All three are
+      // always mounted; each injects its nullable manager token (MEDIA_TUS /
+      // MEDIA_UPLOADS / MEDIA_DIRECT) and cleanly responds 501 NotImplemented when
+      // its feature is unconfigured.
+      controllers: [
+        MediaUploadController,
+        MediaMultipartUploadController,
+        MediaDirectUploadController,
+      ],
       exports: [
         MediaService,
         MEDIA_STORAGE,
