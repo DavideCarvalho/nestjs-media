@@ -1,5 +1,6 @@
 import type { ResumableUploadManager } from '@dudousxd/nestjs-media-core';
 import {
+  BadRequestException,
   Controller,
   Get,
   Inject,
@@ -30,26 +31,36 @@ interface ReqLike {
 export class MediaMultipartUploadController {
   constructor(@Inject(MEDIA_UPLOADS) private readonly manager: ResumableUploadManager | null) {}
 
+  private requireManager(): ResumableUploadManager {
+    if (!this.manager) throw new NotImplementedException('Uploads are not configured.');
+    return this.manager;
+  }
+
   @Put(':id/parts/:partNumber')
   async uploadPart(
     @Param('id') id: string,
     @Param('partNumber') partNumber: string,
     @Req() req: ReqLike,
   ) {
-    if (!this.manager) throw new NotImplementedException('Uploads are not configured.');
-    return this.manager.writePart(id, Number(partNumber), req.body ?? Buffer.alloc(0));
+    const manager = this.requireManager();
+    if (!req.body || req.body.byteLength === 0) {
+      throw new BadRequestException(
+        'Empty upload part body — ensure a raw-body parser with a size cap is mounted on this route.',
+      );
+    }
+    return manager.writePart(id, Number(partNumber), req.body);
   }
 
   @Post(':id/complete')
   async complete(@Param('id') id: string) {
-    if (!this.manager) throw new NotImplementedException('Uploads are not configured.');
-    return this.manager.complete(id);
+    const manager = this.requireManager();
+    return manager.complete(id);
   }
 
   @Get(':id/parts')
   async listParts(@Param('id') id: string): Promise<{ parts: number[] }> {
-    if (!this.manager) throw new NotImplementedException('Uploads are not configured.');
-    const parts = await this.manager.listParts(id);
+    const manager = this.requireManager();
+    const parts = await manager.listParts(id);
     return { parts: parts.map((part) => part.partNumber) };
   }
 }

@@ -1,4 +1,4 @@
-import { NotImplementedException } from '@nestjs/common';
+import { BadRequestException, NotImplementedException } from '@nestjs/common';
 import { describe, expect, it, vi } from 'vitest';
 import { MediaMultipartUploadController } from './media-multipart-upload.controller';
 
@@ -42,5 +42,35 @@ describe('MediaMultipartUploadController', () => {
   it('501s when the manager is not configured', async () => {
     const controller = new MediaMultipartUploadController(null);
     await expect(controller.complete('id1')).rejects.toBeInstanceOf(NotImplementedException);
+  });
+
+  it('uploadPart 501s when the manager is not configured', async () => {
+    const controller = new MediaMultipartUploadController(null);
+    await expect(
+      controller.uploadPart('id1', '1', { body: Buffer.from('x') }),
+    ).rejects.toBeInstanceOf(NotImplementedException);
+  });
+
+  it('listParts 501s when the manager is not configured', async () => {
+    const controller = new MediaMultipartUploadController(null);
+    await expect(controller.listParts('id1')).rejects.toBeInstanceOf(NotImplementedException);
+  });
+
+  it('uploadPart rejects a missing body with BadRequestException', async () => {
+    const manager = managerStub();
+    const controller = new MediaMultipartUploadController(manager as any);
+    await expect(controller.uploadPart('id1', '1', { body: undefined })).rejects.toBeInstanceOf(
+      BadRequestException,
+    );
+    expect(manager.writePart).not.toHaveBeenCalled();
+  });
+
+  it('uploadPart rejects an empty body with BadRequestException', async () => {
+    const manager = managerStub();
+    const controller = new MediaMultipartUploadController(manager as any);
+    await expect(
+      controller.uploadPart('id1', '1', { body: Buffer.alloc(0) }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(manager.writePart).not.toHaveBeenCalled();
   });
 });
