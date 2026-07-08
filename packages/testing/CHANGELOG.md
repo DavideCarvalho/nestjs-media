@@ -1,5 +1,14 @@
 # @dudousxd/nestjs-media-testing
 
+## 0.5.1
+
+### Patch Changes
+
+- 27b334f: `InMemoryUploadSessionStore` implements the new optional `addPart`/`listParts` so tests can
+  exercise the parallel multipart path.
+- Updated dependencies [28734af]
+  - @dudousxd/nestjs-media-core@0.6.1
+
 ## 0.5.0
 
 ### Minor Changes

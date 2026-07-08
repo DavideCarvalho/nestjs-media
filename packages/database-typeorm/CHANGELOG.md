@@ -1,5 +1,12 @@
 # @dudousxd/nestjs-media-database-typeorm
 
+## 0.5.1
+
+### Patch Changes
+
+- Updated dependencies [28734af]
+  - @dudousxd/nestjs-media-core@0.6.1
+
 ## 0.5.0
 
 ### Patch Changes

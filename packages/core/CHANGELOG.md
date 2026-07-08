@@ -1,5 +1,14 @@
 # @dudousxd/nestjs-media-core
 
+## 0.6.1
+
+### Patch Changes
+
+- 28734af: Add `ResumableUploadManager.writePart(id, partNumber, chunk)` and `listParts(id)` for a
+  proxy-parallel multipart upload path, plus optional `addPart`/`listParts` on
+  `UploadSessionStore`. `complete()` now orders parts ascending by `partNumber`. The
+  sequential tus path is unchanged.
+
 ## 0.6.0
 
 ### Minor Changes

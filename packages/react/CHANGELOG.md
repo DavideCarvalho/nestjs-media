@@ -1,5 +1,14 @@
 # @dudousxd/nestjs-media-react
 
+## 0.2.2
+
+### Patch Changes
+
+- 7553ff1: `useMediaUpload` gains opt-in `parallel` + `concurrency` options that route to
+  `uploadMediaParallel`. Default behaviour (sequential) is unchanged.
+- Updated dependencies [1951e24]
+  - @dudousxd/nestjs-media-client@0.2.1
+
 ## 0.2.1
 
 ### Patch Changes

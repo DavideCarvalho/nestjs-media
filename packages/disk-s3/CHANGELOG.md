@@ -1,5 +1,12 @@
 # @dudousxd/nestjs-media-disk-s3
 
+## 0.6.1
+
+### Patch Changes
+
+- Updated dependencies [28734af]
+  - @dudousxd/nestjs-media-core@0.6.1
+
 ## 0.6.0
 
 ### Minor Changes

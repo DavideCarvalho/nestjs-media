@@ -1,5 +1,15 @@
 # @dudousxd/nestjs-media-upload-redis
 
+## 0.7.1
+
+### Patch Changes
+
+- 39f8697: `RedisUploadSessionStore` implements `addPart`/`listParts` backed by a per-session
+  `…:<id>:parts` hash (atomic `HSET` per part number, out-of-order safe), TTL-bounded, and
+  removed with the session on `delete`. Enables the parallel multipart upload path.
+- Updated dependencies [28734af]
+  - @dudousxd/nestjs-media-core@0.6.1
+
 ## 0.7.0
 
 ### Minor Changes
