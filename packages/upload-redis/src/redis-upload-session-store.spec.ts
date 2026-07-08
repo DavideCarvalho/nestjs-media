@@ -129,4 +129,19 @@ describe('RedisUploadSessionStore', () => {
     await store.create(session);
     expect(redis.store.has('media:upload:session:key-check')).toBe(true);
   });
+
+  it('round-trips multipartUploadId and partETags through get()', async () => {
+    const session = makeSession({
+      id: 's1',
+      offset: 5,
+      parts: 1,
+      size: 9,
+      multipartUploadId: 'mpu-1',
+      partETags: [{ partNumber: 1, etag: 'etag-1' }],
+    });
+    await store.create(session);
+    const result = await store.get('s1');
+    expect(result?.multipartUploadId).toBe('mpu-1');
+    expect(result?.partETags).toEqual([{ partNumber: 1, etag: 'etag-1' }]);
+  });
 });

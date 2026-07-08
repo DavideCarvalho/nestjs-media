@@ -10,6 +10,7 @@ import {
   ListObjectsV2Command,
   PutObjectCommand,
   S3Client,
+  UploadPartCommand,
 } from '@aws-sdk/client-s3';
 import { FileNotFoundError, UnsupportedOperationError } from '@dudousxd/nestjs-media-core';
 import { sdkStreamMixin } from '@smithy/util-stream';
@@ -237,6 +238,23 @@ describe('S3Driver', () => {
         Key: 'up/video.mp4',
         UploadId: 'u1',
       });
+    });
+
+    it('uploadPart sends UploadPartCommand and returns the ETag', async () => {
+      mock.on(UploadPartCommand).resolves({ ETag: '"etag-1"' });
+      const d = new S3Driver({ client, bucket: 'b' });
+      const part = await d.uploadPart('videos/clip.bin', 'upload-123', 1, Buffer.from('abc'));
+      expect(part).toEqual({ partNumber: 1, etag: '"etag-1"' });
+      const call = mock.commandCalls(UploadPartCommand)[0]?.args[0].input;
+      expect(call).toMatchObject({ UploadId: 'upload-123', PartNumber: 1 });
+    });
+
+    it('uploadPart throws when S3 returns no ETag', async () => {
+      mock.on(UploadPartCommand).resolves({});
+      const d = new S3Driver({ client, bucket: 'b' });
+      await expect(
+        d.uploadPart('videos/clip.bin', 'upload-123', 1, Buffer.from('abc')),
+      ).rejects.toThrow('S3 did not return an ETag for the uploaded part');
     });
   });
 });
