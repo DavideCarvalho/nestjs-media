@@ -4,12 +4,15 @@ import { mediaUrl, streamChunksParallel, uploadMedia } from './index';
 function mockFetch() {
   return vi.fn(async (_url: string, init: RequestInit) => {
     if (init.method === 'POST') {
-      return { headers: new Headers({ Location: '/media/uploads/s1' }) } as Response;
+      return { ok: true, headers: new Headers({ Location: '/media/uploads/s1' }) } as Response;
     }
     const headers = init.headers as Record<string, string>;
     const offset = Number(headers['Upload-Offset']);
     const body = init.body as Blob;
-    return { headers: new Headers({ 'Upload-Offset': String(offset + body.size) }) } as Response;
+    return {
+      ok: true,
+      headers: new Headers({ 'Upload-Offset': String(offset + body.size) }),
+    } as Response;
   });
 }
 
@@ -70,18 +73,25 @@ describe('streamChunksParallel', () => {
       return { ok: true, headers: new Map() } as any;
     });
 
+    const onProgress = vi.fn();
+
     // 25 bytes @ 10-byte chunks => 3 parts (1,2,3).
     await streamChunksParallel('/api/media/uploads/xyz', blobOf(25), {
       chunkSize: 10,
       concurrency: 2,
       fetchImpl: fetchImpl as any,
+      onProgress,
     });
 
     expect(calls).toContain('PUT /api/media/uploads/xyz/parts/1');
     expect(calls).toContain('PUT /api/media/uploads/xyz/parts/2');
     expect(calls).toContain('PUT /api/media/uploads/xyz/parts/3');
     expect(calls).toContain('POST /api/media/uploads/xyz/complete');
-    expect(maxInFlight).toBeLessThanOrEqual(2);
+    expect(maxInFlight).toBe(2);
+    expect(onProgress).toHaveBeenCalled();
+    const lastCall = onProgress.mock.calls.at(-1) as [number, number];
+    expect(lastCall[0]).toBe(25);
+    expect(lastCall[1]).toBe(25);
   });
 });
 

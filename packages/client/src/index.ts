@@ -127,7 +127,8 @@ export async function streamChunks(
         },
         body: slice,
       });
-      if (res.ok === false) throw new Error(`media upload: PATCH failed at offset ${offset}`);
+      if (!('ok' in res) || res.ok === false)
+        throw new Error(`media upload: PATCH failed at offset ${offset}`);
       const value = Number(res.headers.get('Upload-Offset') ?? '');
       return Number.isFinite(value) && value > offset ? value : end;
     });
@@ -168,7 +169,8 @@ export async function streamChunksParallel(
           headers: { 'Content-Type': 'application/offset+octet-stream', ...(opts.headers ?? {}) },
           body: slice,
         });
-        if (res.ok === false) throw new Error(`media upload: PUT part ${partNumber} failed`);
+        if (!('ok' in res) || res.ok === false)
+          throw new Error(`media upload: PUT part ${partNumber} failed`);
       });
       sent += end - start;
       opts.onProgress?.(sent, total);
@@ -181,7 +183,7 @@ export async function streamChunksParallel(
     method: 'POST',
     headers: { ...(opts.headers ?? {}) },
   });
-  if (done.ok === false) throw new Error('media upload: complete failed');
+  if (!('ok' in done) || done.ok === false) throw new Error('media upload: complete failed');
 }
 
 /** Resumable sequential upload of a Blob/File through the tus endpoints; returns its Location. */
