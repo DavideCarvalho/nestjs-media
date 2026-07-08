@@ -16,32 +16,36 @@ export interface UploadMediaResult {
 }
 
 export interface StreamChunksOptions {
-  chunkSize?: number;
-  onProgress?: (sent: number, total: number) => void;
-  fetchImpl?: typeof fetch;
-  headers?: Record<string, string>;
+  chunkSize?: number | undefined;
+  onProgress?: ((sent: number, total: number) => void) | undefined;
+  fetchImpl?: typeof fetch | undefined;
+  headers?: Record<string, string> | undefined;
   /** HEAD the session first and resume from its offset. Default true. */
-  resume?: boolean;
+  resume?: boolean | undefined;
   /** Per-chunk retry attempts. Default 3. */
-  retries?: number;
-  signal?: AbortSignal;
+  retries?: number | undefined;
+  signal?: AbortSignal | undefined;
 }
 
 export interface StreamChunksParallelOptions {
-  chunkSize?: number;
+  chunkSize?: number | undefined;
   /** Max in-flight part uploads. Default 3. */
-  concurrency?: number;
-  onProgress?: (sentBytes: number, total: number) => void;
-  fetchImpl?: typeof fetch;
-  headers?: Record<string, string>;
+  concurrency?: number | undefined;
+  onProgress?: ((sentBytes: number, total: number) => void) | undefined;
+  fetchImpl?: typeof fetch | undefined;
+  headers?: Record<string, string> | undefined;
   /** Per-part retry attempts. Default 3. */
-  retries?: number;
-  signal?: AbortSignal;
+  retries?: number | undefined;
+  signal?: AbortSignal | undefined;
 }
 
 const DEFAULT_CHUNK = 5 * 1024 * 1024;
 const DEFAULT_CONCURRENCY = 3;
 const DEFAULT_RETRIES = 3;
+
+function assertOk(res: { ok?: boolean }, message: string): void {
+  if (!('ok' in res) || res.ok === false) throw new Error(message);
+}
 
 function encodeMetadata(meta: Record<string, string>): string {
   return Object.entries(meta)
@@ -67,10 +71,10 @@ export async function createSession(
   basePath: string,
   opts: {
     filename: string;
-    contentType?: string;
+    contentType?: string | undefined;
     length: number;
-    fetchImpl?: typeof fetch;
-    headers?: Record<string, string>;
+    fetchImpl?: typeof fetch | undefined;
+    headers?: Record<string, string> | undefined;
   },
 ): Promise<{ location: string }> {
   const doFetch = opts.fetchImpl ?? fetch;
@@ -128,8 +132,7 @@ export async function streamChunks(
         body: slice,
         ...(opts.signal ? { signal: opts.signal } : {}),
       });
-      if (!('ok' in res) || res.ok === false)
-        throw new Error(`media upload: PATCH failed at offset ${offset}`);
+      assertOk(res, `media upload: PATCH failed at offset ${offset}`);
       const value = Number(res.headers.get('Upload-Offset') ?? '');
       return Number.isFinite(value) && value > offset ? value : end;
     });
@@ -184,8 +187,7 @@ export async function streamChunksParallel(
             body: slice,
             signal: combinedSignal,
           });
-          if (!('ok' in res) || res.ok === false)
-            throw new Error(`media upload: PUT part ${partNumber} failed`);
+          assertOk(res, `media upload: PUT part ${partNumber} failed`);
         });
         sent += end - start;
         opts.onProgress?.(sent, total);
@@ -203,7 +205,7 @@ export async function streamChunksParallel(
     headers: { ...(opts.headers ?? {}) },
     signal: combinedSignal,
   });
-  if (!('ok' in done) || done.ok === false) throw new Error('media upload: complete failed');
+  assertOk(done, 'media upload: complete failed');
 }
 
 /** Resumable sequential upload of a Blob/File through the tus endpoints; returns its Location. */
@@ -214,18 +216,17 @@ export async function uploadMedia(
   const base = options.basePath ?? '/media/uploads';
   const { location } = await createSession(base, {
     filename: options.filename,
-    ...(options.contentType ? { contentType: options.contentType } : {}),
+    contentType: options.contentType,
     length: data.size,
-    ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}),
-    ...(options.headers ? { headers: options.headers } : {}),
+    fetchImpl: options.fetchImpl,
+    headers: options.headers,
   });
   await streamChunks(location, data, {
-    // byte-identical to the pre-split implementation: no resume HEAD probe.
-    resume: false,
-    ...(options.chunkSize ? { chunkSize: options.chunkSize } : {}),
-    ...(options.onProgress ? { onProgress: options.onProgress } : {}),
-    ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}),
-    ...(options.headers ? { headers: options.headers } : {}),
+    resume: false, // byte-identical to pre-split: no resume HEAD probe
+    chunkSize: options.chunkSize,
+    onProgress: options.onProgress,
+    fetchImpl: options.fetchImpl,
+    headers: options.headers,
   });
   return { location };
 }
@@ -238,17 +239,17 @@ export async function uploadMediaParallel(
   const base = options.basePath ?? '/media/uploads';
   const { location } = await createSession(base, {
     filename: options.filename,
-    ...(options.contentType ? { contentType: options.contentType } : {}),
+    contentType: options.contentType,
     length: data.size,
-    ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}),
-    ...(options.headers ? { headers: options.headers } : {}),
+    fetchImpl: options.fetchImpl,
+    headers: options.headers,
   });
   await streamChunksParallel(location, data, {
-    ...(options.chunkSize ? { chunkSize: options.chunkSize } : {}),
-    ...(options.concurrency ? { concurrency: options.concurrency } : {}),
-    ...(options.onProgress ? { onProgress: options.onProgress } : {}),
-    ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}),
-    ...(options.headers ? { headers: options.headers } : {}),
+    chunkSize: options.chunkSize,
+    concurrency: options.concurrency,
+    onProgress: options.onProgress,
+    fetchImpl: options.fetchImpl,
+    headers: options.headers,
   });
   return { location };
 }
