@@ -9,14 +9,18 @@ export function renderMediaClient(basePath: string): string {
 // Thin binding over @dudousxd/nestjs-media-client with the project's tus base path.
 import {
   mediaUrl,
+  createSession,
+  streamChunks,
+  streamChunksParallel,
   uploadMedia as uploadMediaBase,
+  uploadMediaParallel as uploadMediaParallelBase,
   type UploadMediaOptions,
   type UploadMediaResult,
 } from '@dudousxd/nestjs-media-client';
 
 const BASE_PATH = ${JSON.stringify(basePath)};
 
-/** Resumable (tus) upload to this project's media endpoint. */
+/** Resumable (tus, sequential) upload to this project's media endpoint. */
 export function uploadMedia(
   data: Blob,
   options: Omit<UploadMediaOptions, 'basePath'>,
@@ -24,7 +28,15 @@ export function uploadMedia(
   return uploadMediaBase(data, { basePath: BASE_PATH, ...options });
 }
 
-export { mediaUrl };
+/** Proxy-parallel upload (concurrent part uploads through the backend). */
+export function uploadMediaParallel(
+  data: Blob,
+  options: Omit<UploadMediaOptions, 'basePath'> & { concurrency?: number },
+): Promise<UploadMediaResult> {
+  return uploadMediaParallelBase(data, { basePath: BASE_PATH, ...options });
+}
+
+export { mediaUrl, createSession, streamChunks, streamChunksParallel };
 export type { UploadMediaOptions, UploadMediaResult };
 `;
 }
