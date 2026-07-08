@@ -1,10 +1,18 @@
-import { type UploadMediaResult, uploadMedia } from '@dudousxd/nestjs-media-client';
+import {
+  type UploadMediaResult,
+  uploadMedia,
+  uploadMediaParallel,
+} from '@dudousxd/nestjs-media-client';
 import { useCallback, useState } from 'react';
 
 export interface UseMediaUploadOptions {
   basePath?: string;
   chunkSize?: number;
   fetchImpl?: typeof fetch;
+  /** Upload parts concurrently through the backend (proxy-parallel). Default false. */
+  parallel?: boolean;
+  /** Max in-flight parts when `parallel` is set. Default 3. */
+  concurrency?: number;
 }
 
 export type MediaUploadStatus = 'idle' | 'uploading' | 'done' | 'error';
@@ -40,13 +48,15 @@ export function useMediaUpload(options: UseMediaUploadOptions = {}): UseMediaUpl
     async (file: Blob, meta: { filename: string; contentType?: string }) => {
       setState({ status: 'uploading', progress: 0, location: undefined, error: undefined });
       try {
-        const result = await uploadMedia(file, {
+        const uploadFn = options.parallel ? uploadMediaParallel : uploadMedia;
+        const result = await uploadFn(file, {
           filename: meta.filename,
           ...(meta.contentType ? { contentType: meta.contentType } : {}),
           ...(options.basePath ? { basePath: options.basePath } : {}),
           ...(options.chunkSize ? { chunkSize: options.chunkSize } : {}),
           ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}),
-          onProgress: (sent, total) =>
+          ...(options.parallel && options.concurrency ? { concurrency: options.concurrency } : {}),
+          onProgress: (sent: number, total: number) =>
             setState((s) => ({ ...s, progress: total ? sent / total : 0 })),
         });
         setState({ status: 'done', progress: 1, location: result.location, error: undefined });
@@ -56,7 +66,7 @@ export function useMediaUpload(options: UseMediaUploadOptions = {}): UseMediaUpl
         throw err;
       }
     },
-    [options.basePath, options.chunkSize, options.fetchImpl],
+    [options.basePath, options.chunkSize, options.fetchImpl, options.parallel, options.concurrency],
   );
 
   const reset = useCallback(() => setState(INITIAL), []);
