@@ -1,5 +1,14 @@
 import { createReadStream } from 'node:fs';
-import { copyFile, mkdir, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises';
+import {
+  copyFile,
+  stat as fsStat,
+  mkdir,
+  readFile,
+  readdir,
+  rename,
+  rm,
+  writeFile,
+} from 'node:fs/promises';
 import { dirname } from 'node:path';
 import type { Readable } from 'node:stream';
 import {
@@ -9,6 +18,7 @@ import {
   type ListOptions,
   type ListResult,
   type PutOptions,
+  type StatResult,
   type StorageDriver,
   UnsupportedOperationError,
   collectStream,
@@ -18,6 +28,27 @@ import { resolveWithinRoot } from './path-safety';
 export interface LocalDriverOptions {
   root: string;
   baseUrl?: string;
+}
+
+const CONTENT_TYPE_BY_EXTENSION: Record<string, string> = {
+  txt: 'text/plain',
+  csv: 'text/csv',
+  json: 'application/json',
+  xml: 'application/xml',
+  html: 'text/html',
+  pdf: 'application/pdf',
+  png: 'image/png',
+  jpg: 'image/jpeg',
+  jpeg: 'image/jpeg',
+  gif: 'image/gif',
+  svg: 'image/svg+xml',
+  zip: 'application/zip',
+  sqlite: 'application/vnd.sqlite3',
+};
+
+function contentTypeFromExtension(path: string): string | undefined {
+  const extension = path.split('.').pop()?.toLowerCase();
+  return extension ? CONTENT_TYPE_BY_EXTENSION[extension] : undefined;
 }
 
 export class LocalDriver implements StorageDriver {
@@ -63,7 +94,7 @@ export class LocalDriver implements StorageDriver {
 
   async exists(path: string): Promise<boolean> {
     try {
-      await stat(this.abs(path));
+      await fsStat(this.abs(path));
       return true;
     } catch {
       return false;
@@ -72,15 +103,35 @@ export class LocalDriver implements StorageDriver {
 
   async size(path: string): Promise<number> {
     try {
-      return (await stat(this.abs(path))).size;
+      return (await fsStat(this.abs(path))).size;
     } catch (e) {
       if ((e as NodeJS.ErrnoException).code === 'ENOENT') throw new FileNotFoundError(path);
       throw e;
     }
   }
 
+  async stat(path: string): Promise<StatResult> {
+    let stats: import('node:fs').Stats;
+    try {
+      stats = await fsStat(this.abs(path));
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === 'ENOENT') throw new FileNotFoundError(path);
+      throw err;
+    }
+    const contentType = contentTypeFromExtension(path);
+    return {
+      size: stats.size,
+      lastModified: stats.mtime,
+      ...(contentType ? { contentType } : {}),
+    };
+  }
+
   async delete(path: string): Promise<void> {
     await rm(this.abs(path), { force: true });
+  }
+
+  async deleteMany(paths: string[]): Promise<void> {
+    for (const path of paths) await this.delete(path);
   }
 
   async copy(from: string, to: string): Promise<void> {
@@ -123,7 +174,7 @@ export class LocalDriver implements StorageDriver {
       if (dirent.isDirectory()) {
         folders.push(`${key}/`);
       } else {
-        const stats = await stat(this.abs(key));
+        const stats = await fsStat(this.abs(key));
         files.push({ key, name: dirent.name, sizeBytes: stats.size, lastModified: stats.mtime });
       }
     }

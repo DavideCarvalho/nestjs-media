@@ -74,4 +74,29 @@ describe('LocalDriver', () => {
     const d = new LocalDriver({ root });
     await expect(d.put('../escape.txt', Buffer.from('x'))).rejects.toThrow();
   });
+
+  it('stat returns size, last-modified and extension content-type', async () => {
+    const d = new LocalDriver({ root });
+    await d.put('report.txt', Buffer.from('hello'));
+    const meta = await d.stat('report.txt');
+    expect(meta.size).toBe(5);
+    expect(meta.contentType).toBe('text/plain');
+    expect(meta.lastModified).toBeInstanceOf(Date);
+  });
+
+  it('stat throws FileNotFoundError when absent', async () => {
+    await expect(new LocalDriver({ root }).stat('nope.txt')).rejects.toBeInstanceOf(
+      FileNotFoundError,
+    );
+  });
+
+  it('deleteMany removes every key and no-ops on []', async () => {
+    const d = new LocalDriver({ root });
+    await d.put('a.txt', Buffer.from('1'));
+    await d.put('b.txt', Buffer.from('2'));
+    await d.deleteMany(['a.txt', 'b.txt']);
+    expect(await d.exists('a.txt')).toBe(false);
+    expect(await d.exists('b.txt')).toBe(false);
+    await expect(d.deleteMany([])).resolves.toBeUndefined();
+  });
 });
