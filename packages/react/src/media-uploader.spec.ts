@@ -7,12 +7,17 @@ import { MediaUploader } from './media-uploader';
 function mockFetch() {
   return vi.fn(async (_url: string, init: RequestInit) => {
     if (init.method === 'POST') {
-      return { headers: new Headers({ Location: '/media/uploads/s1' }) } as Response;
+      // A real `fetch()` Response always exposes `ok`; the client's fail-closed
+      // guard treats a response without it as a failure, so the mock must set it.
+      return { ok: true, headers: new Headers({ Location: '/media/uploads/s1' }) } as Response;
     }
     const headers = init.headers as Record<string, string>;
     const offset = Number(headers['Upload-Offset']);
     const body = init.body as Blob;
-    return { headers: new Headers({ 'Upload-Offset': String(offset + body.size) }) } as Response;
+    return {
+      ok: true,
+      headers: new Headers({ 'Upload-Offset': String(offset + body.size) }),
+    } as Response;
   });
 }
 
