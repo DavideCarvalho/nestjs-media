@@ -1,6 +1,6 @@
 {
   "name": "@dudousxd/nestjs-media-database-typeorm",
-  "version": "1.0.0",
+  "version": "0.5.0",
   "description": "nestjs-media TypeORM media store",
   "license": "MIT",
   "type": "module",
