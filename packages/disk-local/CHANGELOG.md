@@ -1,5 +1,13 @@
 # @dudousxd/nestjs-media-disk-local
 
+## 0.5.2
+
+### Patch Changes
+
+- 3eaee07: Implement `LocalDriver.stat()` (fs stat + extension content-type) and `LocalDriver.deleteMany()`.
+- Updated dependencies [03d5b48]
+  - @dudousxd/nestjs-media-core@0.6.2
+
 ## 0.5.1
 
 ### Patch Changes

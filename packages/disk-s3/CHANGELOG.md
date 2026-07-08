@@ -1,5 +1,13 @@
 # @dudousxd/nestjs-media-disk-s3
 
+## 0.6.2
+
+### Patch Changes
+
+- 1d93957: Implement `S3Driver.stat()` (HeadObject) and `S3Driver.deleteMany()` (DeleteObjects, chunked at 1000 keys).
+- Updated dependencies [03d5b48]
+  - @dudousxd/nestjs-media-core@0.6.2
+
 ## 0.6.1
 
 ### Patch Changes
