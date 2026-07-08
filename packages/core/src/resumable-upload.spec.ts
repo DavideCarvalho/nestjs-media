@@ -272,4 +272,38 @@ describe('ResumableUploadManager.writePart (parallel multipart)', () => {
       /concurrent part writes/,
     );
   });
+
+  it('listParts returns the recorded parts after writePart', async () => {
+    const store = makeStore();
+    const partManager = makeMultipartManager(store, {});
+    const session = await partManager.createUpload({ disk: 's3', key: 'k/o.bin', size: 10 });
+
+    await partManager.writePart(session.id, 1, Buffer.alloc(5));
+    await partManager.writePart(session.id, 2, Buffer.alloc(5));
+
+    const recorded = await partManager.listParts(session.id);
+    expect(recorded).toEqual(
+      expect.arrayContaining([
+        { partNumber: 1, etag: 'etag-1' },
+        { partNumber: 2, etag: 'etag-2' },
+      ]),
+    );
+    expect(recorded).toHaveLength(2);
+  });
+
+  it('writePart does not mutate session.offset or session.parts', async () => {
+    const store = makeStore();
+    const partManager = makeMultipartManager(store, {});
+    const session = await partManager.createUpload({ disk: 's3', key: 'k/o.bin', size: 10 });
+
+    const before = await store.get(session.id);
+    expect(before?.offset).toBe(0);
+    expect(before?.parts).toBe(0);
+
+    await partManager.writePart(session.id, 1, Buffer.alloc(5));
+
+    const after = await store.get(session.id);
+    expect(after?.offset).toBe(0);
+    expect(after?.parts).toBe(0);
+  });
 });

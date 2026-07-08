@@ -74,6 +74,7 @@ export class UploadOffsetConflictError extends Error {
 }
 
 export class InvalidPartNumberError extends Error {
+  readonly code = 'MEDIA_INVALID_PART_NUMBER';
   constructor(partNumber: number) {
     super(`Invalid multipart part number: ${partNumber} (must be an integer in 1..10000)`);
     this.name = 'InvalidPartNumberError';

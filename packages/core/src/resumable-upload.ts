@@ -166,10 +166,11 @@ export class ResumableUploadManager {
     }
     const part = await disk.uploadPart(session.key, session.multipartUploadId, partNumber, chunk);
     await this.sessions.addPart(id, part);
+    const recorded = (await this.sessions.listParts?.(id))?.length ?? 0;
     this.emit('upload.progress', {
       id: session.id,
       offset: session.offset,
-      parts: partNumber,
+      parts: recorded,
       size: session.size,
     });
     return part;
