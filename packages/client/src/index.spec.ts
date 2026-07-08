@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { mediaUrl, uploadMedia } from './index';
+import { mediaUrl, streamChunksParallel, uploadMedia } from './index';
 
 function mockFetch() {
   return vi.fn(async (_url: string, init: RequestInit) => {
@@ -47,5 +47,58 @@ describe('mediaUrl', () => {
   it('builds id and conversion URLs', () => {
     expect(mediaUrl('abc')).toBe('/media/abc');
     expect(mediaUrl('a b', 'thumb')).toBe('/media/a%20b?conversion=thumb');
+  });
+});
+
+function blobOf(bytes: number): Blob {
+  return new Blob([new Uint8Array(bytes)]);
+}
+
+describe('streamChunksParallel', () => {
+  it('PUTs each part by number, respects the concurrency cap, then completes', async () => {
+    let inFlight = 0;
+    let maxInFlight = 0;
+    const calls: string[] = [];
+    const fetchImpl = vi.fn(async (url: string, init: any) => {
+      calls.push(`${init.method} ${url}`);
+      if (init.method === 'PUT') {
+        inFlight += 1;
+        maxInFlight = Math.max(maxInFlight, inFlight);
+        await new Promise((r) => setTimeout(r, 5));
+        inFlight -= 1;
+      }
+      return { ok: true, headers: new Map() } as any;
+    });
+
+    // 25 bytes @ 10-byte chunks => 3 parts (1,2,3).
+    await streamChunksParallel('/api/media/uploads/xyz', blobOf(25), {
+      chunkSize: 10,
+      concurrency: 2,
+      fetchImpl: fetchImpl as any,
+    });
+
+    expect(calls).toContain('PUT /api/media/uploads/xyz/parts/1');
+    expect(calls).toContain('PUT /api/media/uploads/xyz/parts/2');
+    expect(calls).toContain('PUT /api/media/uploads/xyz/parts/3');
+    expect(calls).toContain('POST /api/media/uploads/xyz/complete');
+    expect(maxInFlight).toBeLessThanOrEqual(2);
+  });
+});
+
+describe('uploadMedia (back-compat)', () => {
+  it('still creates a session then PATCHes sequentially', async () => {
+    const fetchImpl = vi.fn(async (_url: string, init: any) => ({
+      ok: true,
+      headers: new Map([
+        ['Location', '/media/uploads/abc'],
+        ['Upload-Offset', '10'],
+      ]),
+    })) as any;
+    const result = await uploadMedia(blobOf(10), {
+      filename: 'f.bin',
+      basePath: '/media/uploads',
+      fetchImpl,
+    });
+    expect(result.location).toBe('/media/uploads/abc');
   });
 });
