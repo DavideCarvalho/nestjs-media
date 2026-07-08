@@ -73,6 +73,12 @@ export interface MultipartUploadDriver {
   abortMultipartUpload(path: string, uploadId: string): Promise<void>;
 }
 
+export interface StatResult {
+  size: number;
+  contentType?: string;
+  lastModified?: Date;
+}
+
 export interface StorageDriver {
   readonly capabilities: DriverCapabilities;
   put(path: string, contents: Buffer | Readable, options?: PutOptions): Promise<void>;
@@ -83,6 +89,12 @@ export interface StorageDriver {
   copy(from: string, to: string): Promise<void>;
   move(from: string, to: string): Promise<void>;
   size(path: string): Promise<number>;
+  /** Object metadata (size/content-type/last-modified) without downloading the body.
+   *  Optional; all bundled drivers implement it. */
+  stat?(path: string): Promise<StatResult>;
+  /** Delete many objects in one call. Optional; all bundled drivers implement it.
+   *  An empty array is a no-op. */
+  deleteMany?(paths: string[]): Promise<void>;
   url(path: string): Promise<string>;
   temporaryUrl(path: string, expiresInSeconds: number): Promise<string>;
   list(prefix: string, options?: ListOptions): Promise<ListResult>;

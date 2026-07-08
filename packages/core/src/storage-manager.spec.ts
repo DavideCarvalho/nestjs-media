@@ -31,3 +31,14 @@ describe('StorageManager', () => {
     );
   });
 });
+
+// diskNames only reads the keys of the disks record; a bare object is a sufficient
+// stand-in for a StorageDriver here (no method on it is called).
+const driver = {} as unknown as StorageDriver;
+
+describe('StorageManager.diskNames', () => {
+  it('returns the configured disk names', () => {
+    const manager = new StorageManager({ default: 'a', disks: { a: driver, b: driver } });
+    expect(manager.diskNames().sort()).toEqual(['a', 'b']);
+  });
+});

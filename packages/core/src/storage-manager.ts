@@ -22,4 +22,9 @@ export class StorageManager {
     if (!driver) throw new UnknownDiskError(key);
     return driver;
   }
+
+  /** Names of the configured disks. */
+  diskNames(): string[] {
+    return Object.keys(this.disks);
+  }
 }
