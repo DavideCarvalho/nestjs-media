@@ -3,10 +3,79 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { UploadOffsetConflictError, UploadSessionNotFoundError } from './errors';
 import { ResumableUploadManager } from './resumable-upload';
 import { StorageManager } from './storage-manager';
+import type { MultipartPart, StorageDriver } from './types';
 
 let disk: InMemoryDriver;
 let manager: ResumableUploadManager;
 let ids: number;
+
+/** Build a manager whose only disk ('d') is the given (possibly fake) driver. */
+function makeManager(driver: StorageDriver): ResumableUploadManager {
+  return new ResumableUploadManager({
+    storage: new StorageManager({ default: 'd', disks: { d: driver } }),
+    sessions: new InMemoryUploadSessionStore(),
+  });
+}
+
+function fakeMultipartDisk() {
+  const parts: Record<string, Buffer[]> = {};
+  const completed: Record<string, Buffer> = {};
+  let aborted = false;
+  return {
+    driver: {
+      capabilities: { presign: false, multipart: true, publicUrls: false, list: false },
+      async createMultipartUpload() {
+        parts['u'] = [];
+        return { uploadId: 'u' };
+      },
+      async uploadPart(_p: string, _u: string, n: number, body: Buffer) {
+        parts['u'][n - 1] = body;
+        return { partNumber: n, etag: `etag-${n}` };
+      },
+      async completeMultipartUpload(_p: string, _u: string, ps: MultipartPart[]) {
+        completed['done'] = Buffer.concat(ps.map((x) => parts['u'][x.partNumber - 1]));
+      },
+      async abortMultipartUpload() {
+        aborted = true;
+      },
+      async get() {
+        throw new Error('must not read parts back in multipart mode');
+      },
+      async put() {
+        throw new Error('must not put whole file in multipart mode');
+      },
+      async stream() {
+        throw new Error('not used by the multipart resumable-upload path');
+      },
+      async exists() {
+        throw new Error('not used by the multipart resumable-upload path');
+      },
+      async delete() {
+        throw new Error('not used by the multipart resumable-upload path');
+      },
+      async copy() {
+        throw new Error('not used by the multipart resumable-upload path');
+      },
+      async move() {
+        throw new Error('not used by the multipart resumable-upload path');
+      },
+      async size() {
+        throw new Error('not used by the multipart resumable-upload path');
+      },
+      async url() {
+        throw new Error('not used by the multipart resumable-upload path');
+      },
+      async temporaryUrl() {
+        throw new Error('not used by the multipart resumable-upload path');
+      },
+      async list() {
+        throw new Error('not used by the multipart resumable-upload path');
+      },
+    },
+    result: () => completed['done'],
+    wasAborted: () => aborted,
+  };
+}
 
 beforeEach(() => {
   disk = new InMemoryDriver();
@@ -65,5 +134,25 @@ describe('ResumableUploadManager', () => {
 
   it('throws for an unknown session', async () => {
     await expect(manager.status('nope')).rejects.toBeInstanceOf(UploadSessionNotFoundError);
+  });
+
+  it('multipart disk: each chunk is one part, complete stitches without buffering', async () => {
+    const multipartDisk = fakeMultipartDisk();
+    const multipartManager = makeManager(multipartDisk.driver);
+    const session = await multipartManager.createUpload({ disk: 'd', key: 'k', size: 9 });
+    await multipartManager.writeChunk(session.id, 0, Buffer.from('AAAAA')); // part 1
+    await multipartManager.writeChunk(session.id, 5, Buffer.from('BBBB')); // part 2 (last, <5MiB ok)
+    const result = await multipartManager.complete(session.id);
+    expect(result.key).toBe('k');
+    expect(multipartDisk.result().toString()).toBe('AAAAABBBB');
+  });
+
+  it('multipart disk: abort calls abortMultipartUpload', async () => {
+    const multipartDisk = fakeMultipartDisk();
+    const multipartManager = makeManager(multipartDisk.driver);
+    const session = await multipartManager.createUpload({ disk: 'd', key: 'k' });
+    await multipartManager.writeChunk(session.id, 0, Buffer.from('AAAAA'));
+    await multipartManager.abort(session.id);
+    expect(multipartDisk.wasAborted()).toBe(true);
   });
 });

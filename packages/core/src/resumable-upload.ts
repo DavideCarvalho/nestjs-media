@@ -1,7 +1,9 @@
 import { randomUUID } from 'node:crypto';
 import { publishMedia } from './diagnostics';
 import { UploadOffsetConflictError, UploadSessionNotFoundError } from './errors';
+import { isMultipartCapable } from './multipart';
 import type { StorageManager } from './storage-manager';
+import type { MultipartPart } from './types';
 
 export interface UploadSession {
   id: string;
@@ -15,6 +17,10 @@ export interface UploadSession {
   offset: number;
   /** Number of chunk parts written so far. */
   parts: number;
+  /** S3 (or other native-multipart) upload id, when the target disk is multipart-capable. */
+  multipartUploadId?: string;
+  /** ETags of uploaded parts, in order, for the native-multipart complete. */
+  partETags?: MultipartPart[];
 }
 
 /** Persistence SPI for resumable upload sessions (in-memory impl in `-testing`). */
@@ -68,6 +74,18 @@ export class ResumableUploadManager {
   }
 
   async createUpload(input: CreateUploadInput): Promise<UploadSession> {
+    const disk = this.storage.disk(input.disk);
+    const multipart = isMultipartCapable(disk)
+      ? {
+          multipartUploadId: (
+            await disk.createMultipartUpload(
+              input.key,
+              input.contentType ? { contentType: input.contentType } : undefined,
+            )
+          ).uploadId,
+          partETags: [] as MultipartPart[],
+        }
+      : {};
     const session = await this.sessions.create({
       id: this.newId(),
       disk: input.disk,
@@ -76,6 +94,7 @@ export class ResumableUploadManager {
       size: input.size,
       offset: 0,
       parts: 0,
+      ...multipart,
     });
     this.emit('upload.start', {
       id: session.id,
@@ -93,7 +112,18 @@ export class ResumableUploadManager {
     if (offset !== session.offset) {
       throw new UploadOffsetConflictError(session.offset, offset);
     }
-    await this.storage.disk(session.disk).put(this.partKey(session, session.parts), chunk);
+    const disk = this.storage.disk(session.disk);
+    if (session.multipartUploadId && isMultipartCapable(disk)) {
+      const part = await disk.uploadPart(
+        session.key,
+        session.multipartUploadId,
+        session.parts + 1,
+        chunk,
+      );
+      session.partETags = [...(session.partETags ?? []), part];
+    } else {
+      await disk.put(this.partKey(session, session.parts), chunk);
+    }
     session.parts += 1;
     session.offset += chunk.byteLength;
     await this.sessions.update(session);
@@ -116,16 +146,19 @@ export class ResumableUploadManager {
     const session = await this.require(id);
     const disk = this.storage.disk(session.disk);
 
-    const chunks: Buffer[] = [];
-    for (let part = 0; part < session.parts; part += 1) {
-      chunks.push(await disk.get(this.partKey(session, part)));
+    if (session.multipartUploadId && isMultipartCapable(disk)) {
+      await disk.completeMultipartUpload(session.key, session.multipartUploadId, session.partETags ?? []);
+    } else {
+      const chunks: Buffer[] = [];
+      for (let part = 0; part < session.parts; part += 1) {
+        chunks.push(await disk.get(this.partKey(session, part)));
+      }
+      await disk.put(
+        session.key,
+        Buffer.concat(chunks),
+        session.contentType ? { contentType: session.contentType } : {},
+      );
     }
-    const body = Buffer.concat(chunks);
-    await disk.put(
-      session.key,
-      body,
-      session.contentType ? { contentType: session.contentType } : {},
-    );
 
     await this.cleanup(session);
     await this.sessions.delete(id);
@@ -133,14 +166,18 @@ export class ResumableUploadManager {
       id: session.id,
       disk: session.disk,
       key: session.key,
-      size: body.byteLength,
+      size: session.offset,
     });
-    return { key: session.key, disk: session.disk, size: body.byteLength };
+    return { key: session.key, disk: session.disk, size: session.offset };
   }
 
   async abort(id: string): Promise<void> {
     const session = await this.sessions.get(id);
     if (!session) return;
+    const disk = this.storage.disk(session.disk);
+    if (session.multipartUploadId && isMultipartCapable(disk)) {
+      await disk.abortMultipartUpload(session.key, session.multipartUploadId);
+    }
     await this.cleanup(session);
     await this.sessions.delete(id);
     this.emit('upload.abort', { id: session.id });
@@ -154,6 +191,7 @@ export class ResumableUploadManager {
   }
 
   private async cleanup(session: UploadSession): Promise<void> {
+    if (session.multipartUploadId) return;
     const disk = this.storage.disk(session.disk);
     for (let part = 0; part < session.parts; part += 1) {
       await disk.delete(this.partKey(session, part));
