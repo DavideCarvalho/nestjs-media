@@ -25,15 +25,15 @@ function fakeMultipartDisk() {
     driver: {
       capabilities: { presign: false, multipart: true, publicUrls: false, list: false },
       async createMultipartUpload() {
-        parts['u'] = [];
+        parts.u = [];
         return { uploadId: 'u' };
       },
       async uploadPart(_p: string, _u: string, n: number, body: Buffer) {
-        parts['u'][n - 1] = body;
+        parts.u[n - 1] = body;
         return { partNumber: n, etag: `etag-${n}` };
       },
       async completeMultipartUpload(_p: string, _u: string, ps: MultipartPart[]) {
-        completed['done'] = Buffer.concat(ps.map((x) => parts['u'][x.partNumber - 1]));
+        completed.done = Buffer.concat(ps.map((x) => parts.u[x.partNumber - 1]));
       },
       async abortMultipartUpload() {
         aborted = true;
@@ -72,7 +72,7 @@ function fakeMultipartDisk() {
         throw new Error('not used by the multipart resumable-upload path');
       },
     },
-    result: () => completed['done'],
+    result: () => completed.done,
     wasAborted: () => aborted,
   };
 }

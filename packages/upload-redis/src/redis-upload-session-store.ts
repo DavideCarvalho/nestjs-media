@@ -21,7 +21,8 @@ function isUploadSession(value: unknown): value is UploadSession {
   if (typeof obj.parts !== 'number') return false;
   if (obj.contentType !== undefined && typeof obj.contentType !== 'string') return false;
   if (obj.size !== undefined && typeof obj.size !== 'number') return false;
-  if (obj.multipartUploadId !== undefined && typeof obj.multipartUploadId !== 'string') return false;
+  if (obj.multipartUploadId !== undefined && typeof obj.multipartUploadId !== 'string')
+    return false;
   if (obj.partETags !== undefined && !Array.isArray(obj.partETags)) return false;
   return true;
 }
@@ -59,7 +60,9 @@ export class RedisUploadSessionStore implements UploadSessionStore {
       parts: parsed.parts,
       contentType: parsed.contentType,
       size: parsed.size,
-      ...(parsed.multipartUploadId !== undefined ? { multipartUploadId: parsed.multipartUploadId } : {}),
+      ...(parsed.multipartUploadId !== undefined
+        ? { multipartUploadId: parsed.multipartUploadId }
+        : {}),
       ...(parsed.partETags !== undefined ? { partETags: parsed.partETags } : {}),
     };
     return session;

@@ -147,7 +147,11 @@ export class ResumableUploadManager {
     const disk = this.storage.disk(session.disk);
 
     if (session.multipartUploadId && isMultipartCapable(disk)) {
-      await disk.completeMultipartUpload(session.key, session.multipartUploadId, session.partETags ?? []);
+      await disk.completeMultipartUpload(
+        session.key,
+        session.multipartUploadId,
+        session.partETags ?? [],
+      );
     } else {
       const chunks: Buffer[] = [];
       for (let part = 0; part < session.parts; part += 1) {
