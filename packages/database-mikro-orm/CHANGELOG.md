@@ -1,5 +1,12 @@
 # @dudousxd/nestjs-media-database-mikro-orm
 
+## 0.5.3
+
+### Patch Changes
+
+- Updated dependencies [caa8eea]
+  - @dudousxd/nestjs-media-core@0.6.3
+
 ## 0.5.2
 
 ### Patch Changes
