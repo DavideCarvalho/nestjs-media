@@ -205,6 +205,25 @@ export class S3Driver implements StorageDriver, MultipartUploadDriver {
     return { uploadId: out.UploadId };
   }
 
+  async uploadPart(
+    path: string,
+    uploadId: string,
+    partNumber: number,
+    body: Buffer,
+  ): Promise<MultipartPart> {
+    const out = await this.client.send(
+      new UploadPartCommand({
+        Bucket: this.bucket,
+        Key: this.key(path),
+        UploadId: uploadId,
+        PartNumber: partNumber,
+        Body: body,
+      }),
+    );
+    if (!out.ETag) throw new Error('S3 did not return an ETag for the uploaded part');
+    return { partNumber, etag: out.ETag };
+  }
+
   async presignUploadPart(
     path: string,
     uploadId: string,

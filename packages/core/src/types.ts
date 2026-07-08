@@ -56,6 +56,13 @@ export interface MultipartPart {
 /** Optional add-on surface for drivers that support native multipart presign (S3). Gated by capabilities.multipart. */
 export interface MultipartUploadDriver {
   createMultipartUpload(path: string, options?: PutOptions): Promise<{ uploadId: string }>;
+  /** Upload one part's bytes server-side (proxy path). Returns the part's ETag. */
+  uploadPart(
+    path: string,
+    uploadId: string,
+    partNumber: number,
+    body: Buffer,
+  ): Promise<MultipartPart>;
   presignUploadPart(
     path: string,
     uploadId: string,
