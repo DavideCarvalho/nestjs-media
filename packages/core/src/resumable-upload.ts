@@ -24,8 +24,6 @@ export interface UploadSession {
   parts: number;
   /** S3 (or other native-multipart) upload id, when the target disk is multipart-capable. */
   multipartUploadId?: string;
-  /** ETags of uploaded parts, in order, for the native-multipart complete. */
-  partETags?: MultipartPart[];
 }
 
 /** Persistence SPI for resumable upload sessions (in-memory impl in `-testing`). */
@@ -92,7 +90,6 @@ export class ResumableUploadManager {
               input.contentType ? { contentType: input.contentType } : undefined,
             )
           ).uploadId,
-          partETags: [] as MultipartPart[],
         }
       : {};
     const session = await this.sessions.create({
@@ -123,13 +120,16 @@ export class ResumableUploadManager {
     }
     const disk = this.storage.disk(session.disk);
     if (session.multipartUploadId && isMultipartCapable(disk)) {
+      if (typeof this.sessions.addPart !== 'function') {
+        throw new UnsupportedOperationError('session store', 'multipart part recording');
+      }
       const part = await disk.uploadPart(
         session.key,
         session.multipartUploadId,
         session.parts + 1,
         chunk,
       );
-      session.partETags = [...(session.partETags ?? []), part];
+      await this.sessions.addPart(id, part);
     } else {
       await disk.put(this.partKey(session, session.parts), chunk);
     }
@@ -166,22 +166,19 @@ export class ResumableUploadManager {
     }
     const part = await disk.uploadPart(session.key, session.multipartUploadId, partNumber, chunk);
     await this.sessions.addPart(id, part);
-    const recorded = (await this.sessions.listParts?.(id))?.length ?? 0;
     this.emit('upload.progress', {
       id: session.id,
       offset: session.offset,
-      parts: recorded,
+      parts: partNumber,
       size: session.size,
     });
     return part;
   }
 
-  /** All recorded parts for a session (parallel side store first, else the sequential session list). */
+  /** All recorded parts for a session (both write paths record via the store side-index). */
   async listParts(id: string): Promise<MultipartPart[]> {
-    const session = await this.require(id);
-    const stored =
-      typeof this.sessions.listParts === 'function' ? await this.sessions.listParts(id) : [];
-    return [...(session.partETags ?? []), ...stored];
+    await this.require(id);
+    return (await this.sessions.listParts?.(id)) ?? [];
   }
 
   async status(id: string): Promise<{ offset: number; size: number | undefined }> {
@@ -195,13 +192,10 @@ export class ResumableUploadManager {
     const disk = this.storage.disk(session.disk);
 
     if (session.multipartUploadId && isMultipartCapable(disk)) {
-      // Sequential tus writes go to session.partETags (in order); parallel writePart
-      // writes to the store's part side-index (out of order). One of the two is
-      // always empty for a given session — concatenate and sort ascending, which S3
-      // requires for completeMultipartUpload.
-      const stored =
-        typeof this.sessions.listParts === 'function' ? await this.sessions.listParts(id) : [];
-      const parts = [...(session.partETags ?? []), ...stored].sort(
+      // Both write paths (sequential writeChunk and parallel writePart) record parts
+      // via the store's part side-index. Sort ascending, which S3 requires for
+      // completeMultipartUpload.
+      const parts = [...((await this.sessions.listParts?.(id)) ?? [])].sort(
         (a, b) => a.partNumber - b.partNumber,
       );
       await disk.completeMultipartUpload(session.key, session.multipartUploadId, parts);
