@@ -262,6 +262,58 @@ POST :id/complete   → completeMultipartUpload(sorted parts) → { key, size }
 - **e2e (testing package / MinIO):** a real parallel upload of a multi-part
   file → the assembled object is byte-identical to the source.
 
+## Ecosystem integration
+
+This feature ripples through the monorepo. The analysis below is the integration
+contract — what changes, what deliberately does not, and why.
+
+**Telescope — media watcher (`@dudousxd/nestjs-media-telescope`): NO CHANGE.**
+The watcher subscribes to the `aviary:media:*` diagnostics channels and already
+excludes `upload.progress` to avoid per-chunk flooding, recording only the
+`upload.start`/`complete`/`abort` milestones. `writePart` reuses the existing
+`upload.progress` event (no new diagnostics event type), so the parallel path
+flows through the diagnostics → telescope bridge with zero watcher changes. The
+milestone entries carry small structured payloads (`{ id, key, size }`), never
+request bodies.
+
+**Telescope — external request watcher (`@dudousxd/nestjs-telescope`): NO LIB
+CHANGE; host guidance.** The new `PUT :id/parts/:n` route carries a raw binary
+part body, exactly like the tus `PATCH`. Two independent safety nets already
+cover it: (1) `@dudousxd/nestjs-telescope` ≥ 1.15.1 bounds binary blobs in
+`redact()` (a Buffer is summarized as an O(1) marker instead of being walked
+byte-by-byte), so capturing a part body can no longer stall the event loop;
+(2) hosts should still skip request capture on the whole `…/media/uploads`
+subtree — capturing many concurrent binary parts is pure noise. flip's existing
+`req.originalUrl.startsWith("/api/media/uploads")` capture skip already covers
+the new parts/complete routes (they live under that prefix). The lib README
+documents this recommendation for other hosts.
+
+**React (`@dudousxd/nestjs-media-react`): patch.** `useMediaUpload` currently
+wraps `uploadMedia` (sequential). Add an opt-in `parallel?: boolean` +
+`concurrency?: number` to `UseMediaUploadOptions`; when `parallel` is set the
+hook calls `uploadMediaParallel` instead. Progress state wiring is unchanged
+(both report cumulative bytes via `onProgress`). Default stays sequential — no
+behavior change for existing callers.
+
+**Codegen (`@dudousxd/nestjs-media-codegen`): patch.** The generated
+`media-client-template` currently emits a single `uploadMedia()` bound to the
+project's tus base path. Add a generated `uploadMediaParallel()` (and re-export
+the `createSession`/`streamChunks`/`streamChunksParallel` split) bound to the
+same base path, so codegen consumers get the parallel helper with zero manual
+wiring. No change to `media.extension` options beyond documenting the new export.
+
+**media-library + DB adapters (drizzle/mikro-orm/prisma/typeorm): NO CHANGE.**
+`MediaLibrary` and the record persistence adapters live strictly downstream of
+`complete()`'s `{ key, disk, size }` result and never touch upload part/session
+state (verified: the adapters have no reference to sessions, parts, or
+multipart). The parallel `complete()` returns the identical shape, so record
+creation is agnostic to how the bytes arrived.
+
+**Full touched-package list (all patch, all stay 0.x):**
+`core` 0.6.0→0.6.1, `upload-redis` 0.7.0→0.7.1, `nestjs` 0.6.0→0.6.1,
+`client` 0.2.0→0.2.1, `react` (patch), `codegen` (patch). The changesets
+Version PR must show **0 major bumps** — scrutinize it before merge.
+
 ## Out of scope
 
 - Migrating flip to `streamChunksParallel` (separate future effort).
