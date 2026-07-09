@@ -70,5 +70,35 @@ export function runMediaStoreConformance(
       await store.delete('a');
       expect(await store.find('a')).toBeNull();
     });
+
+    it('count returns the global total, and honours filters', async () => {
+      const store = await makeStore();
+      if (typeof store.count !== 'function') return;
+      await store.save(makeRecord({ id: 'a', collection: 'gallery', disk: 'local', size: 3 }));
+      await store.save(makeRecord({ id: 'b', collection: 'gallery', disk: 's3', size: 5 }));
+      await store.save(makeRecord({ id: 'c', collection: 'avatar', disk: 'local', size: 7 }));
+      expect(await store.count()).toBe(3);
+      expect(await store.count({ collection: 'gallery' })).toBe(2);
+      expect(await store.count({ disk: 'local' })).toBe(2);
+      expect(await store.count({ collection: 'gallery', disk: 's3' })).toBe(1);
+    });
+
+    it('aggregate groups by collection/disk with counts and summed sizes', async () => {
+      const store = await makeStore();
+      if (typeof store.aggregate !== 'function') return;
+      await store.save(makeRecord({ id: 'a', collection: 'gallery', disk: 'local', size: 3 }));
+      await store.save(makeRecord({ id: 'b', collection: 'gallery', disk: 's3', size: 5 }));
+      await store.save(makeRecord({ id: 'c', collection: 'avatar', disk: 'local', size: 7 }));
+
+      const byCollection = await store.aggregate({ groupBy: 'collection', sum: 'size' });
+      const collectionMap = new Map(byCollection.map((b) => [b.key, b]));
+      expect(collectionMap.get('gallery')).toEqual({ key: 'gallery', count: 2, sumSize: 8 });
+      expect(collectionMap.get('avatar')).toEqual({ key: 'avatar', count: 1, sumSize: 7 });
+
+      const byDisk = await store.aggregate({ groupBy: 'disk', sum: 'size' });
+      const diskMap = new Map(byDisk.map((b) => [b.key, b]));
+      expect(diskMap.get('local')).toEqual({ key: 'local', count: 2, sumSize: 10 });
+      expect(diskMap.get('s3')).toEqual({ key: 's3', count: 1, sumSize: 5 });
+    });
   });
 }
