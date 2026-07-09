@@ -1,5 +1,12 @@
 # @dudousxd/nestjs-media-upload-redis
 
+## 0.7.5
+
+### Patch Changes
+
+- Updated dependencies [1410953]
+  - @dudousxd/nestjs-media-core@0.6.5
+
 ## 0.7.4
 
 ### Patch Changes

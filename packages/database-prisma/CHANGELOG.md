@@ -1,5 +1,12 @@
 # @dudousxd/nestjs-media-database-prisma
 
+## 0.5.5
+
+### Patch Changes
+
+- Updated dependencies [1410953]
+  - @dudousxd/nestjs-media-core@0.6.5
+
 ## 0.5.4
 
 ### Patch Changes

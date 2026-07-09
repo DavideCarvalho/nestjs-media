@@ -1,6 +1,6 @@
 {
   "name": "@dudousxd/nestjs-media-testing",
-  "version": "0.5.4",
+  "version": "0.5.5",
   "description": "nestjs-media testing utilities — in-memory driver + driver conformance suite",
   "license": "MIT",
   "type": "module",
