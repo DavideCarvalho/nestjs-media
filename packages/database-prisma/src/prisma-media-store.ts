@@ -1,4 +1,10 @@
-import type { MediaRecord, MediaStore } from '@dudousxd/nestjs-media-core';
+import type {
+  MediaAggregateQuery,
+  MediaAggregateResult,
+  MediaCountFilter,
+  MediaRecord,
+  MediaStore,
+} from '@dudousxd/nestjs-media-core';
 
 // Prisma's per-model query args are generated generics; left as `any` at this single
 // boundary so a real, generated `PrismaClient` delegate is structurally assignable to
@@ -13,6 +19,10 @@ export interface PrismaMediaDelegate {
   findMany(args: Args): Promise<MediaRecord[]>;
   deleteMany(args: Args): Promise<{ count: number }>;
   aggregate(args: Args): Promise<{ _max: { order: number | null } }>;
+  count(args: Args): Promise<number>;
+  groupBy(
+    args: Args,
+  ): Promise<Array<{ [key: string]: unknown; _count: number; _sum: { size: number | null } }>>;
 }
 
 /**
@@ -57,5 +67,31 @@ export class PrismaMediaStore implements MediaStore {
       _max: { order: true },
     });
     return result._max.order == null ? 0 : result._max.order + 1;
+  }
+
+  count(filter: MediaCountFilter = {}): Promise<number> {
+    return this.prisma.media.count({
+      where: {
+        ...(filter.ownerType !== undefined ? { ownerType: filter.ownerType } : {}),
+        ...(filter.collection !== undefined ? { collection: filter.collection } : {}),
+        ...(filter.disk !== undefined ? { disk: filter.disk } : {}),
+      },
+    });
+  }
+
+  async aggregate(query: MediaAggregateQuery): Promise<MediaAggregateResult> {
+    const rows = await this.prisma.media.groupBy({
+      by: [query.groupBy],
+      _count: true,
+      _sum: { size: true },
+    });
+    return rows.map((row) => {
+      const key = row[query.groupBy];
+      return {
+        key: typeof key === 'string' ? key : String(key),
+        count: Number(row._count),
+        sumSize: query.sum === 'size' ? Number(row._sum.size ?? 0) : 0,
+      };
+    });
   }
 }

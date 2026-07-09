@@ -39,6 +39,26 @@ function fakeClient(): PrismaClientLike & { rows: Map<string, MediaRecord> } {
       const order = list.length ? Math.max(...list.map((r) => r.order)) : null;
       return { _max: { order } };
     },
+    async count({ where }) {
+      return [...rows.values()].filter(
+        (r) =>
+          (where?.ownerType === undefined || r.ownerType === where.ownerType) &&
+          (where?.collection === undefined || r.collection === where.collection) &&
+          (where?.disk === undefined || r.disk === where.disk),
+      ).length;
+    },
+    async groupBy({ by }) {
+      const groups = new Map<string, MediaRecord[]>();
+      for (const r of rows.values()) {
+        const key = String(r[by[0]]);
+        groups.set(key, [...(groups.get(key) ?? []), r]);
+      }
+      return [...groups.entries()].map(([key, list]) => ({
+        [by[0]]: key,
+        _count: list.length,
+        _sum: { size: list.reduce((sum, r) => sum + r.size, 0) },
+      }));
+    },
   };
   return { media, rows };
 }
