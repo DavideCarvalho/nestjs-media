@@ -23,3 +23,10 @@ Plan: docs/plans/2026-07-09-media-console-dashboard.md
 - packages/dashboard: package.json/tsup/vite/tailwind/tsconfigs; server (tokens, MediaConsoleService, read+actions controllers, MediaConsoleApiModule.register(actions), MediaDashboardModule.forRoot + RouterModule, UI controller); client (types + mediaConsoleClient + apiBase); SPA shell (main/App/useHashRoute + 3 view STUBS + preview).
 - DI: @Optional @Inject(Symbol.for) tokens; @Inject explicit everywhere (no metadata). Dual tsup + shims (import.meta.url). Build green (vite+tsup+tsc client). 6 unit specs + mount bootstrap smoke green (topology degrade, disks map, actions-gating 404). biome clean.
 ## Wave 3 IN PROGRESS: 3 SPA views dispatched (DisksView/UploadsView/LibraryView), one subagent each, replace own stub only.
+
+## Wave 3 COMPLETE (commits acdb957 uploads, 55afc1c disks, 22e9ff2 library)
+- 3 SPA views built (react-query; DisksView object-tree w/ guarded setState-in-render + ref-identity pagination; UploadsView live 2s poll + parts + abort; LibraryView useInfiniteQuery grid + variants + delete). app typecheck + full build (82 modules) + 311 tests + biome all green.
+## Wave 4 IN PROGRESS
+- Changeset committed: dashboard MINOR 0.0.0->0.1.0, core/adapters/testing/upload-redis PATCH. changeset status: nothing at 1.0.0 (0.x-safe confirmed).
+- Final whole-branch review DISPATCHED (opus) -> media-console-branch.diff.
+- PENDING: address review findings -> publish (push->PR->merge->Version PR->publish, scrutinize bumps) -> flip mount (MediaDashboardModule.forRoot /media + /api/media/console + prefix exclude + ADMIN guard) -> verify on dev.
