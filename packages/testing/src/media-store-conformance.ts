@@ -112,9 +112,10 @@ export function runMediaStoreConformance(
 
       const page1 = await store.list({ collection: 'gallery' }, { limit: 2 });
       expect(page1.records.map((r) => r.id)).toEqual(['a', 'b']);
-      expect(page1.cursor).toBeDefined();
+      const cursor = page1.cursor;
+      if (cursor === undefined) throw new Error('expected a cursor after the first page');
 
-      const page2 = await store.list({ collection: 'gallery' }, { limit: 2, cursor: page1.cursor });
+      const page2 = await store.list({ collection: 'gallery' }, { limit: 2, cursor });
       expect(page2.records.map((r) => r.id)).toEqual(['c']);
       expect(page2.cursor).toBeUndefined();
     });

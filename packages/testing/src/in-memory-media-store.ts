@@ -106,8 +106,7 @@ export class InMemoryMediaStore implements MediaStore {
     const window = start === -1 ? [] : ordered.slice(start, start + limit + 1);
     const hasMore = window.length > limit;
     const records = window.slice(0, limit).map((r) => ({ ...r }));
-    const result: MediaListResult = { records };
-    if (hasMore && records.length > 0) result.cursor = encodeCursor(records[records.length - 1]);
-    return result;
+    const last = records.at(-1);
+    return hasMore && last ? { records, cursor: encodeCursor(last) } : { records };
   }
 }
