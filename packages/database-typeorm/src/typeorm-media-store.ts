@@ -2,6 +2,9 @@ import type {
   MediaAggregateQuery,
   MediaAggregateResult,
   MediaCountFilter,
+  MediaListFilter,
+  MediaListPage,
+  MediaListResult,
   MediaRecord,
   MediaStore,
 } from '@dudousxd/nestjs-media-core';
@@ -131,5 +134,54 @@ export class TypeOrmMediaStore implements MediaStore {
       count: Number(row.count),
       sumSize: query.sum === 'size' ? Number(row.sumSize ?? 0) : 0,
     }));
+  }
+
+  async list(filter: MediaListFilter = {}, page: MediaListPage = {}): Promise<MediaListResult> {
+    await this.ready();
+    const limit = page.limit ?? 50;
+    const qb = this.repo
+      .createQueryBuilder('m')
+      .orderBy('m.createdAt', 'ASC')
+      .addOrderBy('m.id', 'ASC')
+      .take(limit + 1);
+
+    if (filter.ownerType !== undefined) {
+      qb.andWhere('m.ownerType = :ownerType', { ownerType: filter.ownerType });
+    }
+    if (filter.collection !== undefined) {
+      qb.andWhere('m.collection = :collection', { collection: filter.collection });
+    }
+    if (filter.disk !== undefined) {
+      qb.andWhere('m.disk = :disk', { disk: filter.disk });
+    }
+    if (page.cursor !== undefined) {
+      const { createdAt, id } = this.decodeCursor(page.cursor);
+      qb.andWhere(
+        '(m.createdAt > :cursorCreatedAt OR (m.createdAt = :cursorCreatedAt AND m.id > :cursorId))',
+        { cursorCreatedAt: createdAt, cursorId: id },
+      );
+    }
+
+    const rows = await qb.getMany();
+    const hasNextPage = rows.length > limit;
+    const records = hasNextPage ? rows.slice(0, limit) : rows;
+    const lastRecord = records[records.length - 1];
+    return {
+      records,
+      ...(hasNextPage && lastRecord ? { cursor: this.encodeCursor(lastRecord) } : {}),
+    };
+  }
+
+  private encodeCursor(record: MediaRecord): string {
+    return Buffer.from(`${record.createdAt.toISOString()}|${record.id}`).toString('base64');
+  }
+
+  private decodeCursor(cursor: string): { createdAt: string; id: string } {
+    const decoded = Buffer.from(cursor, 'base64').toString('utf8');
+    const separatorIndex = decoded.indexOf('|');
+    return {
+      createdAt: decoded.slice(0, separatorIndex),
+      id: decoded.slice(separatorIndex + 1),
+    };
   }
 }
