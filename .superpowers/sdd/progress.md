@@ -30,3 +30,7 @@ Plan: docs/plans/2026-07-09-media-console-dashboard.md
 - Changeset committed: dashboard MINOR 0.0.0->0.1.0, core/adapters/testing/upload-redis PATCH. changeset status: nothing at 1.0.0 (0.x-safe confirmed).
 - Final whole-branch review DISPATCHED (opus) -> media-console-branch.diff.
 - PENDING: address review findings -> publish (push->PR->merge->Version PR->publish, scrutinize bumps) -> flip mount (MediaDashboardModule.forRoot /media + /api/media/console + prefix exclude + ADMIN guard) -> verify on dev.
+
+## Final review: CHANGES_NEEDED -> RESOLVED (commit 322f8c2)
+- 0 Critical, 1 Important (abortUpload orphaned-multipart: FIXED via honest "Cancel session" relabel + tooltip + service doc + changeset note), Minor #2 (malformed-cursor 500: FIXED w/ decodeCursor null-guard in all 4 adapters + conformance test), Minors #3 (drizzle `as` matches file convention) / #4 (hasStore requires list()) ACCEPTED. 316 tests green.
+## PUBLISH: driving (push -> PR to main -> merge -> Version PR -> npm). New pkg dashboard 0.1.0 + patches.
