@@ -154,11 +154,11 @@ export class TypeOrmMediaStore implements MediaStore {
     if (filter.disk !== undefined) {
       qb.andWhere('m.disk = :disk', { disk: filter.disk });
     }
-    if (page.cursor !== undefined) {
-      const { createdAt, id } = this.decodeCursor(page.cursor);
+    const decodedCursor = page.cursor !== undefined ? this.decodeCursor(page.cursor) : null;
+    if (decodedCursor) {
       qb.andWhere(
         '(m.createdAt > :cursorCreatedAt OR (m.createdAt = :cursorCreatedAt AND m.id > :cursorId))',
-        { cursorCreatedAt: createdAt, cursorId: id },
+        { cursorCreatedAt: decodedCursor.createdAt, cursorId: decodedCursor.id },
       );
     }
 
@@ -176,9 +176,10 @@ export class TypeOrmMediaStore implements MediaStore {
     return Buffer.from(`${record.createdAt.toISOString()}|${record.id}`).toString('base64');
   }
 
-  private decodeCursor(cursor: string): { createdAt: string; id: string } {
+  private decodeCursor(cursor: string): { createdAt: string; id: string } | null {
     const decoded = Buffer.from(cursor, 'base64').toString('utf8');
     const separatorIndex = decoded.indexOf('|');
+    if (separatorIndex === -1) return null;
     return {
       createdAt: decoded.slice(0, separatorIndex),
       id: decoded.slice(separatorIndex + 1),

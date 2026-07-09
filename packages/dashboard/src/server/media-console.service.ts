@@ -172,6 +172,13 @@ export class MediaConsoleService {
     return { upload: mapUpload(session), parts };
   }
 
+  /**
+   * Cancels a resumable session by removing its record from the upload store, so it stops
+   * appearing as in-progress. NOTE: this does NOT tear down an underlying native multipart upload
+   * (e.g. an S3 multipart) or its temporary parts — the decoupled console resolves only the
+   * `UploadSessionStore`, not the `ResumableUploadManager` that owns `abort()`. An incomplete
+   * multipart is reaped by the bucket's lifecycle policy. Surfaced as "Cancel session" in the UI.
+   */
   async abortUpload(id: string): Promise<void> {
     if (!this.uploads) throw new NotFoundException('No upload store configured');
     await this.uploads.delete(id);

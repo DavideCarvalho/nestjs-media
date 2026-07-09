@@ -54,7 +54,7 @@ function UploadsListView({ actions }: { actions: boolean }): JSX.Element {
       <h2 className="mb-1 text-base font-semibold">Uploads</h2>
       <p className="mb-3 text-xs text-slate-500">
         Live resumable upload sessions, refreshed every 2 seconds.
-        {actions ? ' Abort is available from the detail view.' : ''}
+        {actions ? ' Cancel a session from its detail view.' : ''}
       </p>
       {uploads.length === 0 ? (
         <p className="text-sm text-slate-500">No uploads in progress</p>
@@ -152,13 +152,14 @@ function UploadDetailView({
               type="button"
               onClick={() => abortMutation.mutate()}
               disabled={abortMutation.isPending}
+              title="Removes the resumable session so it stops here. An incomplete underlying multipart upload is reaped by the bucket lifecycle policy, not by this action."
               className="mb-4 rounded border border-slate-200 px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-100 disabled:opacity-50"
             >
-              {abortMutation.isPending ? 'Aborting…' : 'Abort upload'}
+              {abortMutation.isPending ? 'Canceling…' : 'Cancel session'}
             </button>
           )}
           {abortMutation.isError && (
-            <p className="mb-4 text-sm text-slate-500">Failed to abort upload.</p>
+            <p className="mb-4 text-sm text-slate-500">Failed to cancel session.</p>
           )}
 
           <h3 className="mb-1 text-sm font-semibold">Parts</h3>

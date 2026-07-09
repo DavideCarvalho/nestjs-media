@@ -25,10 +25,13 @@ interface DecodedListCursor {
   id: string;
 }
 
-function decodeListCursor(cursor: string): DecodedListCursor {
+function decodeListCursor(cursor: string): DecodedListCursor | null {
   const decoded = Buffer.from(cursor, 'base64').toString('utf8');
   const separator = decoded.indexOf('|');
-  return { createdAt: new Date(decoded.slice(0, separator)), id: decoded.slice(separator + 1) };
+  if (separator === -1) return null;
+  const createdAt = new Date(decoded.slice(0, separator));
+  if (Number.isNaN(createdAt.getTime())) return null;
+  return { createdAt, id: decoded.slice(separator + 1) };
 }
 
 /** Structural subset of the generated Prisma `media` delegate the store relies on. */
@@ -116,14 +119,14 @@ export class PrismaMediaStore implements MediaStore {
 
   async list(filter: MediaListFilter = {}, page: MediaListPage = {}): Promise<MediaListResult> {
     const limit = page.limit ?? 50;
-    const cursor = page.cursor !== undefined ? decodeListCursor(page.cursor) : undefined;
+    const cursor = page.cursor !== undefined ? decodeListCursor(page.cursor) : null;
 
     const rows = await this.prisma.media.findMany({
       where: {
         ...(filter.ownerType !== undefined ? { ownerType: filter.ownerType } : {}),
         ...(filter.collection !== undefined ? { collection: filter.collection } : {}),
         ...(filter.disk !== undefined ? { disk: filter.disk } : {}),
-        ...(cursor !== undefined
+        ...(cursor
           ? {
               OR: [
                 { createdAt: { gt: cursor.createdAt } },

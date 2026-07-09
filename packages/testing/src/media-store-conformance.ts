@@ -134,5 +134,15 @@ export function runMediaStoreConformance(
       expect(everything.records).toHaveLength(3);
       expect(everything.cursor).toBeUndefined();
     });
+
+    it('list ignores a malformed cursor instead of throwing', async () => {
+      const store = await makeStore();
+      if (typeof store.list !== 'function') return;
+      await store.save(makeRecord({ id: 'a', createdAt: new Date(1000) }));
+      // A garbage cursor (no separator / not our encoding) must be treated as "no cursor" and
+      // list from the start, never surface a DB error.
+      const result = await store.list({}, { limit: 10, cursor: 'not-a-valid-cursor' });
+      expect(result.records.map((r) => r.id)).toEqual(['a']);
+    });
   });
 }

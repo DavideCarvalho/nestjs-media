@@ -29,6 +29,7 @@ function decodeListCursor(cursor: string): DecodedListCursor | null {
   const separator = decoded.indexOf('|');
   if (separator === -1) return null;
   const createdAt = new Date(decoded.slice(0, separator));
+  if (Number.isNaN(createdAt.getTime())) return null;
   const id = decoded.slice(separator + 1);
   return { createdAt, id };
 }
