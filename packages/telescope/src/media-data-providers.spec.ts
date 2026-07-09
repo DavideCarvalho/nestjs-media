@@ -20,7 +20,9 @@ import { MEDIA_STORAGE_SHARED, MEDIA_STORE, MEDIA_UPLOAD_SESSIONS } from './medi
 function ctxWith(map: Map<unknown, unknown>): ExtensionContext {
   return {
     config: {} as ExtensionContext['config'],
-    moduleRef: { get: (token: unknown) => map.get(token) } as unknown as ExtensionContext['moduleRef'],
+    moduleRef: {
+      get: (token: unknown) => map.get(token),
+    } as unknown as ExtensionContext['moduleRef'],
   };
 }
 
@@ -197,7 +199,12 @@ describe('mediaDisksProvider', () => {
       defaultDisk: 'local',
       diskNames: () => ['local', 's3'],
       disk: (name: string) => ({
-        capabilities: { presign: name === 's3', multipart: name === 's3', publicUrls: true, list: true },
+        capabilities: {
+          presign: name === 's3',
+          multipart: name === 's3',
+          publicUrls: true,
+          list: true,
+        },
       }),
     };
     const result = (await mediaDisksProvider().resolve(
@@ -221,7 +228,10 @@ describe('mediaDisksProvider', () => {
 describe('mediaRecentUploads / mediaUploadsOverTime', () => {
   it('shape the recorded upload.* events into a table and series', async () => {
     const ctx = storageCtx([
-      { content: { event: 'upload.complete', id: 'u1', disk: 'local', key: 'k', size: 10 }, createdAt: new Date() },
+      {
+        content: { event: 'upload.complete', id: 'u1', disk: 'local', key: 'k', size: 10 },
+        createdAt: new Date(),
+      },
       { content: { event: 'upload.start', id: 'u2' }, createdAt: new Date() },
       { content: { event: 'upload.abort', id: 'u3' }, createdAt: new Date() },
     ]);

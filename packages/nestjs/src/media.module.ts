@@ -24,8 +24,8 @@ import {
   MEDIA_STORAGE_SHARED,
   MEDIA_STORE,
   MEDIA_TUS,
-  MEDIA_UPLOAD_SESSIONS,
   MEDIA_UPLOADS,
+  MEDIA_UPLOAD_SESSIONS,
 } from './tokens';
 
 export interface MediaTusOptions {

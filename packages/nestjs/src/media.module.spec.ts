@@ -104,9 +104,7 @@ describe('MediaModule', () => {
   it('forRootAsync exposes the StorageManager under MEDIA_STORAGE_SHARED, aliasing MEDIA_STORAGE', async () => {
     const s3 = new InMemoryDriver();
     const mod = await Test.createTestingModule({
-      imports: [
-        MediaModule.forRootAsync({ useFactory: () => ({ default: 's3', disks: { s3 } }) }),
-      ],
+      imports: [MediaModule.forRootAsync({ useFactory: () => ({ default: 's3', disks: { s3 } }) })],
     }).compile();
 
     expect(mod.get(MEDIA_STORAGE_SHARED, { strict: false })).toBe(mod.get(MEDIA_STORAGE));

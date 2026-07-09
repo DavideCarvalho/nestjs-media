@@ -1,4 +1,9 @@
-import type { MediaStore, StorageManager, UploadSession, UploadSessionStore } from '@dudousxd/nestjs-media-core';
+import type {
+  MediaStore,
+  StorageManager,
+  UploadSession,
+  UploadSessionStore,
+} from '@dudousxd/nestjs-media-core';
 import type { DataProvider, Entry, ExtensionContext } from '@dudousxd/nestjs-telescope';
 import { TELESCOPE_STORAGE } from '@dudousxd/nestjs-telescope';
 import { MEDIA_STORAGE_SHARED, MEDIA_STORE, MEDIA_UPLOAD_SESSIONS } from './media-tokens';
@@ -97,7 +102,12 @@ function timeBuckets<TExtra extends Record<string, number>>(
   return { rows, minTime, bucketSize };
 }
 
-function bucketIndexFor(entry: StorageEntry, minTime: number, bucketSize: number, count: number): number {
+function bucketIndexFor(
+  entry: StorageEntry,
+  minTime: number,
+  bucketSize: number,
+  count: number,
+): number {
   const at = entry.createdAt ? +new Date(entry.createdAt) : minTime;
   return Math.min(count - 1, Math.max(0, Math.floor((at - minTime) / bucketSize)));
 }
@@ -234,7 +244,10 @@ export function mediaRecentUploadsProvider(): DataProvider {
       const limit = Math.min(200, Math.max(10, Number(query?.limit ?? 50)));
       const rows = (await fetchMediaEntries(ctx))
         .filter((entry) => eventOf(entry).event === 'upload.complete')
-        .sort((a, b) => (b.createdAt ? +new Date(b.createdAt) : 0) - (a.createdAt ? +new Date(a.createdAt) : 0))
+        .sort(
+          (a, b) =>
+            (b.createdAt ? +new Date(b.createdAt) : 0) - (a.createdAt ? +new Date(a.createdAt) : 0),
+        )
         .slice(0, limit)
         .map((entry) => {
           const content = eventOf(entry);
