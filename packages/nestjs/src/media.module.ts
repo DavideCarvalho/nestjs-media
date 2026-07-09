@@ -21,7 +21,9 @@ import {
   MEDIA_DIRECT,
   MEDIA_LIBRARY,
   MEDIA_STORAGE,
+  MEDIA_STORE,
   MEDIA_TUS,
+  MEDIA_UPLOAD_SESSIONS,
   MEDIA_UPLOADS,
 } from './tokens';
 
@@ -129,6 +131,8 @@ export class MediaModule {
         { provide: MEDIA_TUS, useValue: tus },
         { provide: MEDIA_ATTACHMENTS, useValue: buildAttachments(manager, options) },
         { provide: MEDIA_DIRECT, useValue: direct },
+        { provide: MEDIA_STORE, useValue: options.store ?? null },
+        { provide: MEDIA_UPLOAD_SESSIONS, useValue: options.uploadSessions ?? null },
         MediaService,
       ],
       controllers: [
@@ -144,6 +148,8 @@ export class MediaModule {
         MEDIA_TUS,
         MEDIA_ATTACHMENTS,
         MEDIA_DIRECT,
+        MEDIA_STORE,
+        MEDIA_UPLOAD_SESSIONS,
       ],
     };
   }
@@ -185,6 +191,17 @@ export class MediaModule {
         useFactory: async (manager: StorageManager, ...args: any[]) =>
           buildDirect(manager, await options.useFactory(...args)),
       },
+      {
+        provide: MEDIA_STORE,
+        inject: options.inject ?? [],
+        useFactory: async (...args: any[]) => (await options.useFactory(...args)).store ?? null,
+      },
+      {
+        provide: MEDIA_UPLOAD_SESSIONS,
+        inject: options.inject ?? [],
+        useFactory: async (...args: any[]) =>
+          (await options.useFactory(...args)).uploadSessions ?? null,
+      },
       MediaService,
     ];
     return {
@@ -210,6 +227,8 @@ export class MediaModule {
         MEDIA_TUS,
         MEDIA_ATTACHMENTS,
         MEDIA_DIRECT,
+        MEDIA_STORE,
+        MEDIA_UPLOAD_SESSIONS,
       ],
     };
   }

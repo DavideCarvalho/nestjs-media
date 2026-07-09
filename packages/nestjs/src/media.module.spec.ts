@@ -1,4 +1,8 @@
-import { InMemoryDriver } from '@dudousxd/nestjs-media-testing';
+import {
+  InMemoryDriver,
+  InMemoryMediaStore,
+  InMemoryUploadSessionStore,
+} from '@dudousxd/nestjs-media-testing';
 import { NotImplementedException } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import { describe, expect, it } from 'vitest';
@@ -6,6 +10,7 @@ import { MediaDirectUploadController } from './media-direct-upload.controller';
 import { MediaUploadController } from './media-upload.controller';
 import { MediaModule } from './media.module';
 import { MediaService } from './media.service';
+import { MEDIA_STORE, MEDIA_UPLOAD_SESSIONS } from './tokens';
 
 describe('MediaModule', () => {
   it('forRoot wires MediaService with the configured disks', async () => {
@@ -50,5 +55,58 @@ describe('MediaModule', () => {
       NotImplementedException,
     );
     expect(() => direct.initiate({ key: 'x' })).toThrow(NotImplementedException);
+  });
+
+  it('forRoot exposes the store and upload-session store under stable Symbol.for tokens', async () => {
+    const store = new InMemoryMediaStore();
+    const sessions = new InMemoryUploadSessionStore();
+    const local = new InMemoryDriver();
+    const mod = await Test.createTestingModule({
+      imports: [
+        MediaModule.forRoot({
+          default: 'local',
+          disks: { local },
+          store,
+          uploadSessions: sessions,
+        }),
+      ],
+    }).compile();
+
+    expect(mod.get(MEDIA_STORE, { strict: false })).toBe(store);
+    expect(mod.get(MEDIA_UPLOAD_SESSIONS, { strict: false })).toBe(sessions);
+    // Symbol.for identity: an independently-declared symbol resolves the same provider.
+    expect(mod.get(Symbol.for('nestjs-media:store'), { strict: false })).toBe(store);
+    expect(mod.get(Symbol.for('nestjs-media:upload-sessions'), { strict: false })).toBe(sessions);
+  });
+
+  it('forRoot exposes null tokens when store/uploadSessions are not configured', async () => {
+    const local = new InMemoryDriver();
+    const mod = await Test.createTestingModule({
+      imports: [MediaModule.forRoot({ default: 'local', disks: { local } })],
+    }).compile();
+
+    expect(mod.get(MEDIA_STORE, { strict: false })).toBeNull();
+    expect(mod.get(MEDIA_UPLOAD_SESSIONS, { strict: false })).toBeNull();
+  });
+
+  it('forRootAsync exposes the store and upload-session store under stable Symbol.for tokens', async () => {
+    const store = new InMemoryMediaStore();
+    const sessions = new InMemoryUploadSessionStore();
+    const local = new InMemoryDriver();
+    const mod = await Test.createTestingModule({
+      imports: [
+        MediaModule.forRootAsync({
+          useFactory: () => ({
+            default: 'local',
+            disks: { local },
+            store,
+            uploadSessions: sessions,
+          }),
+        }),
+      ],
+    }).compile();
+
+    expect(mod.get(MEDIA_STORE, { strict: false })).toBe(store);
+    expect(mod.get(MEDIA_UPLOAD_SESSIONS, { strict: false })).toBe(sessions);
   });
 });
