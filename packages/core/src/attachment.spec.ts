@@ -81,6 +81,28 @@ describe('AttachmentManager', () => {
     expect(await disk.exists(att.variants.thumb?.path ?? '')).toBe(false);
   });
 
+  it('uses a provided id instead of a generated uuid, so re-creates overwrite the same key', async () => {
+    const input = {
+      fileName: 'af1800.pdf',
+      mimeType: 'application/pdf',
+      contents: Buffer.from('a'),
+    };
+
+    const first = await manager().createFromFile(input, {
+      keyPrefix: 'base/date/inspections',
+      id: 'insp-1',
+    });
+    expect(first.path).toBe('base/date/inspections/insp-1/af1800.pdf');
+
+    const second = await manager().createFromFile(
+      { ...input, contents: Buffer.from('bb') },
+      { keyPrefix: 'base/date/inspections', id: 'insp-1' },
+    );
+    expect(second.path).toBe('base/date/inspections/insp-1/af1800.pdf');
+    // Same key: only one object exists, holding the latest bytes.
+    expect((await disk.get(second.path)).toString()).toBe('bb');
+  });
+
   it('throws for an unknown variant on url()', async () => {
     const publicDisk = new InMemoryDriver();
     vi.spyOn(publicDisk, 'url').mockResolvedValue('https://cdn/x');

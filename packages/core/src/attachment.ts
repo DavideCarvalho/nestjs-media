@@ -75,6 +75,13 @@ export interface CreateAttachmentOptions {
   disk?: string;
   /** Key prefix on the disk. Default `attachments`. */
   keyPrefix?: string;
+  /**
+   * Deterministic id segment for the key, replacing the generated UUID. Use for
+   * idempotent overwrites (e.g. a durable step that re-renders the same file): a
+   * fixed id yields a fixed key that `put()` overwrites on retry, instead of
+   * orphaning the prior object under a fresh UUID.
+   */
+  id?: string;
   /** Image variants to generate eagerly (needs an ImageProcessor). */
   variants?: ConversionPreset[];
   /** Display name override (defaults to the file name). */
@@ -117,7 +124,7 @@ export class AttachmentManager {
   ): Promise<Attachment> {
     const disk = options.disk ?? this.storage.defaultDisk;
     const prefix = options.keyPrefix ?? this.keyPrefix;
-    const id = this.newId();
+    const id = options.id ?? this.newId();
     const dir = `${prefix}/${id}`;
     const path = `${dir}/${input.fileName}`;
 
