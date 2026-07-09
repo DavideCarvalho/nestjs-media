@@ -24,6 +24,25 @@ export interface MediaAggregateBucket {
 
 export type MediaAggregateResult = MediaAggregateBucket[];
 
+/** Filter for {@link MediaStore.list}. All fields AND together; omit for an unfiltered listing. */
+export interface MediaListFilter {
+  ownerType?: string;
+  collection?: string;
+  disk?: string;
+}
+
+/** Pagination for {@link MediaStore.list}. `cursor` is opaque (from a prior result); `limit` defaults to 50. */
+export interface MediaListPage {
+  cursor?: string;
+  limit?: number;
+}
+
+/** One page of {@link MediaStore.list}. `cursor` is absent on the final page. */
+export interface MediaListResult {
+  records: MediaRecord[];
+  cursor?: string;
+}
+
 /**
  * Persistence SPI for media records. Implemented per ORM as a POJO that receives
  * the connection in its constructor (see §3.10 of the ecosystem audit).
@@ -47,4 +66,10 @@ export interface MediaStore {
    * use. Optional — see {@link MediaStore.count}.
    */
   aggregate?(query: MediaAggregateQuery): Promise<MediaAggregateResult>;
+  /**
+   * Paginated global record listing across all owners, optionally filtered.
+   * Ordered by `(createdAt, id)` ascending with an opaque keyset cursor.
+   * Dashboard/admin use. Optional — see {@link MediaStore.count}.
+   */
+  list?(filter?: MediaListFilter, page?: MediaListPage): Promise<MediaListResult>;
 }
