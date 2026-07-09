@@ -8,6 +8,11 @@ import {
 } from '@dudousxd/nestjs-media-testing';
 import { afterEach, describe, expect, it } from 'vitest';
 import { AttachmentManager } from './attachment';
+import {
+  MEDIA_DIAGNOSTIC_EVENTS,
+  type MediaDiagnosticKey,
+  mediaDiagnosticKey,
+} from './diagnostics';
 import { MediaLibrary } from './media-library';
 import { ResumableUploadManager } from './resumable-upload';
 import { StorageManager } from './storage-manager';
@@ -139,5 +144,28 @@ describe('attachment diagnostics', () => {
       variants: [],
     });
     expect(deleted[0]?.payload).toMatchObject({ disk: 'local', path: 'attachments/att-1/me.png' });
+  });
+});
+
+describe('mediaDiagnosticKey', () => {
+  it('composes the media:<event> telescope key', () => {
+    expect(mediaDiagnosticKey('upload.progress')).toBe('media:upload.progress');
+    expect(mediaDiagnosticKey('attachment.create')).toBe('media:attachment.create');
+  });
+
+  it('produces the exact key the diagnostics-telescope bridge groups by (lib:event)', () => {
+    // The bridge's familyHash / exclude key is `${envelope.lib}:${envelope.event}`.
+    // For media the lib is always `media`, so the composed key must match that.
+    for (const event of MEDIA_DIAGNOSTIC_EVENTS) {
+      expect(mediaDiagnosticKey(event)).toBe(`media:${event}`);
+    }
+  });
+
+  it('is typed as MediaDiagnosticKey (media:<event> template literal)', () => {
+    const key: MediaDiagnosticKey = mediaDiagnosticKey('upload.complete');
+    expect(key).toBe('media:upload.complete');
+    // @ts-expect-error — a non-media prefix is not assignable to MediaDiagnosticKey.
+    const bad: MediaDiagnosticKey = 'billing:upload.complete';
+    expect(bad).toBe('billing:upload.complete');
   });
 });

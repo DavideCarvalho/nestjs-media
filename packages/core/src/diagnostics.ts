@@ -51,6 +51,25 @@ export const MEDIA_DIAGNOSTIC_EVENTS: readonly MediaDiagnosticEvent[] = [
   'attachment.delete',
 ];
 
+/**
+ * The telescope key for a media diagnostics channel — `media:<event>`. This is
+ * the key the `@dudousxd/nestjs-diagnostics-telescope` bridge matches its
+ * `exclude` option against, and the label its "Busiest events" panel shows.
+ * Distinct from the `aviary:media:<event>` channel name used on the wire.
+ */
+export type MediaDiagnosticKey = `media:${MediaDiagnosticEvent}`;
+
+/**
+ * Compose the telescope key for a media event, typed against {@link
+ * MediaDiagnosticEvent} so a misspelled event is a compile error. Since the
+ * library owns the `media` lib name, it owns the composed key too — feed the
+ * result to `nestjsDiagnosticsTelescope({ exclude: [...] })` to mute a noisy
+ * channel, e.g. `mediaDiagnosticKey('upload.progress')`.
+ */
+export function mediaDiagnosticKey(event: MediaDiagnosticEvent): MediaDiagnosticKey {
+  return `media:${event}`;
+}
+
 // --- Typed payloads, one per event, so subscribers know the shape ---
 
 export interface AttachPayload {
