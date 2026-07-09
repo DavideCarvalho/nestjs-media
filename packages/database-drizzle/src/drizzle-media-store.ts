@@ -1,5 +1,11 @@
-import type { MediaRecord, MediaStore } from '@dudousxd/nestjs-media-core';
-import { and, asc, eq, max, sql } from 'drizzle-orm';
+import type {
+  MediaAggregateQuery,
+  MediaAggregateResult,
+  MediaCountFilter,
+  MediaRecord,
+  MediaStore,
+} from '@dudousxd/nestjs-media-core';
+import { and, asc, count, eq, max, sql, sum } from 'drizzle-orm';
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
 import { mediaTable } from './media.schema';
 
@@ -29,6 +35,9 @@ export function createMediaTable(db: DB): void {
       updated_at integer NOT NULL
     )
   `);
+  db.run(sql`CREATE INDEX IF NOT EXISTS idx_media_collection ON media (collection)`);
+  db.run(sql`CREATE INDEX IF NOT EXISTS idx_media_disk ON media (disk)`);
+  db.run(sql`CREATE INDEX IF NOT EXISTS idx_media_created_at ON media (created_at)`);
 }
 
 /** MediaStore backed by Drizzle (better-sqlite3). POJO receiving the drizzle db. */
@@ -86,5 +95,31 @@ export class DrizzleMediaStore implements MediaStore {
       );
     const top = rows[0]?.max;
     return top == null ? 0 : Number(top) + 1;
+  }
+
+  async count(filter: MediaCountFilter = {}): Promise<number> {
+    const conditions = [
+      ...(filter.ownerType !== undefined ? [eq(mediaTable.ownerType, filter.ownerType)] : []),
+      ...(filter.collection !== undefined ? [eq(mediaTable.collection, filter.collection)] : []),
+      ...(filter.disk !== undefined ? [eq(mediaTable.disk, filter.disk)] : []),
+    ];
+    const rows = await this.db
+      .select({ value: count() })
+      .from(mediaTable)
+      .where(conditions.length ? and(...conditions) : undefined);
+    return Number(rows[0]?.value ?? 0);
+  }
+
+  async aggregate(query: MediaAggregateQuery): Promise<MediaAggregateResult> {
+    const column = query.groupBy === 'collection' ? mediaTable.collection : mediaTable.disk;
+    const rows = await this.db
+      .select({ key: column, count: count(), sumSize: sum(mediaTable.size) })
+      .from(mediaTable)
+      .groupBy(column);
+    return rows.map((row) => ({
+      key: row.key,
+      count: Number(row.count),
+      sumSize: query.sum === 'size' ? Number(row.sumSize ?? 0) : 0,
+    }));
   }
 }
