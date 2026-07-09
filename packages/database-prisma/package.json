@@ -1,6 +1,6 @@
 {
   "name": "@dudousxd/nestjs-media-database-prisma",
-  "version": "0.5.5",
+  "version": "0.5.6",
   "description": "nestjs-media Prisma media store (consumer-managed schema)",
   "license": "MIT",
   "type": "module",
