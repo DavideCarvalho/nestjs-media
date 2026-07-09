@@ -1,5 +1,12 @@
 # @dudousxd/nestjs-media-image-sharp
 
+## 0.5.7
+
+### Patch Changes
+
+- Updated dependencies [9901000]
+  - @dudousxd/nestjs-media-core@0.6.7
+
 ## 0.5.6
 
 ### Patch Changes

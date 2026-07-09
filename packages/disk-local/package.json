@@ -1,6 +1,6 @@
 {
   "name": "@dudousxd/nestjs-media-disk-local",
-  "version": "0.5.6",
+  "version": "0.5.7",
   "description": "nestjs-media local filesystem driver",
   "license": "MIT",
   "type": "module",

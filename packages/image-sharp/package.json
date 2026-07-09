@@ -1,6 +1,6 @@
 {
   "name": "@dudousxd/nestjs-media-image-sharp",
-  "version": "0.5.6",
+  "version": "0.5.7",
   "description": "nestjs-media image processor backed by sharp",
   "license": "MIT",
   "type": "module",
