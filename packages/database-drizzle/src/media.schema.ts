@@ -29,5 +29,10 @@ export const mediaTable = sqliteTable(
     collectionIdx: index('idx_media_collection').on(table.collection),
     diskIdx: index('idx_media_disk').on(table.disk),
     createdAtIdx: index('idx_media_created_at').on(table.createdAt),
+    collectionCreatedAtIdx: index('idx_media_collection_created_at').on(
+      table.collection,
+      table.createdAt,
+      table.id,
+    ),
   }),
 );

@@ -2,14 +2,36 @@ import type {
   MediaAggregateQuery,
   MediaAggregateResult,
   MediaCountFilter,
+  MediaListFilter,
+  MediaListPage,
+  MediaListResult,
   MediaRecord,
   MediaStore,
 } from '@dudousxd/nestjs-media-core';
-import { and, asc, count, eq, max, sql, sum } from 'drizzle-orm';
+import { and, asc, count, eq, gt, max, or, sql, sum } from 'drizzle-orm';
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
 import { mediaTable } from './media.schema';
 
 type DB = BetterSQLite3Database<Record<string, never>>;
+
+/** Opaque keyset cursor over `(createdAt, id)`. Mirrors the in-memory store's encoding. */
+function encodeListCursor(record: MediaRecord): string {
+  return Buffer.from(`${record.createdAt.toISOString()}|${record.id}`, 'utf8').toString('base64');
+}
+
+interface DecodedListCursor {
+  createdAt: Date;
+  id: string;
+}
+
+function decodeListCursor(cursor: string): DecodedListCursor | null {
+  const decoded = Buffer.from(cursor, 'base64').toString('utf8');
+  const separator = decoded.indexOf('|');
+  if (separator === -1) return null;
+  const createdAt = new Date(decoded.slice(0, separator));
+  const id = decoded.slice(separator + 1);
+  return { createdAt, id };
+}
 
 /**
  * Migration-first (§3.10): Drizzle has no auto-ensure. Run migrations with
@@ -38,6 +60,10 @@ export function createMediaTable(db: DB): void {
   db.run(sql`CREATE INDEX IF NOT EXISTS idx_media_collection ON media (collection)`);
   db.run(sql`CREATE INDEX IF NOT EXISTS idx_media_disk ON media (disk)`);
   db.run(sql`CREATE INDEX IF NOT EXISTS idx_media_created_at ON media (created_at)`);
+  db.run(sql`
+    CREATE INDEX IF NOT EXISTS idx_media_collection_created_at
+    ON media (collection, created_at, id)
+  `);
 }
 
 /** MediaStore backed by Drizzle (better-sqlite3). POJO receiving the drizzle db. */
@@ -121,5 +147,40 @@ export class DrizzleMediaStore implements MediaStore {
       count: Number(row.count),
       sumSize: query.sum === 'size' ? Number(row.sumSize ?? 0) : 0,
     }));
+  }
+
+  async list(filter: MediaListFilter = {}, page: MediaListPage = {}): Promise<MediaListResult> {
+    const limit = page.limit ?? 50;
+    const cursor = page.cursor ? decodeListCursor(page.cursor) : null;
+
+    const filterConditions = [
+      ...(filter.ownerType !== undefined ? [eq(mediaTable.ownerType, filter.ownerType)] : []),
+      ...(filter.collection !== undefined ? [eq(mediaTable.collection, filter.collection)] : []),
+      ...(filter.disk !== undefined ? [eq(mediaTable.disk, filter.disk)] : []),
+      ...(cursor
+        ? [
+            or(
+              gt(mediaTable.createdAt, cursor.createdAt),
+              and(eq(mediaTable.createdAt, cursor.createdAt), gt(mediaTable.id, cursor.id)),
+            ),
+          ]
+        : []),
+    ];
+
+    const rows = await this.db
+      .select()
+      .from(mediaTable)
+      .where(filterConditions.length ? and(...filterConditions) : undefined)
+      .orderBy(asc(mediaTable.createdAt), asc(mediaTable.id))
+      .limit(limit + 1);
+
+    const hasMore = rows.length > limit;
+    const records = (rows.slice(0, limit) as MediaRecord[]).map((record) => ({ ...record }));
+    const result: MediaListResult = { records };
+    const lastRecord = records.at(-1);
+    if (hasMore && lastRecord !== undefined) {
+      result.cursor = encodeListCursor(lastRecord);
+    }
+    return result;
   }
 }
