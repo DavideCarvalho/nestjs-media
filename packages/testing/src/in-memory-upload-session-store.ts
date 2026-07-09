@@ -11,8 +11,9 @@ export class InMemoryUploadSessionStore implements UploadSessionStore {
   private readonly parts = new Map<string, Map<number, string>>();
 
   async create(session: UploadSession): Promise<UploadSession> {
-    this.sessions.set(session.id, { ...session });
-    return { ...session };
+    const stored: UploadSession = { ...session, createdAt: session.createdAt ?? new Date() };
+    this.sessions.set(stored.id, { ...stored });
+    return { ...stored };
   }
 
   async get(id: string): Promise<UploadSession | null> {

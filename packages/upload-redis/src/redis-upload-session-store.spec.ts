@@ -189,6 +189,33 @@ describe('RedisUploadSessionStore', () => {
     await expect(noScanStore.list()).rejects.toThrow(/scan/);
   });
 
+  it('create() sets createdAt to now; get()/list() return it as a Date', async () => {
+    const before = Date.now();
+    const created = await store.create(makeSession({ id: 'ts' }));
+    const after = Date.now();
+    expect(created.createdAt).toBeInstanceOf(Date);
+    expect(created.createdAt?.getTime()).toBeGreaterThanOrEqual(before);
+    expect(created.createdAt?.getTime()).toBeLessThanOrEqual(after);
+
+    const fetched = await store.get('ts');
+    expect(fetched?.createdAt).toBeInstanceOf(Date);
+    expect(fetched?.createdAt?.getTime()).toBe(created.createdAt?.getTime());
+
+    const [listed] = await store.list({ keyPrefix: 'uploads/' });
+    expect(listed.createdAt).toBeInstanceOf(Date);
+    expect(listed.createdAt?.getTime()).toBe(created.createdAt?.getTime());
+  });
+
+  it('leaves createdAt undefined for an older session stored without the field', async () => {
+    const legacySession = makeSession({ id: 'legacy' });
+    // Simulate a pre-existing record written before createdAt existed: bypass
+    // create()'s defaulting and write the raw JSON directly.
+    await redis.set('media:upload:session:legacy', JSON.stringify(legacySession), 'EX', 86400);
+    const result = await store.get('legacy');
+    expect(result).not.toBeNull();
+    expect(result?.createdAt).toBeUndefined();
+  });
+
   it('round-trips multipartUploadId through get()', async () => {
     const session = makeSession({
       id: 's1',
