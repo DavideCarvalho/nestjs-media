@@ -12,7 +12,13 @@ import { defineConfig } from 'tsup';
 // (`new URL('../spa', import.meta.url)`) to locate the Vite SPA output (dist/spa). The SPA build
 // (dist/spa via vite) and the client types (dist/client via tsc) are driven separately by the
 // package `build` script.
-const external = ['@dudousxd/nestjs-media-core', '@nestjs/common', '@nestjs/core', 'rxjs', 'reflect-metadata'];
+const external = [
+  '@dudousxd/nestjs-media-core',
+  '@nestjs/common',
+  '@nestjs/core',
+  'rxjs',
+  'reflect-metadata',
+];
 
 export default defineConfig([
   {
