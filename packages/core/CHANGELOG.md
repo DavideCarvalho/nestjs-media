@@ -1,5 +1,11 @@
 # @dudousxd/nestjs-media-core
 
+## 0.6.5
+
+### Patch Changes
+
+- 1410953: Add optional `id` to `AttachmentManager.createFromFile` options: a caller-supplied id segment replaces the generated UUID in the key, enabling deterministic, idempotent-overwrite paths (e.g. durable steps that re-render the same file).
+
 ## 0.6.4
 
 ### Patch Changes
