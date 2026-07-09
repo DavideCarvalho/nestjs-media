@@ -26,6 +26,14 @@ export interface UploadSession {
   multipartUploadId?: string;
 }
 
+/** Optional filter for {@link UploadSessionStore.list}. */
+export interface UploadSessionListFilter {
+  /** Only sessions on this disk. */
+  disk?: string;
+  /** Only sessions whose `key` starts with this prefix. */
+  keyPrefix?: string;
+}
+
 /** Persistence SPI for resumable upload sessions (in-memory impl in `-testing`). */
 export interface UploadSessionStore {
   create(session: UploadSession): Promise<UploadSession>;
@@ -36,6 +44,12 @@ export interface UploadSessionStore {
   addPart?(id: string, part: MultipartPart): Promise<void>;
   /** All recorded parts for a session (unordered). Used by `complete()` + resume. */
   listParts?(id: string): Promise<MultipartPart[]>;
+  /**
+   * List currently-stored (in-progress) sessions, optionally filtered. Admin-facing
+   * (an "uploads in progress" view), not a hot path. Optional: stores that cannot
+   * enumerate (or a minimal impl) omit it, and callers degrade to an empty list.
+   */
+  list?(filter?: UploadSessionListFilter): Promise<UploadSession[]>;
 }
 
 export interface CreateUploadInput {

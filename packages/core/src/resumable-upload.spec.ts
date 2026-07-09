@@ -6,6 +6,11 @@ import {
   UploadSessionNotFoundError,
 } from './errors';
 import { ResumableUploadManager } from './resumable-upload';
+import type {
+  UploadSession,
+  UploadSessionListFilter,
+  UploadSessionStore,
+} from './resumable-upload';
 import { StorageManager } from './storage-manager';
 import type { MultipartPart, StorageDriver } from './types';
 
@@ -319,5 +324,28 @@ describe('ResumableUploadManager.writePart (parallel multipart)', () => {
     const after = await store.get(session.id);
     expect(after?.offset).toBe(0);
     expect(after?.parts).toBe(0);
+  });
+});
+
+describe('UploadSessionStore.list SPI', () => {
+  it('accepts a store that implements the optional list()', async () => {
+    const session: UploadSession = {
+      id: 'a',
+      disk: 'local',
+      key: 'k',
+      contentType: undefined,
+      size: 10,
+      offset: 5,
+      parts: 1,
+    };
+    const filter: UploadSessionListFilter = { disk: 'local' };
+    const store: UploadSessionStore = {
+      create: async (s) => s,
+      get: async () => session,
+      update: async (s) => s,
+      delete: async () => {},
+      list: async (f?: UploadSessionListFilter) => (f?.disk === 'local' ? [session] : []),
+    };
+    expect(await store.list?.(filter)).toEqual([session]);
   });
 });
