@@ -34,5 +34,13 @@ export const MediaEntity = new EntitySchema<MediaRecord>({
     createdAt: { type: String, transformer: isoDate },
     updatedAt: { type: String, transformer: isoDate },
   },
-  indices: [{ name: 'idx_media_owner', columns: ['ownerType', 'ownerId', 'collection'] }],
+  // Note: `ensureMediaSchema` only creates the table and adds missing columns
+  // non-destructively — it does NOT add indexes to an already-existing table, so
+  // pre-existing deployed tables need a manual `CREATE INDEX` migration for these.
+  indices: [
+    { name: 'idx_media_owner', columns: ['ownerType', 'ownerId', 'collection'] },
+    { name: 'idx_media_collection', columns: ['collection'] },
+    { name: 'idx_media_disk', columns: ['disk'] },
+    { name: 'idx_media_created_at', columns: ['createdAt'] },
+  ],
 });

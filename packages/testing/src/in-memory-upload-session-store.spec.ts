@@ -20,3 +20,30 @@ describe('InMemoryUploadSessionStore parts', () => {
     expect(await store.listParts('a')).toEqual([]);
   });
 });
+
+describe('InMemoryUploadSessionStore.list', () => {
+  it('list() returns all stored sessions', async () => {
+    const store = new InMemoryUploadSessionStore();
+    await store.create({ ...session('a'), disk: 'local' });
+    await store.create({ ...session('b'), disk: 'files' });
+    const all = await store.list();
+    expect(all.map((s) => s.id).sort()).toEqual(['a', 'b']);
+  });
+
+  it('list({ disk }) filters by disk', async () => {
+    const store = new InMemoryUploadSessionStore();
+    await store.create({ ...session('a'), disk: 'local' });
+    await store.create({ ...session('b'), disk: 'files' });
+    const filesOnly = await store.list({ disk: 'files' });
+    expect(filesOnly.map((s) => s.id)).toEqual(['b']);
+  });
+
+  it('list({ disk, keyPrefix }) filters by disk and key prefix', async () => {
+    const store = new InMemoryUploadSessionStore();
+    await store.create({ ...session('a'), disk: 'files', key: 'reports/2026/a' });
+    await store.create({ ...session('b'), disk: 'files', key: 'other/b' });
+    await store.create({ ...session('c'), disk: 'local', key: 'reports/2026/c' });
+    const scoped = await store.list({ disk: 'files', keyPrefix: 'reports/2026/' });
+    expect(scoped.map((s) => s.id)).toEqual(['a']);
+  });
+});

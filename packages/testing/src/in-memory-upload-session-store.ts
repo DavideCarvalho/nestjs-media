@@ -1,4 +1,9 @@
-import type { MultipartPart, UploadSession, UploadSessionStore } from '@dudousxd/nestjs-media-core';
+import type {
+  MultipartPart,
+  UploadSession,
+  UploadSessionListFilter,
+  UploadSessionStore,
+} from '@dudousxd/nestjs-media-core';
 
 /** In-memory UploadSessionStore for tests. */
 export class InMemoryUploadSessionStore implements UploadSessionStore {
@@ -35,5 +40,15 @@ export class InMemoryUploadSessionStore implements UploadSessionStore {
     return [...(this.parts.get(id) ?? new Map<number, string>()).entries()].map(
       ([partNumber, etag]) => ({ partNumber, etag }),
     );
+  }
+
+  async list(filter: UploadSessionListFilter = {}): Promise<UploadSession[]> {
+    return [...this.sessions.values()]
+      .filter(
+        (session) =>
+          (filter.disk === undefined || session.disk === filter.disk) &&
+          (filter.keyPrefix === undefined || session.key.startsWith(filter.keyPrefix)),
+      )
+      .map((session) => ({ ...session }));
   }
 }

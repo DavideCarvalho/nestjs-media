@@ -1,4 +1,9 @@
-import type { MultipartPart, UploadSession, UploadSessionStore } from '@dudousxd/nestjs-media-core';
+import type {
+  MultipartPart,
+  UploadSession,
+  UploadSessionListFilter,
+  UploadSessionStore,
+} from '@dudousxd/nestjs-media-core';
 
 export interface MinimalRedis {
   get(key: string): Promise<string | null>;
@@ -15,14 +20,6 @@ export interface MinimalRedis {
   hgetall?(key: string): Promise<Record<string, string>>;
   /** Set a key TTL in seconds (ioredis signature). Optional — bounds orphaned part hashes. */
   expire?(key: string, seconds: number): Promise<unknown>;
-}
-
-/** Optional filter for {@link RedisUploadSessionStore.list}. */
-export interface UploadSessionListFilter {
-  /** Only sessions on this disk. */
-  disk?: string;
-  /** Only sessions whose `key` starts with this prefix. */
-  keyPrefix?: string;
 }
 
 export interface RedisUploadSessionStoreOptions {

@@ -11,6 +11,7 @@ datasource db {
   url      = env("PRISMA_PG_URL")
 }
 
+// Consumers must add matching @@index on collection, disk, createdAt for the media dashboard aggregates.
 model Media {
   id               String   @id
   ownerType        String
@@ -29,5 +30,8 @@ model Media {
   updatedAt        DateTime
 
   @@index([ownerType, ownerId, collection])
+  @@index([collection])
+  @@index([disk])
+  @@index([createdAt])
   @@map("media")
 }

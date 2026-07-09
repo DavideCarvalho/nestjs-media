@@ -22,4 +22,9 @@ export const MediaEntity = new EntitySchema<MediaRecord>({
     createdAt: { type: 'datetime' },
     updatedAt: { type: 'datetime' },
   },
+  indexes: [
+    { name: 'idx_media_collection', properties: ['collection'] },
+    { name: 'idx_media_disk', properties: ['disk'] },
+    { name: 'idx_media_created_at', properties: ['createdAt'] },
+  ],
 });

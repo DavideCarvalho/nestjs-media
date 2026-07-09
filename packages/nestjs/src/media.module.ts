@@ -21,8 +21,11 @@ import {
   MEDIA_DIRECT,
   MEDIA_LIBRARY,
   MEDIA_STORAGE,
+  MEDIA_STORAGE_SHARED,
+  MEDIA_STORE,
   MEDIA_TUS,
   MEDIA_UPLOADS,
+  MEDIA_UPLOAD_SESSIONS,
 } from './tokens';
 
 export interface MediaTusOptions {
@@ -124,11 +127,14 @@ export class MediaModule {
       module: MediaModule,
       providers: [
         { provide: MEDIA_STORAGE, useValue: manager },
+        { provide: MEDIA_STORAGE_SHARED, useExisting: MEDIA_STORAGE },
         { provide: MEDIA_LIBRARY, useValue: buildLibrary(manager, options) },
         { provide: MEDIA_UPLOADS, useValue: uploads },
         { provide: MEDIA_TUS, useValue: tus },
         { provide: MEDIA_ATTACHMENTS, useValue: buildAttachments(manager, options) },
         { provide: MEDIA_DIRECT, useValue: direct },
+        { provide: MEDIA_STORE, useValue: options.store ?? null },
+        { provide: MEDIA_UPLOAD_SESSIONS, useValue: options.uploadSessions ?? null },
         MediaService,
       ],
       controllers: [
@@ -139,11 +145,14 @@ export class MediaModule {
       exports: [
         MediaService,
         MEDIA_STORAGE,
+        MEDIA_STORAGE_SHARED,
         MEDIA_LIBRARY,
         MEDIA_UPLOADS,
         MEDIA_TUS,
         MEDIA_ATTACHMENTS,
         MEDIA_DIRECT,
+        MEDIA_STORE,
+        MEDIA_UPLOAD_SESSIONS,
       ],
     };
   }
@@ -155,6 +164,7 @@ export class MediaModule {
         inject: options.inject ?? [],
         useFactory: async (...args: any[]) => new StorageManager(await options.useFactory(...args)),
       },
+      { provide: MEDIA_STORAGE_SHARED, useExisting: MEDIA_STORAGE },
       {
         provide: MEDIA_LIBRARY,
         inject: [MEDIA_STORAGE, ...(options.inject ?? [])],
@@ -185,6 +195,17 @@ export class MediaModule {
         useFactory: async (manager: StorageManager, ...args: any[]) =>
           buildDirect(manager, await options.useFactory(...args)),
       },
+      {
+        provide: MEDIA_STORE,
+        inject: options.inject ?? [],
+        useFactory: async (...args: any[]) => (await options.useFactory(...args)).store ?? null,
+      },
+      {
+        provide: MEDIA_UPLOAD_SESSIONS,
+        inject: options.inject ?? [],
+        useFactory: async (...args: any[]) =>
+          (await options.useFactory(...args)).uploadSessions ?? null,
+      },
       MediaService,
     ];
     return {
@@ -205,11 +226,14 @@ export class MediaModule {
       exports: [
         MediaService,
         MEDIA_STORAGE,
+        MEDIA_STORAGE_SHARED,
         MEDIA_LIBRARY,
         MEDIA_UPLOADS,
         MEDIA_TUS,
         MEDIA_ATTACHMENTS,
         MEDIA_DIRECT,
+        MEDIA_STORE,
+        MEDIA_UPLOAD_SESSIONS,
       ],
     };
   }
