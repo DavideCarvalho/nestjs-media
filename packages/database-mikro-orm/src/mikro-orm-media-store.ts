@@ -1,4 +1,10 @@
-import type { MediaRecord, MediaStore } from '@dudousxd/nestjs-media-core';
+import type {
+  MediaAggregateQuery,
+  MediaAggregateResult,
+  MediaCountFilter,
+  MediaRecord,
+  MediaStore,
+} from '@dudousxd/nestjs-media-core';
 import type { EntityManager, MikroORM } from '@mikro-orm/core';
 import { MediaEntity } from './media.entity';
 
@@ -50,5 +56,31 @@ export class MikroOrmMediaStore implements MediaStore {
     const em = this.em.fork();
     const rows = await em.find(MediaEntity, { ownerType, ownerId, collection });
     return rows.reduce((max, r) => Math.max(max, r.order + 1), 0);
+  }
+
+  async count(filter: MediaCountFilter = {}): Promise<number> {
+    const em = this.em.fork();
+    return em.count(MediaEntity, {
+      ...(filter.ownerType !== undefined ? { ownerType: filter.ownerType } : {}),
+      ...(filter.collection !== undefined ? { collection: filter.collection } : {}),
+      ...(filter.disk !== undefined ? { disk: filter.disk } : {}),
+    });
+  }
+
+  async aggregate(query: MediaAggregateQuery): Promise<MediaAggregateResult> {
+    const em = this.em.fork();
+    const rows: Array<{ key: string; count: number | string; sumSize: number | string | null }> =
+      await em
+        .getConnection()
+        .execute<Array<{ key: string; count: number | string; sumSize: number | string | null }>>(
+          `select ${query.groupBy} as "key", count(*) as "count", sum(size) as "sumSize" from media group by ${query.groupBy}`,
+          [],
+          'all',
+        );
+    return rows.map((row) => ({
+      key: row.key,
+      count: Number(row.count),
+      sumSize: query.sum === 'size' ? Number(row.sumSize ?? 0) : 0,
+    }));
   }
 }
