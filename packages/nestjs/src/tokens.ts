@@ -11,3 +11,5 @@ export const MEDIA_DIRECT = Symbol('MEDIA_DIRECT');
 export const MEDIA_STORE = Symbol.for('nestjs-media:store');
 /** The configured `UploadSessionStore` (or `null`). Consumed by the media telescope dashboard. */
 export const MEDIA_UPLOAD_SESSIONS = Symbol.for('nestjs-media:upload-sessions');
+/** Alias for {@link MEDIA_STORAGE} (the `StorageManager`). Consumed by the media telescope dashboard. */
+export const MEDIA_STORAGE_SHARED = Symbol.for('nestjs-media:storage');

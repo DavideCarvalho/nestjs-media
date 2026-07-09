@@ -10,7 +10,7 @@ import { MediaDirectUploadController } from './media-direct-upload.controller';
 import { MediaUploadController } from './media-upload.controller';
 import { MediaModule } from './media.module';
 import { MediaService } from './media.service';
-import { MEDIA_STORE, MEDIA_UPLOAD_SESSIONS } from './tokens';
+import { MEDIA_STORAGE, MEDIA_STORAGE_SHARED, MEDIA_STORE, MEDIA_UPLOAD_SESSIONS } from './tokens';
 
 describe('MediaModule', () => {
   it('forRoot wires MediaService with the configured disks', async () => {
@@ -87,6 +87,29 @@ describe('MediaModule', () => {
 
     expect(mod.get(MEDIA_STORE, { strict: false })).toBeNull();
     expect(mod.get(MEDIA_UPLOAD_SESSIONS, { strict: false })).toBeNull();
+  });
+
+  it('forRoot exposes the StorageManager under MEDIA_STORAGE_SHARED, aliasing MEDIA_STORAGE', async () => {
+    const local = new InMemoryDriver();
+    const mod = await Test.createTestingModule({
+      imports: [MediaModule.forRoot({ default: 'local', disks: { local } })],
+    }).compile();
+
+    expect(mod.get(MEDIA_STORAGE_SHARED, { strict: false })).toBe(mod.get(MEDIA_STORAGE));
+    expect(mod.get(Symbol.for('nestjs-media:storage'), { strict: false })).toBe(
+      mod.get(MEDIA_STORAGE),
+    );
+  });
+
+  it('forRootAsync exposes the StorageManager under MEDIA_STORAGE_SHARED, aliasing MEDIA_STORAGE', async () => {
+    const s3 = new InMemoryDriver();
+    const mod = await Test.createTestingModule({
+      imports: [
+        MediaModule.forRootAsync({ useFactory: () => ({ default: 's3', disks: { s3 } }) }),
+      ],
+    }).compile();
+
+    expect(mod.get(MEDIA_STORAGE_SHARED, { strict: false })).toBe(mod.get(MEDIA_STORAGE));
   });
 
   it('forRootAsync exposes the store and upload-session store under stable Symbol.for tokens', async () => {
