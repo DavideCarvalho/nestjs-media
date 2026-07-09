@@ -24,6 +24,8 @@ export interface UploadSession {
   parts: number;
   /** S3 (or other native-multipart) upload id, when the target disk is multipart-capable. */
   multipartUploadId?: string;
+  /** When the session was created. Optional/additive — consumers (dashboard) omit age when absent. */
+  createdAt?: Date;
 }
 
 /** Optional filter for {@link UploadSessionStore.list}. */

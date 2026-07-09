@@ -33,5 +33,6 @@ model Media {
   @@index([collection])
   @@index([disk])
   @@index([createdAt])
+  @@index([collection, createdAt, id])
   @@map("media")
 }

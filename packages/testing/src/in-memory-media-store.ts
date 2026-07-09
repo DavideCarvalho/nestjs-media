@@ -2,9 +2,24 @@ import type {
   MediaAggregateQuery,
   MediaAggregateResult,
   MediaCountFilter,
+  MediaListFilter,
+  MediaListPage,
+  MediaListResult,
   MediaRecord,
   MediaStore,
 } from '@dudousxd/nestjs-media-core';
+
+/** Opaque keyset cursor over `(createdAt, id)`. */
+function encodeCursor(record: MediaRecord): string {
+  return Buffer.from(`${record.createdAt.toISOString()}|${record.id}`, 'utf8').toString('base64');
+}
+
+function decodeCursor(cursor: string): { createdAt: string; id: string } | null {
+  const decoded = Buffer.from(cursor, 'base64').toString('utf8');
+  const separator = decoded.indexOf('|');
+  if (separator === -1) return null;
+  return { createdAt: decoded.slice(0, separator), id: decoded.slice(separator + 1) };
+}
 
 /** In-memory MediaStore for tests and the reference store-conformance suite. */
 export class InMemoryMediaStore implements MediaStore {
@@ -65,5 +80,33 @@ export class InMemoryMediaStore implements MediaStore {
       buckets.set(key, bucket);
     }
     return [...buckets.values()];
+  }
+
+  async list(filter: MediaListFilter = {}, page: MediaListPage = {}): Promise<MediaListResult> {
+    const limit = page.limit ?? 50;
+    const after = page.cursor ? decodeCursor(page.cursor) : null;
+    const ordered = [...this.records.values()]
+      .filter(
+        (r) =>
+          (filter.ownerType === undefined || r.ownerType === filter.ownerType) &&
+          (filter.collection === undefined || r.collection === filter.collection) &&
+          (filter.disk === undefined || r.disk === filter.disk),
+      )
+      .sort((a, b) => {
+        const byDate = a.createdAt.getTime() - b.createdAt.getTime();
+        return byDate !== 0 ? byDate : a.id.localeCompare(b.id);
+      });
+    const start = after
+      ? ordered.findIndex(
+          (r) =>
+            r.createdAt.toISOString() > after.createdAt ||
+            (r.createdAt.toISOString() === after.createdAt && r.id > after.id),
+        )
+      : 0;
+    const window = start === -1 ? [] : ordered.slice(start, start + limit + 1);
+    const hasMore = window.length > limit;
+    const records = window.slice(0, limit).map((r) => ({ ...r }));
+    const last = records.at(-1);
+    return hasMore && last ? { records, cursor: encodeCursor(last) } : { records };
   }
 }

@@ -21,6 +21,26 @@ describe('InMemoryUploadSessionStore parts', () => {
   });
 });
 
+describe('InMemoryUploadSessionStore createdAt', () => {
+  it('create() sets createdAt to now; get()/list() return it as a Date', async () => {
+    const store = new InMemoryUploadSessionStore();
+    const before = Date.now();
+    const created = await store.create(session('a'));
+    const after = Date.now();
+    expect(created.createdAt).toBeInstanceOf(Date);
+    expect(created.createdAt?.getTime()).toBeGreaterThanOrEqual(before);
+    expect(created.createdAt?.getTime()).toBeLessThanOrEqual(after);
+
+    const fetched = await store.get('a');
+    expect(fetched?.createdAt).toBeInstanceOf(Date);
+    expect(fetched?.createdAt?.getTime()).toBe(created.createdAt?.getTime());
+
+    const [listed] = await store.list();
+    expect(listed.createdAt).toBeInstanceOf(Date);
+    expect(listed.createdAt?.getTime()).toBe(created.createdAt?.getTime());
+  });
+});
+
 describe('InMemoryUploadSessionStore.list', () => {
   it('list() returns all stored sessions', async () => {
     const store = new InMemoryUploadSessionStore();

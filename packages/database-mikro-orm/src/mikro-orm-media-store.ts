@@ -2,11 +2,33 @@ import type {
   MediaAggregateQuery,
   MediaAggregateResult,
   MediaCountFilter,
+  MediaListFilter,
+  MediaListPage,
+  MediaListResult,
   MediaRecord,
   MediaStore,
 } from '@dudousxd/nestjs-media-core';
-import type { EntityManager, MikroORM } from '@mikro-orm/core';
+import type { EntityManager, FilterQuery, MikroORM } from '@mikro-orm/core';
 import { MediaEntity } from './media.entity';
+
+/** Opaque keyset cursor over `(createdAt, id)`; matches the in-memory store's encoding. */
+function encodeListCursor(record: MediaRecord): string {
+  return Buffer.from(`${record.createdAt.toISOString()}|${record.id}`, 'utf8').toString('base64');
+}
+
+interface DecodedListCursor {
+  createdAt: Date;
+  id: string;
+}
+
+function decodeListCursor(cursor: string): DecodedListCursor | null {
+  const decoded = Buffer.from(cursor, 'base64').toString('utf8');
+  const separator = decoded.indexOf('|');
+  if (separator === -1) return null;
+  const createdAt = new Date(decoded.slice(0, separator));
+  if (Number.isNaN(createdAt.getTime())) return null;
+  return { createdAt, id: decoded.slice(separator + 1) };
+}
 
 /**
  * Non-destructive schema management (§3.10). MikroORM gets create + add-column for
@@ -82,5 +104,39 @@ export class MikroOrmMediaStore implements MediaStore {
       count: Number(row.count),
       sumSize: query.sum === 'size' ? Number(row.sumSize ?? 0) : 0,
     }));
+  }
+
+  async list(filter: MediaListFilter = {}, page: MediaListPage = {}): Promise<MediaListResult> {
+    const em = this.em.fork();
+    const limit = page.limit ?? 50;
+    const cursor = page.cursor !== undefined ? decodeListCursor(page.cursor) : null;
+
+    const where: FilterQuery<MediaRecord> = {
+      ...(filter.ownerType !== undefined ? { ownerType: filter.ownerType } : {}),
+      ...(filter.collection !== undefined ? { collection: filter.collection } : {}),
+      ...(filter.disk !== undefined ? { disk: filter.disk } : {}),
+      ...(cursor !== null
+        ? {
+            $or: [
+              { createdAt: { $gt: cursor.createdAt } },
+              { createdAt: cursor.createdAt, id: { $gt: cursor.id } },
+            ],
+          }
+        : {}),
+    };
+
+    const rows = await em.find(MediaEntity, where, {
+      orderBy: { createdAt: 'asc', id: 'asc' },
+      limit: limit + 1,
+    });
+
+    const hasMore = rows.length > limit;
+    const records = rows.slice(0, limit);
+    const last = records[records.length - 1];
+    const result: MediaListResult = { records };
+    if (hasMore && last !== undefined) {
+      result.cursor = encodeListCursor(last);
+    }
+    return result;
   }
 }

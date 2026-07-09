@@ -39,6 +39,7 @@ function isUploadSession(value: unknown): value is UploadSession {
   if (obj.size !== undefined && typeof obj.size !== 'number') return false;
   if (obj.multipartUploadId !== undefined && typeof obj.multipartUploadId !== 'string')
     return false;
+  if (obj.createdAt !== undefined && typeof obj.createdAt !== 'string') return false;
   return true;
 }
 
@@ -62,8 +63,9 @@ export class RedisUploadSessionStore implements UploadSessionStore {
   }
 
   async create(session: UploadSession): Promise<UploadSession> {
-    await this.redis.set(this.key(session.id), JSON.stringify(session), 'EX', this.ttlSeconds);
-    return { ...session };
+    const toStore: UploadSession = { ...session, createdAt: session.createdAt ?? new Date() };
+    await this.redis.set(this.key(toStore.id), JSON.stringify(toStore), 'EX', this.ttlSeconds);
+    return { ...toStore };
   }
 
   private deserialize(raw: string): UploadSession | null {
@@ -80,6 +82,7 @@ export class RedisUploadSessionStore implements UploadSessionStore {
       ...(parsed.multipartUploadId !== undefined
         ? { multipartUploadId: parsed.multipartUploadId }
         : {}),
+      ...(parsed.createdAt !== undefined ? { createdAt: new Date(parsed.createdAt) } : {}),
     };
     return session;
   }

@@ -100,5 +100,49 @@ export function runMediaStoreConformance(
       expect(diskMap.get('local')).toEqual({ key: 'local', count: 2, sumSize: 10 });
       expect(diskMap.get('s3')).toEqual({ key: 's3', count: 1, sumSize: 5 });
     });
+
+    it('list paginates by (createdAt, id) with a round-trip cursor', async () => {
+      const store = await makeStore();
+      if (typeof store.list !== 'function') return;
+      // Distinct createdAt so ordering is by date; ids intentionally out of insert order.
+      await store.save(makeRecord({ id: 'c', collection: 'gallery', createdAt: new Date(3000) }));
+      await store.save(makeRecord({ id: 'a', collection: 'gallery', createdAt: new Date(1000) }));
+      await store.save(makeRecord({ id: 'b', collection: 'gallery', createdAt: new Date(2000) }));
+      await store.save(makeRecord({ id: 'd', collection: 'avatar', createdAt: new Date(4000) }));
+
+      const page1 = await store.list({ collection: 'gallery' }, { limit: 2 });
+      expect(page1.records.map((r) => r.id)).toEqual(['a', 'b']);
+      const cursor = page1.cursor;
+      if (cursor === undefined) throw new Error('expected a cursor after the first page');
+
+      const page2 = await store.list({ collection: 'gallery' }, { limit: 2, cursor });
+      expect(page2.records.map((r) => r.id)).toEqual(['c']);
+      expect(page2.cursor).toBeUndefined();
+    });
+
+    it('list filters by disk and returns everything unfiltered', async () => {
+      const store = await makeStore();
+      if (typeof store.list !== 'function') return;
+      await store.save(makeRecord({ id: 'a', disk: 'local', createdAt: new Date(1000) }));
+      await store.save(makeRecord({ id: 'b', disk: 's3', createdAt: new Date(2000) }));
+      await store.save(makeRecord({ id: 'c', disk: 'local', createdAt: new Date(3000) }));
+
+      const onLocal = await store.list({ disk: 'local' }, { limit: 50 });
+      expect(onLocal.records.map((r) => r.id)).toEqual(['a', 'c']);
+
+      const everything = await store.list({}, { limit: 50 });
+      expect(everything.records).toHaveLength(3);
+      expect(everything.cursor).toBeUndefined();
+    });
+
+    it('list ignores a malformed cursor instead of throwing', async () => {
+      const store = await makeStore();
+      if (typeof store.list !== 'function') return;
+      await store.save(makeRecord({ id: 'a', createdAt: new Date(1000) }));
+      // A garbage cursor (no separator / not our encoding) must be treated as "no cursor" and
+      // list from the start, never surface a DB error.
+      const result = await store.list({}, { limit: 10, cursor: 'not-a-valid-cursor' });
+      expect(result.records.map((r) => r.id)).toEqual(['a']);
+    });
   });
 }

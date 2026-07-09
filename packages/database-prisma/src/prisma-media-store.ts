@@ -2,6 +2,9 @@ import type {
   MediaAggregateQuery,
   MediaAggregateResult,
   MediaCountFilter,
+  MediaListFilter,
+  MediaListPage,
+  MediaListResult,
   MediaRecord,
   MediaStore,
 } from '@dudousxd/nestjs-media-core';
@@ -11,6 +14,25 @@ import type {
 // `PrismaClientLike` (matches the canonical ecosystem prisma adapter). The adapter
 // never imports `@prisma/client` (§3.10: the prisma schema is consumer-managed).
 type Args = any;
+
+/** Opaque keyset cursor over `(createdAt, id)`; matches the other adapters' encoding. */
+function encodeListCursor(record: MediaRecord): string {
+  return Buffer.from(`${record.createdAt.toISOString()}|${record.id}`, 'utf8').toString('base64');
+}
+
+interface DecodedListCursor {
+  createdAt: Date;
+  id: string;
+}
+
+function decodeListCursor(cursor: string): DecodedListCursor | null {
+  const decoded = Buffer.from(cursor, 'base64').toString('utf8');
+  const separator = decoded.indexOf('|');
+  if (separator === -1) return null;
+  const createdAt = new Date(decoded.slice(0, separator));
+  if (Number.isNaN(createdAt.getTime())) return null;
+  return { createdAt, id: decoded.slice(separator + 1) };
+}
 
 /** Structural subset of the generated Prisma `media` delegate the store relies on. */
 export interface PrismaMediaDelegate {
@@ -93,5 +115,37 @@ export class PrismaMediaStore implements MediaStore {
         sumSize: query.sum === 'size' ? Number(row._sum.size ?? 0) : 0,
       };
     });
+  }
+
+  async list(filter: MediaListFilter = {}, page: MediaListPage = {}): Promise<MediaListResult> {
+    const limit = page.limit ?? 50;
+    const cursor = page.cursor !== undefined ? decodeListCursor(page.cursor) : null;
+
+    const rows = await this.prisma.media.findMany({
+      where: {
+        ...(filter.ownerType !== undefined ? { ownerType: filter.ownerType } : {}),
+        ...(filter.collection !== undefined ? { collection: filter.collection } : {}),
+        ...(filter.disk !== undefined ? { disk: filter.disk } : {}),
+        ...(cursor
+          ? {
+              OR: [
+                { createdAt: { gt: cursor.createdAt } },
+                { createdAt: cursor.createdAt, id: { gt: cursor.id } },
+              ],
+            }
+          : {}),
+      },
+      orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+      take: limit + 1,
+    });
+
+    const hasMore = rows.length > limit;
+    const records = rows.slice(0, limit);
+    const last = records[records.length - 1];
+    const result: MediaListResult = { records };
+    if (hasMore && last !== undefined) {
+      result.cursor = encodeListCursor(last);
+    }
+    return result;
   }
 }

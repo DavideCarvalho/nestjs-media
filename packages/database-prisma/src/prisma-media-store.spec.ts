@@ -15,7 +15,32 @@ function fakeClient(): PrismaClientLike & { rows: Map<string, MediaRecord> } {
     async findUnique({ where }) {
       return rows.get(where.id) ?? null;
     },
-    async findMany({ where, orderBy }) {
+    async findMany({ where, orderBy, take }) {
+      // `list()` orders by [{createdAt},{id}] (array); `listByOwner()` orders by a
+      // single `{order}` field — branch on shape to mirror both call sites.
+      if (Array.isArray(orderBy)) {
+        const matchesCursor = (r: MediaRecord): boolean => {
+          if (where.OR === undefined) return true;
+          return where.OR.some((clause) =>
+            clause.id !== undefined
+              ? r.createdAt.getTime() === clause.createdAt.getTime() && r.id > clause.id.gt
+              : r.createdAt.getTime() > clause.createdAt.gt.getTime(),
+          );
+        };
+        const list = [...rows.values()].filter(
+          (r) =>
+            (where.ownerType === undefined || r.ownerType === where.ownerType) &&
+            (where.collection === undefined || r.collection === where.collection) &&
+            (where.disk === undefined || r.disk === where.disk) &&
+            matchesCursor(r),
+        );
+        list.sort(
+          (a, b) =>
+            a.createdAt.getTime() - b.createdAt.getTime() ||
+            (a.id < b.id ? -1 : a.id > b.id ? 1 : 0),
+        );
+        return take !== undefined ? list.slice(0, take) : list;
+      }
       const list = [...rows.values()].filter(
         (r) =>
           r.ownerType === where.ownerType &&

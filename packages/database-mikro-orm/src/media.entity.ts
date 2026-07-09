@@ -26,5 +26,6 @@ export const MediaEntity = new EntitySchema<MediaRecord>({
     { name: 'idx_media_collection', properties: ['collection'] },
     { name: 'idx_media_disk', properties: ['disk'] },
     { name: 'idx_media_created_at', properties: ['createdAt'] },
+    { name: 'idx_media_collection_created_at_id', properties: ['collection', 'createdAt', 'id'] },
   ],
 });
