@@ -83,13 +83,41 @@ export const mediaConsoleClient = {
    *  embed previews that a cross-origin signed URL would download (PDFs) or that CORS would block. */
   objectRawUrl: (disk: string, key: string): string =>
     `${apiBase()}${withQuery(`/disks/${encodeURIComponent(disk)}/object/raw`, { key })}`,
-  /** Fetch an object's bytes as text (for CSV/JSON/text previews) through the inline proxy above. */
-  objectText: async (disk: string, key: string): Promise<string> => {
+  /** Read up to `maxBytes` of an object as text through the inline proxy, aborting the stream once the
+   *  budget is reached — so a many-MB CSV/text file is *sampled* (its head) without downloading the
+   *  whole thing. Returns the decoded text and the bytes actually read (compare to the object's size
+   *  to know whether it was truncated). Falls back to a full read when the body isn't streamable. */
+  objectTextHead: async (
+    disk: string,
+    key: string,
+    maxBytes: number,
+  ): Promise<{ text: string; bytesRead: number }> => {
     const response = await fetch(mediaConsoleClient.objectRawUrl(disk, key), {
       credentials: 'same-origin',
     });
     if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
-    return response.text();
+    if (!response.body) {
+      const text = await response.text();
+      return { text, bytesRead: text.length };
+    }
+    const reader = response.body.getReader();
+    const chunks: Uint8Array[] = [];
+    let bytesRead = 0;
+    while (bytesRead < maxBytes) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      chunks.push(value);
+      bytesRead += value.length;
+    }
+    // Stop the transfer if we bailed on the budget rather than EOF — don't pull the whole file down.
+    if (bytesRead >= maxBytes) await reader.cancel();
+    const merged = new Uint8Array(bytesRead);
+    let offset = 0;
+    for (const chunk of chunks) {
+      merged.set(chunk, offset);
+      offset += chunk.length;
+    }
+    return { text: new TextDecoder().decode(merged), bytesRead };
   },
   /** Fetch an object's raw bytes (for binary previews like XLSX) through the inline proxy. */
   objectBytes: async (disk: string, key: string): Promise<ArrayBuffer> => {
