@@ -246,6 +246,16 @@ describe('guards option — forRootAsync (static field)', () => {
   });
 });
 
+describe('inlined GUARDS_METADATA literal', () => {
+  // media.module.ts inlines '__guards__' instead of deep-importing
+  // @nestjs/common/constants (whose extensionless ESM emit breaks Node's strict
+  // resolver in consumers). This pins the literal to the real upstream constant
+  // so a Nest rename fails here instead of silently stamping a dead key.
+  it('matches @nestjs/common/constants', () => {
+    expect(GUARDS_METADATA).toBe('__guards__');
+  });
+});
+
 describe('guards metadata replaces rather than accumulates across registrations', () => {
   it('a later forRoot() call with fewer/no guards overrides an earlier one on the shared controller classes', () => {
     MediaModule.forRoot({ ...tusOptions(), guards: [TokenGuard, DenyGuard] });
