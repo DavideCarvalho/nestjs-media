@@ -498,12 +498,16 @@ export function DisksView({ route, actions }: { route: Route; actions: boolean }
             <p className="px-2 py-1 text-sm s-error">{describeError(disksQuery.error)}</p>
           )}
           {!disksQuery.isLoading && disks.length === 0 && <Notice>No disks configured.</Notice>}
-          <FolderTree
-            disks={disks}
-            selectedDisk={selectedDisk}
-            currentPrefix={prefix}
-            onNavigate={navigateToPrefix}
-          />
+          {/* Mount only once disks resolve, so the tree's initial expand captures the selected disk
+              (on first paint `selectedDisk` is still undefined and its root wouldn't auto-open). */}
+          {disks.length > 0 && (
+            <FolderTree
+              disks={disks}
+              selectedDisk={selectedDisk}
+              currentPrefix={prefix}
+              onNavigate={navigateToPrefix}
+            />
+          )}
         </Panel>
 
         <Panel className="p-3">
