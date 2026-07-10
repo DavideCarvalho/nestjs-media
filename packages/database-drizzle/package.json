@@ -1,6 +1,6 @@
 {
   "name": "@dudousxd/nestjs-media-database-drizzle",
-  "version": "0.5.7",
+  "version": "1.0.0",
   "description": "nestjs-media Drizzle media store (sqlite)",
   "license": "MIT",
   "type": "module",
