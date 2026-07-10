@@ -141,7 +141,7 @@ export class MediaConsoleService {
 
   async objectDetail(disk: string, key: string): Promise<ObjectDetailResponse> {
     const driver = this.diskOrThrow(disk);
-    const stat = driver.stat ? await driver.stat(key) : { size: await driver.size(key) };
+    const stat = await driver.stat(key);
     const url = driver.capabilities.presign
       ? await driver.temporaryUrl(key, URL_TTL_SECONDS)
       : await driver.url(key);
@@ -162,7 +162,7 @@ export class MediaConsoleService {
     key: string,
   ): Promise<{ stream: Readable; contentType: string; size: number }> {
     const driver = this.diskOrThrow(disk);
-    const stat = driver.stat ? await driver.stat(key) : { size: await driver.size(key) };
+    const stat = await driver.stat(key);
     const stream = await driver.stream(key);
     return { stream, contentType: stat.contentType ?? 'application/octet-stream', size: stat.size };
   }

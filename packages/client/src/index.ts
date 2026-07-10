@@ -9,6 +9,10 @@ export interface UploadMediaOptions {
   fetchImpl?: typeof fetch;
   /** Extra headers merged into every request (e.g. Authorization). */
   headers?: Record<string, string>;
+  /** Resolved fresh before every request (each PATCH/PUT part, the complete POST, and the
+   *  initiate call). Use for short-lived tokens that may expire mid-upload; merged over the
+   *  static `headers`, with these values winning on key conflict. */
+  getHeaders?: () => HeadersInit | Promise<HeadersInit>;
 }
 
 export interface UploadMediaResult {
@@ -20,6 +24,10 @@ export interface StreamChunksOptions {
   onProgress?: ((sent: number, total: number) => void) | undefined;
   fetchImpl?: typeof fetch | undefined;
   headers?: Record<string, string> | undefined;
+  /** Resolved fresh before every HEAD/PATCH request. Use for short-lived tokens that may
+   *  expire mid-upload; merged over the static `headers`, with these values winning on key
+   *  conflict. */
+  getHeaders?: (() => HeadersInit | Promise<HeadersInit>) | undefined;
   /** HEAD the session first and resume from its offset. Default true. */
   resume?: boolean | undefined;
   /** Per-chunk retry attempts. Default 3. */
@@ -34,6 +42,10 @@ export interface StreamChunksParallelOptions {
   onProgress?: ((sentBytes: number, total: number) => void) | undefined;
   fetchImpl?: typeof fetch | undefined;
   headers?: Record<string, string> | undefined;
+  /** Resolved fresh before every part PUT and the complete POST. Use for short-lived tokens
+   *  that may expire mid-upload; merged over the static `headers`, with these values winning
+   *  on key conflict. */
+  getHeaders?: (() => HeadersInit | Promise<HeadersInit>) | undefined;
   /** Per-part retry attempts. Default 3. */
   retries?: number | undefined;
   signal?: AbortSignal | undefined;
@@ -51,6 +63,27 @@ function encodeMetadata(meta: Record<string, string>): string {
   return Object.entries(meta)
     .map(([k, v]) => `${k} ${btoa(v)}`)
     .join(',');
+}
+
+function headersInitToRecord(headersInit: HeadersInit): Record<string, string> {
+  if (headersInit instanceof Headers) {
+    const record: Record<string, string> = {};
+    headersInit.forEach((value, key) => {
+      record[key] = value;
+    });
+    return record;
+  }
+  if (Array.isArray(headersInit)) return Object.fromEntries(headersInit);
+  return { ...headersInit };
+}
+
+/** Merges static headers with a fresh getHeaders() result; the dynamic values win on key conflict. */
+async function mergeHeaders(
+  staticHeaders: Record<string, string> | undefined,
+  getHeaders: (() => HeadersInit | Promise<HeadersInit>) | undefined,
+): Promise<Record<string, string>> {
+  if (!getHeaders) return { ...(staticHeaders ?? {}) };
+  return { ...(staticHeaders ?? {}), ...headersInitToRecord(await getHeaders()) };
 }
 
 async function withRetry<T>(attempts: number, fn: () => Promise<T>): Promise<T> {
@@ -75,6 +108,7 @@ export async function createSession(
     length: number;
     fetchImpl?: typeof fetch | undefined;
     headers?: Record<string, string> | undefined;
+    getHeaders?: (() => HeadersInit | Promise<HeadersInit>) | undefined;
   },
 ): Promise<{ location: string }> {
   const doFetch = opts.fetchImpl ?? fetch;
@@ -87,7 +121,7 @@ export async function createSession(
         filename: opts.filename,
         ...(opts.contentType ? { filetype: opts.contentType } : {}),
       }),
-      ...(opts.headers ?? {}),
+      ...(await mergeHeaders(opts.headers, opts.getHeaders)),
     },
   });
   const location = create.headers.get('Location');
@@ -110,7 +144,7 @@ export async function streamChunks(
   if (opts.resume !== false) {
     const head = await doFetch(location, {
       method: 'HEAD',
-      headers: { 'Tus-Resumable': '1.0.0', ...(opts.headers ?? {}) },
+      headers: { 'Tus-Resumable': '1.0.0', ...(await mergeHeaders(opts.headers, opts.getHeaders)) },
     });
     if (head.ok) offset = Number(head.headers.get('Upload-Offset') ?? '0') || 0;
   }
@@ -127,7 +161,7 @@ export async function streamChunks(
           'Tus-Resumable': '1.0.0',
           'Content-Type': 'application/offset+octet-stream',
           'Upload-Offset': String(offset),
-          ...(opts.headers ?? {}),
+          ...(await mergeHeaders(opts.headers, opts.getHeaders)),
         },
         body: slice,
         ...(opts.signal ? { signal: opts.signal } : {}),
@@ -182,7 +216,7 @@ export async function streamChunksParallel(
             method: 'PUT',
             headers: {
               'Content-Type': 'application/offset+octet-stream',
-              ...(opts.headers ?? {}),
+              ...(await mergeHeaders(opts.headers, opts.getHeaders)),
             },
             body: slice,
             signal: combinedSignal,
@@ -202,7 +236,7 @@ export async function streamChunksParallel(
 
   const done = await doFetch(`${location}/complete`, {
     method: 'POST',
-    headers: { ...(opts.headers ?? {}) },
+    headers: { ...(await mergeHeaders(opts.headers, opts.getHeaders)) },
     signal: combinedSignal,
   });
   assertOk(done, 'media upload: complete failed');
@@ -220,6 +254,7 @@ export async function uploadMedia(
     length: data.size,
     fetchImpl: options.fetchImpl,
     headers: options.headers,
+    getHeaders: options.getHeaders,
   });
   await streamChunks(location, data, {
     resume: false, // byte-identical to pre-split: no resume HEAD probe
@@ -227,6 +262,7 @@ export async function uploadMedia(
     onProgress: options.onProgress,
     fetchImpl: options.fetchImpl,
     headers: options.headers,
+    getHeaders: options.getHeaders,
   });
   return { location };
 }
@@ -243,6 +279,7 @@ export async function uploadMediaParallel(
     length: data.size,
     fetchImpl: options.fetchImpl,
     headers: options.headers,
+    getHeaders: options.getHeaders,
   });
   await streamChunksParallel(location, data, {
     chunkSize: options.chunkSize,
@@ -250,6 +287,7 @@ export async function uploadMediaParallel(
     onProgress: options.onProgress,
     fetchImpl: options.fetchImpl,
     headers: options.headers,
+    getHeaders: options.getHeaders,
   });
   return { location };
 }

@@ -97,9 +97,8 @@ export interface StorageDriver {
   copy(from: string, to: string): Promise<void>;
   move(from: string, to: string): Promise<void>;
   size(path: string): Promise<number>;
-  /** Object metadata (size/content-type/last-modified) without downloading the body.
-   *  Optional; all bundled drivers implement it. */
-  stat?(path: string): Promise<StatResult>;
+  /** Object metadata (size/content-type/last-modified) without downloading the body. */
+  stat(path: string): Promise<StatResult>;
   /** Delete many objects in one call. Optional; all bundled drivers implement it.
    *  An empty array is a no-op. */
   deleteMany?(paths: string[]): Promise<void>;
