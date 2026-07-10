@@ -13,6 +13,7 @@ import {
   Injectable,
   NotFoundException,
   Optional,
+  PayloadTooLargeException,
 } from '@nestjs/common';
 import type {
   CollectionsResponse,
@@ -37,6 +38,10 @@ import {
 /** Seconds a generated preview/download URL stays valid. */
 const URL_TTL_SECONDS = 300;
 const DEFAULT_PAGE_LIMIT = 50;
+/** Ceiling for a console (direct) upload — buffered in memory, so bounded to protect the heap. */
+const MAX_UPLOAD_BYTES = 100 * 1024 * 1024;
+/** Page size when sweeping a folder's objects for a recursive delete. */
+const DELETE_SWEEP_LIMIT = 1000;
 
 /** Last path segment of a folder prefix, ignoring a trailing slash. */
 function lastSegment(prefix: string): string {
@@ -168,9 +173,27 @@ export class MediaConsoleService {
   }
 
   /** Writes an object from a byte stream (a browser upload). The caller supplies the full key
-   *  (prefix + filename); an unknown disk 404s via {@link diskOrThrow}. Actions-gated. */
+   *  (prefix + filename); an unknown disk 404s via {@link diskOrThrow}. Actions-gated.
+   *
+   *  The request stream is buffered before the write: S3's PutObject needs a known Content-Length,
+   *  which a raw request stream doesn't carry, so passing the stream straight through fails. Bounded
+   *  at {@link MAX_UPLOAD_BYTES} so a runaway upload can't exhaust the pod's heap — larger files
+   *  belong on the resumable upload path, not this console convenience upload. */
   async putObject(disk: string, key: string, body: Readable, contentType?: string): Promise<void> {
-    await this.diskOrThrow(disk).put(key, body, contentType ? { contentType } : undefined);
+    const driver = this.diskOrThrow(disk);
+    const chunks: Buffer[] = [];
+    let total = 0;
+    for await (const chunk of body) {
+      const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+      total += buffer.length;
+      if (total > MAX_UPLOAD_BYTES) {
+        throw new PayloadTooLargeException(
+          `Upload exceeds the ${MAX_UPLOAD_BYTES / (1024 * 1024)} MB console limit.`,
+        );
+      }
+      chunks.push(buffer);
+    }
+    await driver.put(key, Buffer.concat(chunks), contentType ? { contentType } : undefined);
   }
 
   /** Creates a "folder" — a zero-byte marker object at `<prefix>/`, which S3-style listing surfaces
@@ -183,6 +206,27 @@ export class MediaConsoleService {
 
   async deleteObject(disk: string, key: string): Promise<void> {
     await this.diskOrThrow(disk).delete(key);
+  }
+
+  /** Recursively deletes a "folder": every object under `<prefix>/` (nested included) plus the
+   *  zero-byte marker itself. Sweeps the prefix without a delimiter (flat listing) so it reaches
+   *  nested keys, paginating until the disk reports no more. Actions-gated. */
+  async deleteFolder(disk: string, prefix: string): Promise<void> {
+    const driver = this.diskOrThrow(disk);
+    const normalized = prefix.replace(/^\/+/, '').replace(/\/+$/, '');
+    if (normalized === '') throw new BadRequestException('Folder is required');
+    const sweepPrefix = `${normalized}/`;
+    let cursor: string | undefined;
+    do {
+      const result = await driver.list(sweepPrefix, {
+        limit: DELETE_SWEEP_LIMIT,
+        ...(cursor ? { cursor } : {}),
+      });
+      for (const entry of result.files) {
+        await driver.delete(entry.key);
+      }
+      cursor = result.cursor;
+    } while (cursor);
   }
 
   async copyObject(disk: string, from: string, to: string): Promise<void> {

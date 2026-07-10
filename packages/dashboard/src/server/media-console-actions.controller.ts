@@ -74,6 +74,12 @@ export class MediaConsoleActionsController {
     return this.service.createFolder(disk, body.prefix);
   }
 
+  @Delete('disks/:disk/folder')
+  @HttpCode(204)
+  deleteFolder(@Param('disk') disk: string, @Query('prefix') prefix: string): Promise<void> {
+    return this.service.deleteFolder(disk, prefix);
+  }
+
   @Post('uploads/:id/abort')
   @HttpCode(204)
   abortUpload(@Param('id') id: string): Promise<void> {
