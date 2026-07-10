@@ -1,6 +1,16 @@
-export { MediaDashboardModule, type MediaDashboardOptions } from './media-dashboard.module.js';
+export {
+  MediaDashboardModule,
+  type MediaDashboardOptions,
+  type MediaDashboardAsyncOptions,
+} from './media-dashboard.module.js';
 export { MediaConsoleApiModule } from './media-console-api.module.js';
 export { MediaConsoleService } from './media-console.service.js';
+export type {
+  ConsoleAuthOptions,
+  LoginHook,
+  SessionHook,
+} from './auth/config.js';
+export type { ConsoleSessionUser } from './auth/session-cookie.js';
 export {
   MEDIA_STORAGE_SHARED,
   MEDIA_STORE,
