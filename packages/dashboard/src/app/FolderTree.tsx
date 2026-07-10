@@ -163,11 +163,16 @@ function FolderChildren({
   prefix,
   depth,
   context,
+  ancestorIds,
 }: {
   disk: string;
   prefix: string;
   depth: number;
   context: TreeContext;
+  /** Node ids of this level and every ancestor — a child repeating one is a cycle and is dropped, so
+   *  a self-referential listing (e.g. a stray leading-slash prefix that resolves back to root) can't
+   *  infinite-loop the tree. */
+  ancestorIds: ReadonlySet<string>;
 }): JSX.Element {
   const prefixParam = prefix === '' ? undefined : prefix;
   const query = useQuery({
@@ -195,7 +200,11 @@ function FolderChildren({
       </p>
     );
   }
-  const folders = query.data?.folders ?? [];
+  // Drop any child that repeats an ancestor's id — a self-referential listing would otherwise recurse
+  // forever (the row renders expanded because its id is already in the expanded set → lists itself → …).
+  const folders = (query.data?.folders ?? []).filter(
+    (folder) => !ancestorIds.has(nodeId(disk, folder.prefix)),
+  );
   if (folders.length === 0) {
     return (
       <p
@@ -215,6 +224,7 @@ function FolderChildren({
           folder={folder}
           depth={depth}
           context={context}
+          ancestorIds={ancestorIds}
         />
       ))}
     </ul>
@@ -227,11 +237,13 @@ function TreeFolder({
   folder,
   depth,
   context,
+  ancestorIds,
 }: {
   disk: string;
   folder: ObjectFolder;
   depth: number;
   context: TreeContext;
+  ancestorIds: ReadonlySet<string>;
 }): JSX.Element {
   const id = nodeId(disk, folder.prefix);
   const expanded = context.expanded.has(id);
@@ -252,7 +264,13 @@ function TreeFolder({
         dropProps={dropPropsFor(context, id, disk, folder.prefix)}
       />
       {expanded && (
-        <FolderChildren disk={disk} prefix={folder.prefix} depth={depth + 1} context={context} />
+        <FolderChildren
+          disk={disk}
+          prefix={folder.prefix}
+          depth={depth + 1}
+          context={context}
+          ancestorIds={new Set([...ancestorIds, id])}
+        />
       )}
     </li>
   );
@@ -292,7 +310,13 @@ function DiskRoot({ disk, context }: { disk: DiskInfo; context: TreeContext }): 
         }
       />
       {expanded && canList && (
-        <FolderChildren disk={disk.name} prefix="" depth={1} context={context} />
+        <FolderChildren
+          disk={disk.name}
+          prefix=""
+          depth={1}
+          context={context}
+          ancestorIds={new Set([id])}
+        />
       )}
     </li>
   );

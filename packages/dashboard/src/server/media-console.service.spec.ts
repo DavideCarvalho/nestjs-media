@@ -94,6 +94,27 @@ describe('MediaConsoleService', () => {
     expect(service.topology().hasStore).toBe(true);
   });
 
+  it('drops phantom empty-name folders (leading-slash CommonPrefix) from a listing', async () => {
+    const driver = {
+      capabilities: { presign: true, multipart: true, publicUrls: false, list: true },
+      list: async () => ({
+        // A stray leading-slash key makes S3 emit a "/" CommonPrefix (empty name) — the self-
+        // referential trap that froze the tree. It must not reach the client.
+        folders: ['/', 'bases/', 'templates/'],
+        files: [{ key: 'a.txt', name: 'a.txt', sizeBytes: 1, lastModified: null }],
+      }),
+    };
+    const storage = {
+      defaultDisk: 'primary',
+      diskNames: () => ['primary'],
+      disk: () => driver,
+    } as unknown as StorageManager;
+    const service = new MediaConsoleService(storage, null, null, true);
+
+    const result = await service.listObjects('primary', {});
+    expect(result.folders.map((folder) => folder.prefix)).toEqual(['bases/', 'templates/']);
+  });
+
   it('deletes a folder recursively: flat listing (empty delimiter), paginated, marker last', async () => {
     const listCalls: Array<{ prefix: string; delimiter?: string; cursor?: string }> = [];
     const deleted: string[] = [];

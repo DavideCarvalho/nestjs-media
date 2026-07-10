@@ -133,7 +133,14 @@ export class MediaConsoleService {
       limit: options.limit ?? DEFAULT_PAGE_LIMIT,
     });
     return {
-      folders: result.folders.map((prefix) => ({ name: lastSegment(prefix), prefix })),
+      // Drop phantom folders whose name is empty — a CommonPrefix of only slashes (`/`, `//`),
+      // produced by a stray key with a leading slash. The S3 driver normalizes such a prefix back to
+      // the root, so listing INTO one returns the root again (the phantom included) — a self-reference
+      // that infinite-loops the folder tree. Filtering it out removes the trap; those leading-slash
+      // keys are unreachable from the console anyway (the driver strips the leading slash).
+      folders: result.folders
+        .map((prefix) => ({ name: lastSegment(prefix), prefix }))
+        .filter((folder) => folder.name !== ''),
       // Drop the zero-byte "folder marker" (a key ending in `/`, whose name is empty after the
       // prefix) that `createFolder` writes — it's the folder itself, not a file inside it.
       files: result.files
