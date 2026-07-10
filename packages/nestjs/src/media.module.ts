@@ -62,18 +62,21 @@ export interface MediaModuleOptions extends StorageManagerOptions {
   /** Mount the direct (S3 multipart presign) upload controller. */
   direct?: MediaDirectOptions;
   /**
-   * Guard(s) applied to ALL THREE upload controllers (tus, multipart, direct) —
-   * whichever of them end up mounted. Third-party controller classes can't be
-   * annotated with `@UseGuards` by consumers, so without this option the upload
-   * surface is mounted with NO auth: anyone who can reach the app can upload.
-   * **Uploads are unauthenticated by default — set `guards` (or otherwise gate
-   * these routes, e.g. with a global guard) before exposing this module.**
+   * Guard(s) for the upload controllers. A plain array gates ALL THREE (tus,
+   * multipart, direct) uniformly; the per-surface object form gates each
+   * controller with its own list (upload surfaces often carry different
+   * sensitivity — e.g. session creation admin-only, part PUTs any authenticated
+   * user). Third-party controller classes can't be annotated with `@UseGuards`
+   * by consumers, so without this option the upload surface is mounted with NO
+   * auth: anyone who can reach the app can upload. **Uploads are
+   * unauthenticated by default — set `guards` (or otherwise gate these routes,
+   * e.g. with a global guard) before exposing this module.**
    *
    * Guard classes are added to this module's `providers` so Nest can DI-instantiate
    * them; if a guard has its own dependencies, pass the modules that provide them
    * via `imports`.
    */
-  guards?: Type<CanActivate>[];
+  guards?: Type<CanActivate>[] | MediaUploadGuards;
   /**
    * Modules providing dependencies for `guards` (or anything else you inject into
    * them). `forRoot` doesn't otherwise import anything, so this exists purely as
@@ -87,7 +90,9 @@ export interface MediaModuleAsyncOptions {
   inject?: any[];
   useFactory: (...args: any[]) => MediaModuleOptions | Promise<MediaModuleOptions>;
   /**
-   * Guard(s) applied to ALL THREE upload controllers. This is a STATIC field on
+   * Guard(s) for the upload controllers — plain array gates all three
+   * uniformly, the per-surface object form gates each controller with its own
+   * list (see `MediaModuleOptions.guards`). This is a STATIC field on
    * the async config object itself — NOT part of the options resolved by
    * `useFactory` — because controllers (and the enhancers bound to them) are
    * wired at module build time, before any async factory has run. If you need
@@ -98,7 +103,7 @@ export interface MediaModuleAsyncOptions {
    * Same default-open caveat as `MediaModuleOptions.guards`: **omitting this
    * leaves the upload surface unauthenticated.**
    */
-  guards?: Type<CanActivate>[];
+  guards?: Type<CanActivate>[] | MediaUploadGuards;
   /**
    * Static, build-time control over which upload controllers get mounted at
    * all. Unlike `guards`, this can't be deferred to the async factory either —
@@ -116,14 +121,38 @@ export interface MediaModuleAsyncOptions {
 }
 
 /**
- * The three upload controllers guards are stamped onto uniformly. Exported as a
- * fixed tuple so `applyGuards` and the module's `controllers` arrays can't drift.
+ * Per-surface guard lists. Each key gates one upload controller; an omitted key
+ * leaves that controller UNGUARDED (equivalent to `[]`), it does not fall back
+ * to some other surface's guards. Use the plain-array form of `guards` to gate
+ * all three uniformly.
  */
-const UPLOAD_CONTROLLERS: [
-  typeof MediaUploadController,
-  typeof MediaMultipartUploadController,
-  typeof MediaDirectUploadController,
-] = [MediaUploadController, MediaMultipartUploadController, MediaDirectUploadController];
+export interface MediaUploadGuards {
+  /** Guards for `MediaUploadController` (tus session create/HEAD/PATCH). */
+  tus?: Type<CanActivate>[];
+  /** Guards for `MediaMultipartUploadController` (part PUTs + /complete). */
+  multipart?: Type<CanActivate>[];
+  /** Guards for `MediaDirectUploadController` (S3 presign endpoints). */
+  direct?: Type<CanActivate>[];
+}
+
+function perSurfaceGuards(
+  guards: Type<CanActivate>[] | MediaUploadGuards | undefined,
+): Required<MediaUploadGuards> {
+  if (Array.isArray(guards)) return { tus: guards, multipart: guards, direct: guards };
+  return {
+    tus: guards?.tus ?? [],
+    multipart: guards?.multipart ?? [],
+    direct: guards?.direct ?? [],
+  };
+}
+
+/** Every distinct guard class across the three surfaces, for the module's `providers`. */
+function guardProviders(
+  guards: Type<CanActivate>[] | MediaUploadGuards | undefined,
+): Type<CanActivate>[] {
+  const bySurface = perSurfaceGuards(guards);
+  return [...new Set([...bySurface.tus, ...bySurface.multipart, ...bySurface.direct])];
+}
 
 /**
  * Stamp (or clear) `@UseGuards`-equivalent metadata on the three shared upload
@@ -150,10 +179,11 @@ const UPLOAD_CONTROLLERS: [
  * this repo's tests (vitest isolates test files, and within a file tests run
  * sequentially against a freshly-compiled `TestingModule` each time).
  */
-function applyGuards(guards: Type<CanActivate>[] | undefined): void {
-  for (const controller of UPLOAD_CONTROLLERS) {
-    Reflect.defineMetadata(GUARDS_METADATA, guards ?? [], controller);
-  }
+function applyGuards(guards: Type<CanActivate>[] | MediaUploadGuards | undefined): void {
+  const bySurface = perSurfaceGuards(guards);
+  Reflect.defineMetadata(GUARDS_METADATA, bySurface.tus, MediaUploadController);
+  Reflect.defineMetadata(GUARDS_METADATA, bySurface.multipart, MediaMultipartUploadController);
+  Reflect.defineMetadata(GUARDS_METADATA, bySurface.direct, MediaDirectUploadController);
 }
 
 function buildLibrary(manager: StorageManager, options: MediaModuleOptions): MediaLibrary | null {
@@ -232,7 +262,7 @@ export class MediaModule {
         { provide: MEDIA_DIRECT, useValue: direct },
         { provide: MEDIA_STORE, useValue: options.store ?? null },
         { provide: MEDIA_UPLOAD_SESSIONS, useValue: options.uploadSessions ?? null },
-        ...(options.guards ?? []),
+        ...guardProviders(options.guards),
         MediaService,
       ],
       controllers: [
@@ -304,7 +334,7 @@ export class MediaModule {
         useFactory: async (...args: any[]) =>
           (await options.useFactory(...args)).uploadSessions ?? null,
       },
-      ...(options.guards ?? []),
+      ...guardProviders(options.guards),
       MediaService,
     ];
     applyGuards(options.guards);
