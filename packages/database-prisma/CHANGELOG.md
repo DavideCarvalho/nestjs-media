@@ -1,6 +1,6 @@
 # @dudousxd/nestjs-media-database-prisma
 
-## 1.0.0
+## 0.5.8
 
 ### Patch Changes
 

@@ -1,6 +1,6 @@
 # @dudousxd/nestjs-media-disk-s3
 
-## 1.0.0
+## 0.6.9
 
 ### Patch Changes
 

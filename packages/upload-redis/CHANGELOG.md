@@ -1,6 +1,6 @@
 # @dudousxd/nestjs-media-upload-redis
 
-## 1.0.0
+## 0.7.8
 
 ### Patch Changes
 

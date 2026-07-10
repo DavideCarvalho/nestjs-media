@@ -1,6 +1,6 @@
 # @dudousxd/nestjs-media-database-drizzle
 
-## 1.0.0
+## 0.5.8
 
 ### Patch Changes
 
