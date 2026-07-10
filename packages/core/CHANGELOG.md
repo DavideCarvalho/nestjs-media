@@ -1,5 +1,14 @@
 # @dudousxd/nestjs-media-core
 
+## 0.7.0
+
+### Minor Changes
+
+- 74e9f4d: `StorageDriver.stat` is now a required method instead of optional. Every bundled driver
+  (disk-s3, disk-local, testing's in-memory driver) already implemented it, so this only affects
+  third-party `StorageDriver` implementations — add a `stat(path): Promise<StatResult>` method to
+  your driver to stay compatible. `deleteMany` remains optional.
+
 ## 0.6.7
 
 ### Patch Changes

@@ -1,5 +1,14 @@
 # @dudousxd/nestjs-media-dashboard
 
+## 0.2.1
+
+### Patch Changes
+
+- 74e9f4d: Call `driver.stat()` directly in the console service now that `StorageDriver.stat` is required — the
+  `driver.size()` fallback ternaries were dead code.
+- Updated dependencies [74e9f4d]
+  - @dudousxd/nestjs-media-core@0.7.0
+
 ## 0.2.0
 
 ### Minor Changes
