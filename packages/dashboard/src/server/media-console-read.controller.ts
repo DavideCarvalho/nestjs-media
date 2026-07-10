@@ -1,4 +1,4 @@
-import { Controller, Get, Inject, Param, Query, StreamableFile } from '@nestjs/common';
+import { Controller, Get, Inject, Param, Query, StreamableFile, UseGuards } from '@nestjs/common';
 import type {
   CollectionsResponse,
   DiskListResponse,
@@ -10,6 +10,7 @@ import type {
   UploadDetailResponse,
   UploadListResponse,
 } from '../client/types.js';
+import { MediaConsoleGuard } from './media-console.guard.js';
 import { MediaConsoleService } from './media-console.service.js';
 
 /** Parse an optional numeric query param; undefined when absent or not a finite number. */
@@ -22,7 +23,9 @@ function toLimit(value: string | undefined): number | undefined {
 /**
  * Read-only JSON API for the /media console. Bare `@Controller()` — the path prefix is applied by
  * `RouterModule` (set in `MediaDashboardModule.forRoot({ apiBasePath })`). Always mounted.
+ * `MediaConsoleGuard` gates it on a session cookie when the host configured `auth` (else a no-op).
  */
+@UseGuards(MediaConsoleGuard)
 @Controller()
 export class MediaConsoleReadController {
   constructor(@Inject(MediaConsoleService) private readonly service: MediaConsoleService) {}

@@ -1,5 +1,6 @@
 import { type DynamicModule, Module } from '@nestjs/common';
 import { RouterModule } from '@nestjs/core';
+import { type ConsoleAuthOptions, resolveConsoleAuth } from './auth/config.js';
 import { MediaConsoleApiModule } from './media-console-api.module.js';
 import { MediaDashboardUiController } from './media-dashboard-ui.controller.js';
 import { MEDIA_DASHBOARD_API_PATH, MEDIA_DASHBOARD_BASE_PATH } from './tokens.js';
@@ -21,6 +22,13 @@ export interface MediaDashboardOptions {
    * `false` — the read API is always available. Front the mount with your own guard either way.
    */
   actions?: boolean;
+  /**
+   * Gate the console (SPA + API) behind a built-in session-cookie login, telescope-style. Omit to
+   * leave the console open (front it with your own guard). When set, the SPA renders a login screen
+   * until a valid cookie exists; supply a `login(username, password)` and/or `session(request)`
+   * hook that returns a session user (or `null` to deny) — see {@link ConsoleAuthOptions}.
+   */
+  auth?: ConsoleAuthOptions;
 }
 
 /** Leading slash, no trailing slash. */
@@ -40,10 +48,11 @@ export class MediaDashboardModule {
     const basePath = normalize(options.basePath ?? '/media');
     const apiBasePath = normalize(options.apiBasePath ?? `${basePath}/api`);
     const actions = options.actions === true;
+    const auth = resolveConsoleAuth(options.auth);
     return {
       module: MediaDashboardModule,
       imports: [
-        MediaConsoleApiModule.register(actions),
+        MediaConsoleApiModule.register({ actions, auth, cookiePath: apiBasePath }),
         RouterModule.register([
           { path: basePath, module: MediaDashboardModule }, // the UI controller below
           { path: apiBasePath, module: MediaConsoleApiModule },
