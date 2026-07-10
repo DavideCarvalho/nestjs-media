@@ -17,6 +17,8 @@ import { MediaConsoleService } from './media-console.service.js';
 interface CopyMoveBody {
   from: string;
   to: string;
+  /** Destination disk for a cross-disk copy/move. Omitted → same disk as the source (`:disk`). */
+  toDisk?: string;
 }
 
 interface CreateFolderBody {
@@ -43,19 +45,25 @@ export class MediaConsoleActionsController {
   @Post('disks/:disk/copy')
   @HttpCode(204)
   copyObject(@Param('disk') disk: string, @Body() body: CopyMoveBody): Promise<void> {
-    return this.service.copyObject(disk, body.from, body.to);
+    return this.service.copyObject(disk, body.from, body.toDisk ?? disk, body.to);
   }
 
   @Post('disks/:disk/move')
   @HttpCode(204)
   moveObject(@Param('disk') disk: string, @Body() body: CopyMoveBody): Promise<void> {
-    return this.service.moveObject(disk, body.from, body.to);
+    return this.service.moveObject(disk, body.from, body.toDisk ?? disk, body.to);
   }
 
   @Post('disks/:disk/move-folder')
   @HttpCode(204)
   moveFolder(@Param('disk') disk: string, @Body() body: CopyMoveBody): Promise<void> {
-    return this.service.moveFolder(disk, body.from, body.to);
+    return this.service.moveFolder(disk, body.from, body.toDisk ?? disk, body.to);
+  }
+
+  @Post('disks/:disk/copy-folder')
+  @HttpCode(204)
+  copyFolder(@Param('disk') disk: string, @Body() body: CopyMoveBody): Promise<void> {
+    return this.service.copyFolder(disk, body.from, body.toDisk ?? disk, body.to);
   }
 
   /**

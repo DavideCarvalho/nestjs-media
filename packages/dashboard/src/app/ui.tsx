@@ -1,4 +1,4 @@
-import { type ReactNode, useEffect } from 'react';
+import { type ReactNode, useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 
 /** Shared surface primitives for the media console, mirroring the durable console's design system:
@@ -146,6 +146,93 @@ export function Button({
     >
       {children}
     </button>
+  );
+}
+
+/** A transient corner notification — the console's answer to `window.alert`, so a failed (or
+ *  succeeded) action reports without a blocking browser dialog. Success auto-dismisses quickly; an
+ *  error lingers longer and can be dismissed by hand. */
+export type ToastTone = 'ok' | 'error';
+export interface Toast {
+  id: number;
+  tone: ToastTone;
+  text: string;
+}
+
+/** Owns the live toast list. `pushToast` enqueues one (returns nothing — fire and forget from any
+ *  handler); `dismissToast` drops it early. Ids come from a monotonic ref so they never collide. */
+export function useToasts(): {
+  toasts: Toast[];
+  pushToast: (tone: ToastTone, text: string) => void;
+  dismissToast: (id: number) => void;
+} {
+  const [toasts, setToasts] = useState<Toast[]>([]);
+  const nextId = useRef(0);
+  const pushToast = useCallback((tone: ToastTone, text: string): void => {
+    const id = nextId.current;
+    nextId.current += 1;
+    setToasts((current) => [...current, { id, tone, text }]);
+  }, []);
+  const dismissToast = useCallback((id: number): void => {
+    setToasts((current) => current.filter((toast) => toast.id !== id));
+  }, []);
+  return { toasts, pushToast, dismissToast };
+}
+
+function ToastRow({
+  toast,
+  onDismiss,
+}: {
+  toast: Toast;
+  onDismiss: (id: number) => void;
+}): JSX.Element {
+  useEffect(() => {
+    const timer = window.setTimeout(
+      () => onDismiss(toast.id),
+      toast.tone === 'error' ? 6000 : 3500,
+    );
+    return () => window.clearTimeout(timer);
+  }, [toast.id, toast.tone, onDismiss]);
+  return (
+    <div
+      className={`rise mono flex items-start gap-2 rounded-md border px-3 py-2 text-[11px] shadow-2xl backdrop-blur-sm ${
+        toast.tone === 'error'
+          ? 'border-rose-500/40 bg-rose-500/15 text-rose-200'
+          : 'border-emerald-500/40 bg-emerald-500/15 text-emerald-200'
+      }`}
+    >
+      <span className="mt-px shrink-0" aria-hidden>
+        {toast.tone === 'error' ? '✕' : '✓'}
+      </span>
+      <span className="flex-1 break-words normal-case">{toast.text}</span>
+      <button
+        type="button"
+        aria-label="Dismiss"
+        onClick={() => onDismiss(toast.id)}
+        className="shrink-0 opacity-60 transition-opacity hover:opacity-100"
+      >
+        ✕
+      </button>
+    </div>
+  );
+}
+
+/** Renders the live toasts stacked in the bottom-right, over everything (including modals). */
+export function ToastStack({
+  toasts,
+  onDismiss,
+}: {
+  toasts: Toast[];
+  onDismiss: (id: number) => void;
+}): JSX.Element | null {
+  if (toasts.length === 0) return null;
+  return createPortal(
+    <div className="fixed right-4 bottom-4 z-[60] flex w-80 max-w-[calc(100vw-2rem)] flex-col gap-2">
+      {toasts.map((toast) => (
+        <ToastRow key={toast.id} toast={toast} onDismiss={onDismiss} />
+      ))}
+    </div>,
+    document.body,
   );
 }
 

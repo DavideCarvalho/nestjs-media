@@ -178,13 +178,18 @@ export const mediaConsoleClient = {
     getJson(`/library/${encodeURIComponent(id)}`),
   deleteObject: (disk: string, key: string): Promise<void> =>
     send('DELETE', withQuery(`/disks/${encodeURIComponent(disk)}/object`, { key })),
-  copyObject: (disk: string, from: string, to: string): Promise<void> =>
-    send('POST', `/disks/${encodeURIComponent(disk)}/copy`, { from, to }),
-  moveObject: (disk: string, from: string, to: string): Promise<void> =>
-    send('POST', `/disks/${encodeURIComponent(disk)}/move`, { from, to }),
-  /** Move a whole folder (recursively) from one prefix to another on the same disk. */
-  moveFolder: (disk: string, from: string, to: string): Promise<void> =>
-    send('POST', `/disks/${encodeURIComponent(disk)}/move-folder`, { from, to }),
+  /** Copy an object to `to` on `toDisk` (same disk, or across buckets when `toDisk` differs). */
+  copyObject: (fromDisk: string, from: string, toDisk: string, to: string): Promise<void> =>
+    send('POST', `/disks/${encodeURIComponent(fromDisk)}/copy`, { from, to, toDisk }),
+  /** Move an object to `to` on `toDisk` (same disk, or across buckets when `toDisk` differs). */
+  moveObject: (fromDisk: string, from: string, toDisk: string, to: string): Promise<void> =>
+    send('POST', `/disks/${encodeURIComponent(fromDisk)}/move`, { from, to, toDisk }),
+  /** Move a whole folder (recursively) to `to` on `toDisk` (same disk or across buckets). */
+  moveFolder: (fromDisk: string, from: string, toDisk: string, to: string): Promise<void> =>
+    send('POST', `/disks/${encodeURIComponent(fromDisk)}/move-folder`, { from, to, toDisk }),
+  /** Copy a whole folder (recursively) to `to` on `toDisk` (same disk or across buckets). */
+  copyFolder: (fromDisk: string, from: string, toDisk: string, to: string): Promise<void> =>
+    send('POST', `/disks/${encodeURIComponent(fromDisk)}/copy-folder`, { from, to, toDisk }),
   abortUpload: (id: string): Promise<void> =>
     send('POST', `/uploads/${encodeURIComponent(id)}/abort`),
   deleteLibraryRecord: (id: string): Promise<void> =>

@@ -9,7 +9,17 @@ import type {
 } from '../../client/types.js';
 import { DRAG_MIME, type DragItem, FolderTree } from '../FolderTree.js';
 import { Lightbox, type PreviewItem } from '../Lightbox.js';
-import { Button, GhostButton, Modal, Notice, Panel, formatBytes, formatDate } from '../ui.js';
+import {
+  Button,
+  GhostButton,
+  Modal,
+  Notice,
+  Panel,
+  ToastStack,
+  formatBytes,
+  formatDate,
+  useToasts,
+} from '../ui.js';
 import type { Route } from '../useHashRoute.js';
 
 interface AccumulatedPage {
@@ -27,11 +37,18 @@ interface Breadcrumb {
   prefix: string;
 }
 
+/** A file or a folder targeted by a copy/move/rename. A file is addressed by its full key; a folder
+ *  by its prefix (which carries a trailing slash from S3 listing). */
+type MoveTarget =
+  | { type: 'file'; key: string; name: string }
+  | { type: 'folder'; prefix: string; name: string };
+
 /** Which action dialog (if any) is open over the disk browser. */
 type Dialog =
   | { kind: 'upload' }
   | { kind: 'folder' }
-  | { kind: 'copy' | 'move'; key: string; name: string }
+  | { kind: 'copy' | 'move'; target: MoveTarget }
+  | { kind: 'rename'; target: MoveTarget }
   | { kind: 'delete-file'; key: string; name: string }
   | { kind: 'delete-folder'; prefix: string; name: string };
 
@@ -78,6 +95,19 @@ function startRowDrag(event: React.DragEvent, item: DragItem): void {
 function keyIn(prefix: string | undefined, name: string): string {
   const parent = prefix?.replace(/\/+$/, '');
   return parent ? `${parent}/${name}` : name;
+}
+
+/** The normalized source address of a move target: a file's full key, or a folder's prefix with the
+ *  trailing slash stripped (so it composes with {@link keyIn} like any other path). */
+function sourceAddress(target: MoveTarget): string {
+  return target.type === 'file' ? target.key : target.prefix.replace(/\/+$/, '');
+}
+
+/** The containing folder of an address, WITH a trailing slash (or '' at the root) — pass to
+ *  {@link keyIn} to place a renamed/moved sibling next to it. */
+function parentDirOf(address: string): string {
+  const lastSlash = address.lastIndexOf('/');
+  return lastSlash === -1 ? '' : address.slice(0, lastSlash + 1);
 }
 
 /** Modal file uploader: pick or drop files, see them listed, upload with per-file progress. */
@@ -271,28 +301,32 @@ function FolderDialog({
   );
 }
 
-/** Modal copy/move: a destination-key input pre-filled with the source key, so the user edits in
- *  place. Copy keeps the original; Move deletes it after a successful copy (server-side). */
+/** Modal copy/move for a file OR a folder. The destination is picked from a folder tree spanning ALL
+ *  disks (so you can relocate across buckets) plus an editable name. Same-disk uses the driver's
+ *  native copy/move; cross-disk streams the bytes through the server. Copy keeps the original; Move
+ *  removes it after the transfer. */
 function CopyMoveDialog({
   kind,
-  diskInfo,
-  sourceKey,
+  disks,
+  sourceDisk,
+  target,
   onClose,
   onDone,
+  notify,
 }: {
   kind: 'copy' | 'move';
-  diskInfo: DiskInfo;
-  sourceKey: string;
+  disks: DiskInfo[];
+  sourceDisk: string;
+  target: MoveTarget;
   onClose: () => void;
-  onDone: () => Promise<void>;
+  onDone: (disk: string) => Promise<void>;
+  notify: (tone: 'ok' | 'error', text: string) => void;
 }): JSX.Element {
-  const disk = diskInfo.name;
-  const lastSlash = sourceKey.lastIndexOf('/');
-  const sourceName = lastSlash === -1 ? sourceKey : sourceKey.slice(lastSlash + 1);
-  const sourceDir = lastSlash === -1 ? '' : sourceKey.slice(0, lastSlash + 1);
-  // Destination is a picked folder (from the tree) + an editable filename — no free-text keys.
-  const [destPrefix, setDestPrefix] = useState(sourceDir);
-  const [fileName, setFileName] = useState(sourceName);
+  const source = sourceAddress(target);
+  // Destination is a picked disk + folder (from the tree) + an editable name — no free-text keys.
+  const [destDisk, setDestDisk] = useState(sourceDisk);
+  const [destPrefix, setDestPrefix] = useState(parentDirOf(source));
+  const [name, setName] = useState(target.name);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -301,22 +335,43 @@ function CopyMoveDialog({
     inputRef.current?.select();
   }, []);
 
+  const noun = target.type === 'folder' ? 'folder' : 'object';
   const verb = kind === 'copy' ? 'Copy' : 'Move';
-  const trimmedName = fileName.trim();
+  const trimmedName = name.trim();
   const destination = keyIn(destPrefix, trimmedName);
-  const unchanged = destination === sourceKey;
+  const sameDisk = destDisk === sourceDisk;
+  const unchanged = sameDisk && destination === source;
+  // Can't move/copy a folder into itself or a descendant (same disk only — the server enforces this
+  // too, but disabling gives immediate feedback).
+  const intoItself =
+    target.type === 'folder' &&
+    sameDisk &&
+    (destination === source || destination.startsWith(`${source}/`));
+  const blocked = trimmedName === '' || unchanged || intoItself;
 
   async function submit(): Promise<void> {
-    if (trimmedName === '' || unchanged) return;
+    if (blocked) return;
     setBusy(true);
     setError(null);
     try {
-      if (kind === 'copy') {
-        await mediaConsoleClient.copyObject(disk, sourceKey, destination);
+      if (target.type === 'folder') {
+        if (kind === 'copy') {
+          await mediaConsoleClient.copyFolder(sourceDisk, target.prefix, destDisk, destination);
+        } else {
+          await mediaConsoleClient.moveFolder(sourceDisk, target.prefix, destDisk, destination);
+        }
+      } else if (kind === 'copy') {
+        await mediaConsoleClient.copyObject(sourceDisk, target.key, destDisk, destination);
       } else {
-        await mediaConsoleClient.moveObject(disk, sourceKey, destination);
+        await mediaConsoleClient.moveObject(sourceDisk, target.key, destDisk, destination);
       }
-      await onDone();
+      // A move out of the source disk changes both listings; refresh whichever one differs too.
+      await onDone(sourceDisk);
+      if (!sameDisk) await onDone(destDisk);
+      notify(
+        'ok',
+        `${verb === 'Copy' ? 'Copied' : 'Moved'} ${target.name} to ${destDisk}/${destination}`,
+      );
       onClose();
     } catch (actionError) {
       setError(describeError(actionError));
@@ -326,7 +381,7 @@ function CopyMoveDialog({
 
   return (
     <Modal
-      title={`${verb} object`}
+      title={`${verb} ${noun}`}
       onClose={onClose}
       footer={
         <>
@@ -336,7 +391,7 @@ function CopyMoveDialog({
           <Button
             tone={kind === 'move' ? 'rose' : 'emerald'}
             onClick={submit}
-            disabled={busy || trimmedName === '' || unchanged}
+            disabled={busy || blocked}
           >
             {busy ? `${verb === 'Copy' ? 'Copying' : 'Moving'}…` : verb}
           </Button>
@@ -344,25 +399,122 @@ function CopyMoveDialog({
       }
     >
       <p className="mono mb-2 text-[11px] text-zinc-500">
-        From <span className="text-zinc-300">{sourceKey}</span>
+        From{' '}
+        <span className="text-zinc-300">
+          {sourceDisk}/{source}
+          {target.type === 'folder' ? '/' : ''}
+        </span>
       </p>
       <div className="mono mb-1 text-[10px] uppercase tracking-wider text-zinc-600">
         Destination folder
       </div>
       <div className="max-h-56 overflow-auto rounded-md border border-[var(--line)] bg-black/20 p-1">
         <FolderTree
-          disks={[diskInfo]}
-          selectedDisk={disk}
+          disks={disks}
+          selectedDisk={destDisk}
           currentPrefix={destPrefix}
-          onNavigate={(_navDisk, navPrefix) => setDestPrefix(navPrefix)}
+          onNavigate={(navDisk, navPrefix) => {
+            setDestDisk(navDisk);
+            setDestPrefix(navPrefix);
+          }}
         />
       </div>
       <label className="mono mt-3 flex flex-col gap-1 text-[10px] uppercase tracking-wider text-zinc-600">
         Name
         <input
           ref={inputRef}
-          value={fileName}
-          onChange={(event) => setFileName(event.target.value)}
+          value={name}
+          onChange={(event) => setName(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter') submit();
+          }}
+          className="mono rounded-md border border-[var(--line)] bg-black/30 px-3 py-2 text-sm normal-case tracking-normal text-zinc-100 focus:border-emerald-500/40 focus:outline-none"
+        />
+      </label>
+      <p className="mono mt-2 text-[10px] text-zinc-600">
+        To{' '}
+        <span className="text-zinc-400">
+          {destDisk}/{destination || '—'}
+        </span>
+        {unchanged && ' (same as source — pick a different folder or name)'}
+        {intoItself && ' (a folder cannot go into itself)'}
+      </p>
+      {error && <p className="mono mt-3 text-[11px] s-error">{error}</p>}
+    </Modal>
+  );
+}
+
+/** Modal rename-in-place for a file OR folder: a single name input, no tree. Keeps the item in its
+ *  current folder and disk, just under a new name (a same-disk move under the hood). */
+function RenameDialog({
+  disk,
+  target,
+  onClose,
+  onDone,
+  notify,
+}: {
+  disk: string;
+  target: MoveTarget;
+  onClose: () => void;
+  onDone: (disk: string) => Promise<void>;
+  notify: (tone: 'ok' | 'error', text: string) => void;
+}): JSX.Element {
+  const source = sourceAddress(target);
+  const parentDir = parentDirOf(source);
+  const [name, setName] = useState(target.name);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    inputRef.current?.select();
+  }, []);
+
+  const noun = target.type === 'folder' ? 'folder' : 'object';
+  const trimmedName = name.trim();
+  const destination = keyIn(parentDir, trimmedName);
+  const blocked = trimmedName === '' || destination === source;
+
+  async function submit(): Promise<void> {
+    if (blocked) return;
+    setBusy(true);
+    setError(null);
+    try {
+      if (target.type === 'folder') {
+        await mediaConsoleClient.moveFolder(disk, target.prefix, disk, destination);
+      } else {
+        await mediaConsoleClient.moveObject(disk, target.key, disk, destination);
+      }
+      await onDone(disk);
+      notify('ok', `Renamed ${target.name} to ${trimmedName}`);
+      onClose();
+    } catch (actionError) {
+      setError(describeError(actionError));
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Modal
+      title={`Rename ${noun}`}
+      onClose={onClose}
+      footer={
+        <>
+          <Button onClick={onClose} disabled={busy}>
+            Cancel
+          </Button>
+          <Button tone="emerald" onClick={submit} disabled={busy || blocked}>
+            {busy ? 'Renaming…' : 'Rename'}
+          </Button>
+        </>
+      }
+    >
+      <label className="mono flex flex-col gap-1 text-[10px] uppercase tracking-wider text-zinc-600">
+        New name
+        <input
+          ref={inputRef}
+          value={name}
+          onChange={(event) => setName(event.target.value)}
           onKeyDown={(event) => {
             if (event.key === 'Enter') submit();
           }}
@@ -371,7 +523,7 @@ function CopyMoveDialog({
       </label>
       <p className="mono mt-2 text-[10px] text-zinc-600">
         To <span className="text-zinc-400">{destination || '—'}</span>
-        {unchanged && ' (same as source — pick a different folder or name)'}
+        {target.type === 'folder' ? '/' : ''}
       </p>
       {error && <p className="mono mt-3 text-[11px] s-error">{error}</p>}
     </Modal>
@@ -398,6 +550,7 @@ export function DisksView({ route, actions }: { route: Route; actions: boolean }
   const [preview, setPreview] = useState<PreviewItem | null>(null);
   const [dialog, setDialog] = useState<Dialog | null>(null);
   const [dragOver, setDragOver] = useState(false);
+  const { toasts, pushToast, dismissToast } = useToasts();
 
   if (page.key !== pageKey) {
     setPage({ key: pageKey, folders: [], files: [], cursor: undefined, lastData: undefined });
@@ -453,7 +606,7 @@ export function DisksView({ route, actions }: { route: Route; actions: boolean }
       const detail = await mediaConsoleClient.object(disk, key);
       setPreview({ ...detail, disk, name });
     } catch (error) {
-      window.alert(`Failed to open "${key}": ${describeError(error)}`);
+      pushToast('error', `Failed to open "${key}": ${describeError(error)}`);
     } finally {
       setBusyKey(null);
     }
@@ -463,31 +616,29 @@ export function DisksView({ route, actions }: { route: Route; actions: boolean }
     await navigator.clipboard.writeText(key);
   }
 
-  /** Drop a dragged file/folder onto a tree node: move it under that node. Same-disk only — moving
-   *  across buckets needs server-side cross-disk copy, not yet available. No-ops when the drop lands
-   *  where the item already is. */
+  /** Drop a dragged file/folder onto a tree node: move it under that node — on the same disk or across
+   *  buckets. No-ops when the drop lands where the item already is. */
   async function handleTreeDrop(
     item: DragItem,
     targetDisk: string,
     targetPrefix: string,
   ): Promise<void> {
-    if (item.disk !== targetDisk) {
-      window.alert('Moving between buckets is not supported yet.');
-      return;
-    }
     const destination = keyIn(targetPrefix, item.name);
+    const sameDisk = item.disk === targetDisk;
     setBusyKey('__move__');
     try {
       if (item.kind === 'file') {
-        if (destination === item.key) return;
-        await mediaConsoleClient.moveObject(targetDisk, item.key, destination);
+        if (sameDisk && destination === item.key) return;
+        await mediaConsoleClient.moveObject(item.disk, item.key, targetDisk, destination);
       } else {
-        if (destination === item.prefix.replace(/\/+$/, '')) return;
-        await mediaConsoleClient.moveFolder(targetDisk, item.prefix, destination);
+        if (sameDisk && destination === item.prefix.replace(/\/+$/, '')) return;
+        await mediaConsoleClient.moveFolder(item.disk, item.prefix, targetDisk, destination);
       }
-      await invalidateObjects(targetDisk);
+      await invalidateObjects(item.disk);
+      if (!sameDisk) await invalidateObjects(targetDisk);
+      pushToast('ok', `Moved ${item.name} to ${targetDisk}/${destination}`);
     } catch (error) {
-      window.alert(`Move failed: ${describeError(error)}`);
+      pushToast('error', `Move failed: ${describeError(error)}`);
     } finally {
       setBusyKey(null);
     }
@@ -503,8 +654,9 @@ export function DisksView({ route, actions }: { route: Route; actions: boolean }
         await mediaConsoleClient.uploadObject(disk, keyIn(prefix, file.name), file);
       }
       await invalidateObjects(disk);
+      pushToast('ok', `Uploaded ${list.length === 1 ? list[0]?.name : `${list.length} files`}`);
     } catch (error) {
-      window.alert(`Upload failed: ${describeError(error)}`);
+      pushToast('error', `Upload failed: ${describeError(error)}`);
     } finally {
       setBusyKey(null);
     }
@@ -521,9 +673,10 @@ export function DisksView({ route, actions }: { route: Route; actions: boolean }
         await mediaConsoleClient.deleteFolder(disk, target.prefix);
       }
       await invalidateObjects(disk);
+      pushToast('ok', `Deleted ${target.name}`);
       setDialog(null);
     } catch (error) {
-      window.alert(`Failed to delete: ${describeError(error)}`);
+      pushToast('error', `Failed to delete: ${describeError(error)}`);
     } finally {
       setBusyKey(null);
     }
@@ -679,18 +832,62 @@ export function DisksView({ route, actions }: { route: Route; actions: boolean }
                         <td className="py-2 pr-2 text-zinc-700">—</td>
                         <td className="py-2 pr-2">
                           {actions && (
-                            <GhostButton
-                              tone="rose"
-                              onClick={() =>
-                                setDialog({
-                                  kind: 'delete-folder',
-                                  prefix: folder.prefix,
-                                  name: folder.name,
-                                })
-                              }
-                            >
-                              Delete
-                            </GhostButton>
+                            <div className="flex flex-wrap gap-1.5">
+                              <GhostButton
+                                onClick={() =>
+                                  setDialog({
+                                    kind: 'copy',
+                                    target: {
+                                      type: 'folder',
+                                      prefix: folder.prefix,
+                                      name: folder.name,
+                                    },
+                                  })
+                                }
+                              >
+                                Copy to…
+                              </GhostButton>
+                              <GhostButton
+                                onClick={() =>
+                                  setDialog({
+                                    kind: 'move',
+                                    target: {
+                                      type: 'folder',
+                                      prefix: folder.prefix,
+                                      name: folder.name,
+                                    },
+                                  })
+                                }
+                              >
+                                Move to…
+                              </GhostButton>
+                              <GhostButton
+                                onClick={() =>
+                                  setDialog({
+                                    kind: 'rename',
+                                    target: {
+                                      type: 'folder',
+                                      prefix: folder.prefix,
+                                      name: folder.name,
+                                    },
+                                  })
+                                }
+                              >
+                                Rename
+                              </GhostButton>
+                              <GhostButton
+                                tone="rose"
+                                onClick={() =>
+                                  setDialog({
+                                    kind: 'delete-folder',
+                                    prefix: folder.prefix,
+                                    name: folder.name,
+                                  })
+                                }
+                              >
+                                Delete
+                              </GhostButton>
+                            </div>
                           )}
                         </td>
                       </tr>
@@ -734,17 +931,33 @@ export function DisksView({ route, actions }: { route: Route; actions: boolean }
                               <>
                                 <GhostButton
                                   onClick={() =>
-                                    setDialog({ kind: 'copy', key: file.key, name: file.name })
+                                    setDialog({
+                                      kind: 'copy',
+                                      target: { type: 'file', key: file.key, name: file.name },
+                                    })
                                   }
                                 >
                                   Copy to…
                                 </GhostButton>
                                 <GhostButton
                                   onClick={() =>
-                                    setDialog({ kind: 'move', key: file.key, name: file.name })
+                                    setDialog({
+                                      kind: 'move',
+                                      target: { type: 'file', key: file.key, name: file.name },
+                                    })
                                   }
                                 >
                                   Move to…
+                                </GhostButton>
+                                <GhostButton
+                                  onClick={() =>
+                                    setDialog({
+                                      kind: 'rename',
+                                      target: { type: 'file', key: file.key, name: file.name },
+                                    })
+                                  }
+                                >
+                                  Rename
                                 </GhostButton>
                                 <GhostButton
                                   tone="rose"
@@ -804,13 +1017,24 @@ export function DisksView({ route, actions }: { route: Route; actions: boolean }
           onCreated={() => invalidateObjects(selectedDisk)}
         />
       )}
-      {selectedDisk && selectedDiskInfo && (dialog?.kind === 'copy' || dialog?.kind === 'move') && (
+      {selectedDisk && (dialog?.kind === 'copy' || dialog?.kind === 'move') && (
         <CopyMoveDialog
           kind={dialog.kind}
-          diskInfo={selectedDiskInfo}
-          sourceKey={dialog.key}
+          disks={disks}
+          sourceDisk={selectedDisk}
+          target={dialog.target}
           onClose={() => setDialog(null)}
-          onDone={() => invalidateObjects(selectedDisk)}
+          onDone={invalidateObjects}
+          notify={pushToast}
+        />
+      )}
+      {selectedDisk && dialog?.kind === 'rename' && (
+        <RenameDialog
+          disk={selectedDisk}
+          target={dialog.target}
+          onClose={() => setDialog(null)}
+          onDone={invalidateObjects}
+          notify={pushToast}
         />
       )}
       {selectedDisk && (dialog?.kind === 'delete-file' || dialog?.kind === 'delete-folder') && (
@@ -844,6 +1068,7 @@ export function DisksView({ route, actions }: { route: Route; actions: boolean }
       )}
 
       <Lightbox item={preview} onClose={() => setPreview(null)} />
+      <ToastStack toasts={toasts} onDismiss={dismissToast} />
     </section>
   );
 }
