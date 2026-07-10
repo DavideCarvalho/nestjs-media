@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { mediaConsoleClient } from '../../client/media-console-client.js';
 import type {
   DiskInfo,
@@ -8,7 +8,7 @@ import type {
   ObjectListResponse,
 } from '../../client/types.js';
 import { Lightbox, type PreviewItem } from '../Lightbox.js';
-import { Dot, GhostButton, Notice, Panel, formatBytes, formatDate } from '../ui.js';
+import { Button, Dot, GhostButton, Modal, Notice, Panel, formatBytes, formatDate } from '../ui.js';
 import type { Route } from '../useHashRoute.js';
 
 interface AccumulatedPage {
@@ -25,6 +25,13 @@ interface Breadcrumb {
   label: string;
   prefix: string;
 }
+
+/** Which action dialog (if any) is open over the disk browser. */
+type Dialog =
+  | { kind: 'upload' }
+  | { kind: 'folder' }
+  | { kind: 'delete-file'; key: string; name: string }
+  | { kind: 'delete-folder'; prefix: string; name: string };
 
 function breadcrumbsFor(prefix: string | undefined): Breadcrumb[] {
   if (!prefix) return [];
@@ -61,6 +68,202 @@ function describeError(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+/** The full object key for a name placed into `prefix`: the browsed prefix + the name. */
+function keyIn(prefix: string | undefined, name: string): string {
+  return prefix ? `${prefix}/${name}` : name;
+}
+
+/** Modal file uploader: pick or drop files, see them listed, upload with per-file progress. */
+function UploadDialog({
+  disk,
+  prefix,
+  onClose,
+  onUploaded,
+}: {
+  disk: string;
+  prefix: string | undefined;
+  onClose: () => void;
+  onUploaded: () => Promise<void>;
+}): JSX.Element {
+  const [files, setFiles] = useState<File[]>([]);
+  const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [dragOver, setDragOver] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  function addFiles(incoming: FileList | File[]): void {
+    setFiles((current) => [...current, ...Array.from(incoming)]);
+  }
+
+  async function upload(): Promise<void> {
+    if (files.length === 0) return;
+    setProgress({ done: 0, total: files.length });
+    setError(null);
+    try {
+      for (let index = 0; index < files.length; index++) {
+        const file = files[index];
+        if (!file) continue;
+        await mediaConsoleClient.uploadObject(disk, keyIn(prefix, file.name), file);
+        setProgress({ done: index + 1, total: files.length });
+      }
+      await onUploaded();
+      onClose();
+    } catch (uploadError) {
+      setError(describeError(uploadError));
+      setProgress(null);
+    }
+  }
+
+  const busy = progress !== null;
+  return (
+    <Modal
+      title={`Upload to ${prefix ? `/${prefix}` : disk}`}
+      onClose={onClose}
+      footer={
+        <>
+          <Button onClick={onClose} disabled={busy}>
+            Cancel
+          </Button>
+          <Button tone="emerald" onClick={upload} disabled={busy || files.length === 0}>
+            {busy ? `Uploading ${progress.done}/${progress.total}…` : 'Upload'}
+          </Button>
+        </>
+      }
+    >
+      {/* biome-ignore lint/a11y/useKeyWithClickEvents: click opens the native file picker; keyboard users reach it via the same hidden input's label semantics */}
+      <div
+        onClick={() => inputRef.current?.click()}
+        onDragOver={(event) => {
+          event.preventDefault();
+          setDragOver(true);
+        }}
+        onDragLeave={() => setDragOver(false)}
+        onDrop={(event) => {
+          event.preventDefault();
+          setDragOver(false);
+          addFiles(event.dataTransfer.files);
+        }}
+        className={`mono cursor-pointer rounded-md border border-dashed px-3 py-6 text-center text-xs transition-colors ${
+          dragOver
+            ? 'border-emerald-500/50 bg-emerald-500/5 text-emerald-300'
+            : 'border-[var(--line)] text-zinc-500 hover:text-zinc-300'
+        }`}
+      >
+        Drop files here, or click to choose
+        <input
+          ref={inputRef}
+          type="file"
+          multiple
+          className="hidden"
+          onChange={(event) => {
+            if (event.target.files) addFiles(event.target.files);
+            event.target.value = '';
+          }}
+        />
+      </div>
+      {files.length > 0 && (
+        <ul className="mt-3 max-h-48 space-y-1 overflow-auto">
+          {files.map((file, index) => (
+            <li
+              key={`${file.name}-${index}`}
+              className="mono flex items-center justify-between gap-2 rounded border border-[var(--line)] px-2 py-1 text-[11px]"
+            >
+              <span className="truncate text-zinc-300">{file.name}</span>
+              <span className="flex shrink-0 items-center gap-2">
+                <span className="tnum text-zinc-600">{formatBytes(file.size)}</span>
+                {!busy && (
+                  <button
+                    type="button"
+                    aria-label={`Remove ${file.name}`}
+                    onClick={() => setFiles((current) => current.filter((_, i) => i !== index))}
+                    className="text-zinc-600 hover:text-rose-400"
+                  >
+                    ✕
+                  </button>
+                )}
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+      {error && <p className="mono mt-3 text-[11px] s-error">{error}</p>}
+    </Modal>
+  );
+}
+
+/** Modal folder creator: a name input that writes a `<prefix>/name/` marker. */
+function FolderDialog({
+  disk,
+  prefix,
+  onClose,
+  onCreated,
+}: {
+  disk: string;
+  prefix: string | undefined;
+  onClose: () => void;
+  onCreated: () => Promise<void>;
+}): JSX.Element {
+  const [name, setName] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    inputRef.current?.focus();
+  }, []);
+
+  async function create(): Promise<void> {
+    const trimmed = name.trim();
+    if (trimmed === '') return;
+    setBusy(true);
+    setError(null);
+    try {
+      await mediaConsoleClient.createFolder(disk, keyIn(prefix, trimmed));
+      await onCreated();
+      onClose();
+    } catch (createError) {
+      setError(describeError(createError));
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Modal
+      title="New folder"
+      onClose={onClose}
+      footer={
+        <>
+          <Button onClick={onClose} disabled={busy}>
+            Cancel
+          </Button>
+          <Button tone="emerald" onClick={create} disabled={busy || name.trim() === ''}>
+            {busy ? 'Creating…' : 'Create'}
+          </Button>
+        </>
+      }
+    >
+      <label className="mono flex flex-col gap-1 text-[10px] uppercase tracking-wider text-zinc-600">
+        Folder name
+        <input
+          ref={inputRef}
+          value={name}
+          onChange={(event) => setName(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter') create();
+          }}
+          placeholder="reports"
+          className="mono rounded-md border border-[var(--line)] bg-black/30 px-3 py-2 text-sm normal-case tracking-normal text-zinc-100 focus:border-emerald-500/40 focus:outline-none"
+        />
+      </label>
+      <p className="mono mt-2 text-[10px] text-zinc-600">
+        Creates {prefix ? `/${prefix}/` : ''}
+        <span className="text-zinc-400">{name.trim() || 'name'}</span>/
+      </p>
+      {error && <p className="mono mt-3 text-[11px] s-error">{error}</p>}
+    </Modal>
+  );
+}
+
 export function DisksView({ route, actions }: { route: Route; actions: boolean }): JSX.Element {
   const queryClient = useQueryClient();
   const disksQuery = useQuery({ queryKey: ['disks'], queryFn: () => mediaConsoleClient.disks() });
@@ -79,9 +282,8 @@ export function DisksView({ route, actions }: { route: Route; actions: boolean }
   });
   const [busyKey, setBusyKey] = useState<string | null>(null);
   const [preview, setPreview] = useState<PreviewItem | null>(null);
-  const [uploading, setUploading] = useState(false);
+  const [dialog, setDialog] = useState<Dialog | null>(null);
   const [dragOver, setDragOver] = useState(false);
-  const fileInputRef = useRef<HTMLInputElement>(null);
 
   if (page.key !== pageKey) {
     setPage({ key: pageKey, folders: [], files: [], cursor: undefined, lastData: undefined });
@@ -147,19 +349,6 @@ export function DisksView({ route, actions }: { route: Route; actions: boolean }
     await navigator.clipboard.writeText(key);
   }
 
-  async function handleDelete(disk: string, key: string): Promise<void> {
-    if (!window.confirm(`Delete "${key}"? This cannot be undone.`)) return;
-    setBusyKey(key);
-    try {
-      await mediaConsoleClient.deleteObject(disk, key);
-      await invalidateObjects(disk);
-    } catch (error) {
-      window.alert(`Failed to delete "${key}": ${describeError(error)}`);
-    } finally {
-      setBusyKey(null);
-    }
-  }
-
   async function handleCopyOrMove(kind: 'copy' | 'move', disk: string, key: string): Promise<void> {
     const destination = window.prompt(`${kind === 'copy' ? 'Copy' : 'Move'} "${key}" to key:`, key);
     if (!destination || destination === key) return;
@@ -178,35 +367,39 @@ export function DisksView({ route, actions }: { route: Route; actions: boolean }
     }
   }
 
-  /** The full object key for a name dropped into the current folder: the browsed prefix + the name. */
-  function keyIn(name: string): string {
-    return prefix ? `${prefix}/${name}` : name;
-  }
-
-  async function handleUpload(disk: string, files: FileList | File[]): Promise<void> {
+  /** Quick drag-drop-to-panel upload (the modal is the click path). */
+  async function handleDropUpload(disk: string, files: FileList): Promise<void> {
     const list = Array.from(files);
     if (list.length === 0) return;
-    setUploading(true);
+    setBusyKey('__drop__');
     try {
       for (const file of list) {
-        await mediaConsoleClient.uploadObject(disk, keyIn(file.name), file);
+        await mediaConsoleClient.uploadObject(disk, keyIn(prefix, file.name), file);
       }
       await invalidateObjects(disk);
     } catch (error) {
       window.alert(`Upload failed: ${describeError(error)}`);
     } finally {
-      setUploading(false);
+      setBusyKey(null);
     }
   }
 
-  async function handleCreateFolder(disk: string): Promise<void> {
-    const name = window.prompt('New folder name:');
-    if (!name) return;
+  async function confirmDelete(disk: string): Promise<void> {
+    if (!dialog || (dialog.kind !== 'delete-file' && dialog.kind !== 'delete-folder')) return;
+    const target = dialog;
+    setBusyKey('__delete__');
     try {
-      await mediaConsoleClient.createFolder(disk, keyIn(name));
+      if (target.kind === 'delete-file') {
+        await mediaConsoleClient.deleteObject(disk, target.key);
+      } else {
+        await mediaConsoleClient.deleteFolder(disk, target.prefix);
+      }
       await invalidateObjects(disk);
+      setDialog(null);
     } catch (error) {
-      window.alert(`Failed to create folder: ${describeError(error)}`);
+      window.alert(`Failed to delete: ${describeError(error)}`);
+    } finally {
+      setBusyKey(null);
     }
   }
 
@@ -289,7 +482,7 @@ export function DisksView({ route, actions }: { route: Route; actions: boolean }
                   ? (event) => {
                       event.preventDefault();
                       setDragOver(false);
-                      handleUpload(selectedDisk, event.dataTransfer.files);
+                      handleDropUpload(selectedDisk, event.dataTransfer.files);
                     }
                   : undefined
               }
@@ -323,24 +516,10 @@ export function DisksView({ route, actions }: { route: Route; actions: boolean }
                 </nav>
                 {actions && (
                   <div className="flex shrink-0 items-center gap-1.5">
-                    <input
-                      ref={fileInputRef}
-                      type="file"
-                      multiple
-                      className="hidden"
-                      onChange={(event) => {
-                        if (event.target.files) handleUpload(selectedDisk, event.target.files);
-                        event.target.value = '';
-                      }}
-                    />
-                    <GhostButton
-                      tone="emerald"
-                      disabled={uploading}
-                      onClick={() => fileInputRef.current?.click()}
-                    >
-                      {uploading ? 'Uploading…' : '↑ Upload'}
+                    <GhostButton tone="emerald" onClick={() => setDialog({ kind: 'upload' })}>
+                      ↑ Upload
                     </GhostButton>
-                    <GhostButton onClick={() => handleCreateFolder(selectedDisk)}>
+                    <GhostButton onClick={() => setDialog({ kind: 'folder' })}>
                       + New folder
                     </GhostButton>
                   </div>
@@ -378,7 +557,22 @@ export function DisksView({ route, actions }: { route: Route; actions: boolean }
                         </td>
                         <td className="py-2 pr-2 text-zinc-700">—</td>
                         <td className="py-2 pr-2 text-zinc-700">—</td>
-                        <td className="py-2 pr-2 text-zinc-700">—</td>
+                        <td className="py-2 pr-2">
+                          {actions && (
+                            <GhostButton
+                              tone="rose"
+                              onClick={() =>
+                                setDialog({
+                                  kind: 'delete-folder',
+                                  prefix: folder.prefix,
+                                  name: folder.name,
+                                })
+                              }
+                            >
+                              Delete
+                            </GhostButton>
+                          )}
+                        </td>
                       </tr>
                     ))}
                     {page.files.map((file) => (
@@ -417,8 +611,13 @@ export function DisksView({ route, actions }: { route: Route; actions: boolean }
                                 </GhostButton>
                                 <GhostButton
                                   tone="rose"
-                                  disabled={busyKey === file.key}
-                                  onClick={() => handleDelete(selectedDisk, file.key)}
+                                  onClick={() =>
+                                    setDialog({
+                                      kind: 'delete-file',
+                                      key: file.key,
+                                      name: file.name,
+                                    })
+                                  }
                                 >
                                   Delete
                                 </GhostButton>
@@ -451,6 +650,53 @@ export function DisksView({ route, actions }: { route: Route; actions: boolean }
           )}
         </Panel>
       </div>
+
+      {selectedDisk && dialog?.kind === 'upload' && (
+        <UploadDialog
+          disk={selectedDisk}
+          prefix={prefix}
+          onClose={() => setDialog(null)}
+          onUploaded={() => invalidateObjects(selectedDisk)}
+        />
+      )}
+      {selectedDisk && dialog?.kind === 'folder' && (
+        <FolderDialog
+          disk={selectedDisk}
+          prefix={prefix}
+          onClose={() => setDialog(null)}
+          onCreated={() => invalidateObjects(selectedDisk)}
+        />
+      )}
+      {selectedDisk && (dialog?.kind === 'delete-file' || dialog?.kind === 'delete-folder') && (
+        <Modal
+          title={dialog.kind === 'delete-folder' ? 'Delete folder' : 'Delete object'}
+          onClose={() => setDialog(null)}
+          footer={
+            <>
+              <Button onClick={() => setDialog(null)} disabled={busyKey === '__delete__'}>
+                Cancel
+              </Button>
+              <Button
+                tone="rose"
+                onClick={() => confirmDelete(selectedDisk)}
+                disabled={busyKey === '__delete__'}
+              >
+                {busyKey === '__delete__' ? 'Deleting…' : 'Delete'}
+              </Button>
+            </>
+          }
+        >
+          <p className="text-sm text-zinc-300">
+            Delete <span className="mono text-zinc-100">{dialog.name}</span>?
+          </p>
+          <p className="mono mt-2 text-[11px] text-zinc-600">
+            {dialog.kind === 'delete-folder'
+              ? 'Every object inside this folder is removed. This cannot be undone.'
+              : 'This cannot be undone.'}
+          </p>
+        </Modal>
+      )}
+
       <Lightbox item={preview} onClose={() => setPreview(null)} />
     </section>
   );
