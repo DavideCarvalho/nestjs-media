@@ -134,4 +134,57 @@ describe('MediaConsoleService', () => {
     // Nested files across both pages, then the folder marker itself, deleted last.
     expect(deleted).toEqual(['reports/deep/a.txt', 'reports/b.txt', 'reports/']);
   });
+
+  it('moves a folder recursively, preserving relative paths and relocating the marker', async () => {
+    const moves: Array<{ from: string; to: string }> = [];
+    const puts: string[] = [];
+    const deletes: string[] = [];
+    const driver = {
+      capabilities: { presign: true, multipart: true, publicUrls: false, list: true },
+      list: async (_prefix: string, options?: { cursor?: string }) => {
+        if (options?.cursor === undefined) {
+          return { folders: [], files: [{ key: 'bases/deep/a.txt', name: 'deep/a.txt' }] };
+        }
+        return { folders: [], files: [] };
+      },
+      move: async (from: string, to: string) => {
+        moves.push({ from, to });
+      },
+      put: async (key: string) => {
+        puts.push(key);
+      },
+      delete: async (key: string) => {
+        deletes.push(key);
+      },
+    };
+    const storage = {
+      defaultDisk: 'primary',
+      diskNames: () => ['primary'],
+      disk: () => driver,
+    } as unknown as StorageManager;
+    const service = new MediaConsoleService(storage, null, null, true);
+
+    await service.moveFolder('primary', 'bases', 'templates/bases');
+
+    // Each key relocates under the destination with its relative path intact.
+    expect(moves).toEqual([{ from: 'bases/deep/a.txt', to: 'templates/bases/deep/a.txt' }]);
+    // Destination marker written, source marker removed.
+    expect(puts).toEqual(['templates/bases/']);
+    expect(deletes).toEqual(['bases/']);
+  });
+
+  it('rejects moving a folder into itself or a descendant', async () => {
+    const driver = {
+      capabilities: { presign: true, multipart: true, publicUrls: false, list: true },
+    };
+    const storage = {
+      defaultDisk: 'primary',
+      diskNames: () => ['primary'],
+      disk: () => driver,
+    } as unknown as StorageManager;
+    const service = new MediaConsoleService(storage, null, null, true);
+    await expect(service.moveFolder('primary', 'bases', 'bases/sub')).rejects.toThrow(
+      /into itself/,
+    );
+  });
 });

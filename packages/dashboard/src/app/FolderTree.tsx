@@ -10,9 +10,33 @@ import { Dot } from './ui.js';
  * pane uses, so the cache is shared). Clicking any node navigates the main pane to it. The node
  * matching the current location is highlighted. Files are not shown here — the tree is folders only,
  * the right pane lists the selected folder's files.
+ *
+ * When `onDropMove` is supplied, every node is also a drop target: dragging a file/folder row from
+ * the main pane onto a node moves it there (see {@link DragItem}).
  */
 
 const INDENT_PER_DEPTH = 12;
+
+/** The drag payload a file/folder row hands to a tree drop target. Same-disk only — the drop handler
+ *  rejects a target on a different disk. */
+export const DRAG_MIME = 'application/x-media-console-item';
+
+export type DragItem =
+  | { kind: 'file'; disk: string; key: string; name: string }
+  | { kind: 'folder'; disk: string; prefix: string; name: string };
+
+/** Parse a {@link DragItem} out of a drop's DataTransfer, or null if it isn't one of ours. */
+export function readDragItem(dataTransfer: DataTransfer): DragItem | null {
+  const raw = dataTransfer.getData(DRAG_MIME);
+  if (!raw) return null;
+  const parsed: unknown = JSON.parse(raw);
+  if (typeof parsed !== 'object' || parsed === null) return null;
+  const item = parsed as Partial<DragItem>;
+  if (typeof item.disk !== 'string' || typeof item.name !== 'string') return null;
+  if (item.kind === 'file' && typeof item.key === 'string') return item as DragItem;
+  if (item.kind === 'folder' && typeof item.prefix === 'string') return item as DragItem;
+  return null;
+}
 
 /** A stable id for a node's expanded/collapsed state: disk + folder prefix. */
 function nodeId(disk: string, prefix: string): string {
@@ -31,10 +55,14 @@ interface TreeContext {
   expanded: Set<string>;
   toggle: (id: string) => void;
   onNavigate: (disk: string, prefix: string) => void;
+  onDropMove?: ((item: DragItem, targetDisk: string, targetPrefix: string) => void) | undefined;
+  dropTarget: string | null;
+  setDropTarget: (id: string | null) => void;
 }
 
-/** The chevron + label row shared by disk roots and folders. `hasChildren` decides whether the
- *  chevron is interactive; `onToggle` flips expansion without navigating. */
+/** The chevron + label row shared by disk roots and folders. Also the drop target when the tree is in
+ *  drag-and-drop mode: `dropProps` (supplied by the parent when `onDropMove` is set) wire the row's
+ *  drag-over highlight and drop handler. */
 function TreeRow({
   depth,
   expanded,
@@ -44,6 +72,7 @@ function TreeRow({
   icon,
   label,
   trailing,
+  dropProps,
 }: {
   depth: number;
   expanded: boolean;
@@ -53,13 +82,26 @@ function TreeRow({
   icon: string;
   label: string;
   trailing?: JSX.Element;
+  dropProps?:
+    | {
+        isTarget: boolean;
+        onDragOver: (event: React.DragEvent) => void;
+        onDragLeave: () => void;
+        onDrop: (event: React.DragEvent) => void;
+      }
+    | undefined;
 }): JSX.Element {
   return (
     <div
+      onDragOver={dropProps?.onDragOver}
+      onDragLeave={dropProps?.onDragLeave}
+      onDrop={dropProps?.onDrop}
       className={`mono group flex items-center gap-1 rounded-md border pr-1.5 text-xs transition-colors ${
-        active
-          ? 'border-[var(--line)] bg-zinc-900 text-zinc-100'
-          : 'border-transparent text-zinc-400 hover:bg-zinc-900/50 hover:text-zinc-200'
+        dropProps?.isTarget
+          ? 'border-emerald-500/60 bg-emerald-500/10 text-emerald-200'
+          : active
+            ? 'border-[var(--line)] bg-zinc-900 text-zinc-100'
+            : 'border-transparent text-zinc-400 hover:bg-zinc-900/50 hover:text-zinc-200'
       }`}
       style={{ paddingLeft: depth * INDENT_PER_DEPTH }}
     >
@@ -84,6 +126,34 @@ function TreeRow({
       {trailing}
     </div>
   );
+}
+
+/** Builds the drop handlers for a node at `(disk, prefix)`, or undefined when the tree isn't in
+ *  drag-and-drop mode. Not a hook — pure, safe to call inline. */
+function dropPropsFor(
+  context: TreeContext,
+  id: string,
+  disk: string,
+  prefix: string,
+): Parameters<typeof TreeRow>[0]['dropProps'] {
+  const { onDropMove } = context;
+  if (!onDropMove) return undefined;
+  return {
+    isTarget: context.dropTarget === id,
+    onDragOver: (event) => {
+      event.preventDefault();
+      context.setDropTarget(id);
+    },
+    onDragLeave: () => {
+      if (context.dropTarget === id) context.setDropTarget(null);
+    },
+    onDrop: (event) => {
+      event.preventDefault();
+      context.setDropTarget(null);
+      const item = readDragItem(event.dataTransfer);
+      if (item) onDropMove(item, disk, prefix);
+    },
+  };
 }
 
 /** The sub-folders of `(disk, prefix)`, fetched only when this level is rendered (i.e. its parent is
@@ -179,6 +249,7 @@ function TreeFolder({
         }}
         icon={expanded ? '▾' : '▸'}
         label={folder.name}
+        dropProps={dropPropsFor(context, id, disk, folder.prefix)}
       />
       {expanded && (
         <FolderChildren disk={disk} prefix={folder.prefix} depth={depth + 1} context={context} />
@@ -206,6 +277,7 @@ function DiskRoot({ disk, context }: { disk: DiskInfo; context: TreeContext }): 
         }}
         icon="🪣"
         label={disk.name}
+        dropProps={dropPropsFor(context, id, disk.name, '')}
         trailing={
           <span className="flex shrink-0 items-center gap-1.5">
             {disk.default && (
@@ -231,16 +303,19 @@ export function FolderTree({
   selectedDisk,
   currentPrefix,
   onNavigate,
+  onDropMove,
 }: {
   disks: DiskInfo[];
   selectedDisk: string | undefined;
   currentPrefix: string | undefined;
   onNavigate: (disk: string, prefix: string) => void;
+  onDropMove?: ((item: DragItem, targetDisk: string, targetPrefix: string) => void) | undefined;
 }): JSX.Element {
   // Open the selected disk's root by default so its top folders are visible without a click.
   const [expanded, setExpanded] = useState<Set<string>>(() =>
     selectedDisk ? new Set([nodeId(selectedDisk, '')]) : new Set(),
   );
+  const [dropTarget, setDropTarget] = useState<string | null>(null);
 
   function toggle(id: string): void {
     setExpanded((current) => {
@@ -254,7 +329,16 @@ export function FolderTree({
     });
   }
 
-  const context: TreeContext = { selectedDisk, currentPrefix, expanded, toggle, onNavigate };
+  const context: TreeContext = {
+    selectedDisk,
+    currentPrefix,
+    expanded,
+    toggle,
+    onNavigate,
+    onDropMove,
+    dropTarget,
+    setDropTarget,
+  };
   return (
     <ul className="space-y-0.5">
       {disks.map((disk) => (

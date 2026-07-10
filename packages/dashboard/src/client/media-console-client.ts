@@ -182,6 +182,9 @@ export const mediaConsoleClient = {
     send('POST', `/disks/${encodeURIComponent(disk)}/copy`, { from, to }),
   moveObject: (disk: string, from: string, to: string): Promise<void> =>
     send('POST', `/disks/${encodeURIComponent(disk)}/move`, { from, to }),
+  /** Move a whole folder (recursively) from one prefix to another on the same disk. */
+  moveFolder: (disk: string, from: string, to: string): Promise<void> =>
+    send('POST', `/disks/${encodeURIComponent(disk)}/move-folder`, { from, to }),
   abortUpload: (id: string): Promise<void> =>
     send('POST', `/uploads/${encodeURIComponent(id)}/abort`),
   deleteLibraryRecord: (id: string): Promise<void> =>
