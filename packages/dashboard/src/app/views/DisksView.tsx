@@ -7,8 +7,9 @@ import type {
   ObjectFolder,
   ObjectListResponse,
 } from '../../client/types.js';
+import { FolderTree } from '../FolderTree.js';
 import { Lightbox, type PreviewItem } from '../Lightbox.js';
-import { Button, Dot, GhostButton, Modal, Notice, Panel, formatBytes, formatDate } from '../ui.js';
+import { Button, GhostButton, Modal, Notice, Panel, formatBytes, formatDate } from '../ui.js';
 import type { Route } from '../useHashRoute.js';
 
 interface AccumulatedPage {
@@ -44,10 +45,6 @@ function breadcrumbsFor(prefix: string | undefined): Breadcrumb[] {
     crumbs.push({ label: segment, prefix: accumulated });
   }
   return crumbs;
-}
-
-function navigateToDisk(disk: string): void {
-  window.location.hash = `#/disks/${encodeURIComponent(disk)}`;
 }
 
 function navigateToPrefix(disk: string, prefix: string): void {
@@ -494,45 +491,19 @@ export function DisksView({ route, actions }: { route: Route; actions: boolean }
       <div className="grid grid-cols-[220px_1fr] gap-4">
         <Panel className="h-fit p-2">
           <h3 className="mono px-2 py-1 text-[10px] uppercase tracking-wider text-zinc-600">
-            disks
+            explorer
           </h3>
           {disksQuery.isLoading && <Notice>Loading…</Notice>}
           {disksQuery.isError && (
             <p className="px-2 py-1 text-sm s-error">{describeError(disksQuery.error)}</p>
           )}
           {!disksQuery.isLoading && disks.length === 0 && <Notice>No disks configured.</Notice>}
-          <ul className="space-y-0.5">
-            {disks.map((disk) => {
-              const active = disk.name === selectedDisk;
-              return (
-                <li key={disk.name}>
-                  <button
-                    type="button"
-                    onClick={() => navigateToDisk(disk.name)}
-                    className={`mono flex w-full items-center justify-between gap-2 rounded-md border px-2 py-1.5 text-left text-xs transition-colors ${
-                      active
-                        ? 'border-[var(--line)] bg-zinc-900 text-zinc-100'
-                        : 'border-transparent text-zinc-400 hover:bg-zinc-900/50 hover:text-zinc-200'
-                    }`}
-                  >
-                    <span className="truncate">{disk.name}</span>
-                    <span className="flex shrink-0 items-center gap-1.5">
-                      {disk.default && (
-                        <span className="text-[9px] uppercase tracking-wider text-zinc-600">
-                          default
-                        </span>
-                      )}
-                      {!disk.capabilities.list && (
-                        <span title="Listing unsupported on this disk">
-                          <Dot tone="warn" />
-                        </span>
-                      )}
-                    </span>
-                  </button>
-                </li>
-              );
-            })}
-          </ul>
+          <FolderTree
+            disks={disks}
+            selectedDisk={selectedDisk}
+            currentPrefix={prefix}
+            onNavigate={navigateToPrefix}
+          />
         </Panel>
 
         <Panel className="p-3">
