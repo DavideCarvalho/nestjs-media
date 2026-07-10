@@ -56,6 +56,18 @@ async function send(
   if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
 }
 
+/** POST raw bytes as `application/octet-stream` (a file upload) — the host's JSON parser leaves the
+ *  stream intact, so the server reads it straight from the request. */
+async function sendRaw(path: string, body: Blob): Promise<void> {
+  const response = await fetch(`${apiBase()}${path}`, {
+    method: 'POST',
+    credentials: 'same-origin',
+    headers: { 'Content-Type': 'application/octet-stream' },
+    body,
+  });
+  if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
+}
+
 /** Typed browser client for the /media console JSON API. Rides ambient cookies (host guards). */
 export const mediaConsoleClient = {
   topology: (): Promise<Topology> => getJson('/topology'),
@@ -67,6 +79,26 @@ export const mediaConsoleClient = {
     getJson(withQuery(`/disks/${encodeURIComponent(disk)}/objects`, params)),
   object: (disk: string, key: string): Promise<ObjectDetailResponse> =>
     getJson(withQuery(`/disks/${encodeURIComponent(disk)}/object`, { key })),
+  /** Same-origin URL that streams the object bytes inline (Content-Disposition: inline) — used to
+   *  embed previews that a cross-origin signed URL would download (PDFs) or that CORS would block. */
+  objectRawUrl: (disk: string, key: string): string =>
+    `${apiBase()}${withQuery(`/disks/${encodeURIComponent(disk)}/object/raw`, { key })}`,
+  /** Fetch an object's bytes as text (for CSV/JSON/text previews) through the inline proxy above. */
+  objectText: async (disk: string, key: string): Promise<string> => {
+    const response = await fetch(mediaConsoleClient.objectRawUrl(disk, key), {
+      credentials: 'same-origin',
+    });
+    if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
+    return response.text();
+  },
+  /** Fetch an object's raw bytes (for binary previews like XLSX) through the inline proxy. */
+  objectBytes: async (disk: string, key: string): Promise<ArrayBuffer> => {
+    const response = await fetch(mediaConsoleClient.objectRawUrl(disk, key), {
+      credentials: 'same-origin',
+    });
+    if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
+    return response.arrayBuffer();
+  },
   uploads: (params: { disk?: string; prefix?: string } = {}): Promise<UploadListResponse> =>
     getJson(withQuery('/uploads', params)),
   upload: (id: string): Promise<UploadDetailResponse> =>
@@ -87,6 +119,18 @@ export const mediaConsoleClient = {
     send('POST', `/uploads/${encodeURIComponent(id)}/abort`),
   deleteLibraryRecord: (id: string): Promise<void> =>
     send('DELETE', `/library/${encodeURIComponent(id)}`),
+  /** Upload a file to `key` on the disk (raw bytes; MIME preserved via the `type` param). */
+  uploadObject: (disk: string, key: string, file: Blob & { type: string }): Promise<void> =>
+    sendRaw(
+      withQuery(`/disks/${encodeURIComponent(disk)}/upload`, {
+        key,
+        ...(file.type ? { type: file.type } : {}),
+      }),
+      file,
+    ),
+  /** Create a folder (a zero-byte marker at `<prefix>/`) on the disk. */
+  createFolder: (disk: string, prefix: string): Promise<void> =>
+    send('POST', `/disks/${encodeURIComponent(disk)}/folder`, { prefix }),
 };
 
 export type MediaConsoleClient = typeof mediaConsoleClient;

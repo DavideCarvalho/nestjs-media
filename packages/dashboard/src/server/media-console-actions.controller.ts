@@ -1,9 +1,24 @@
-import { Body, Controller, Delete, HttpCode, Inject, Param, Post, Query } from '@nestjs/common';
+import type { Readable } from 'node:stream';
+import {
+  Body,
+  Controller,
+  Delete,
+  HttpCode,
+  Inject,
+  Param,
+  Post,
+  Query,
+  Req,
+} from '@nestjs/common';
 import { MediaConsoleService } from './media-console.service.js';
 
 interface CopyMoveBody {
   from: string;
   to: string;
+}
+
+interface CreateFolderBody {
+  prefix: string;
 }
 
 /**
@@ -31,6 +46,28 @@ export class MediaConsoleActionsController {
   @HttpCode(204)
   moveObject(@Param('disk') disk: string, @Body() body: CopyMoveBody): Promise<void> {
     return this.service.moveObject(disk, body.from, body.to);
+  }
+
+  /**
+   * Uploads a file to `key` on the disk. The body is the raw bytes sent as `application/octet-stream`
+   * so the host's JSON/urlencoded body parsers never consume the stream; the real MIME rides as the
+   * `type` query param and becomes the stored object's Content-Type. `@Req()` is the request stream.
+   */
+  @Post('disks/:disk/upload')
+  @HttpCode(204)
+  uploadObject(
+    @Param('disk') disk: string,
+    @Query('key') key: string,
+    @Req() request: Readable,
+    @Query('type') type?: string,
+  ): Promise<void> {
+    return this.service.putObject(disk, key, request, type);
+  }
+
+  @Post('disks/:disk/folder')
+  @HttpCode(204)
+  createFolder(@Param('disk') disk: string, @Body() body: CreateFolderBody): Promise<void> {
+    return this.service.createFolder(disk, body.prefix);
   }
 
   @Post('uploads/:id/abort')

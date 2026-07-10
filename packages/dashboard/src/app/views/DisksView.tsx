@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { mediaConsoleClient } from '../../client/media-console-client.js';
 import type {
   DiskInfo,
@@ -7,6 +7,8 @@ import type {
   ObjectFolder,
   ObjectListResponse,
 } from '../../client/types.js';
+import { Lightbox, type PreviewItem } from '../Lightbox.js';
+import { Dot, GhostButton, Notice, Panel, formatBytes, formatDate } from '../ui.js';
 import type { Route } from '../useHashRoute.js';
 
 interface AccumulatedPage {
@@ -22,23 +24,6 @@ interface AccumulatedPage {
 interface Breadcrumb {
   label: string;
   prefix: string;
-}
-
-function formatBytes(bytes: number | null): string {
-  if (bytes === null) return '—';
-  if (bytes === 0) return '0 B';
-  const units = ['B', 'KB', 'MB', 'GB', 'TB'];
-  const exponent = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
-  const value = bytes / 1024 ** exponent;
-  const unit = units[exponent] ?? 'B';
-  return exponent === 0 ? `${value} ${unit}` : `${value.toFixed(1)} ${unit}`;
-}
-
-function formatDate(value: string | null): string {
-  if (!value) return '—';
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return '—';
-  return date.toLocaleString();
 }
 
 function breadcrumbsFor(prefix: string | undefined): Breadcrumb[] {
@@ -93,6 +78,10 @@ export function DisksView({ route, actions }: { route: Route; actions: boolean }
     lastData: undefined,
   });
   const [busyKey, setBusyKey] = useState<string | null>(null);
+  const [preview, setPreview] = useState<PreviewItem | null>(null);
+  const [uploading, setUploading] = useState(false);
+  const [dragOver, setDragOver] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   if (page.key !== pageKey) {
     setPage({ key: pageKey, folders: [], files: [], cursor: undefined, lastData: undefined });
@@ -142,11 +131,11 @@ export function DisksView({ route, actions }: { route: Route; actions: boolean }
     resetPagination();
   }
 
-  async function handlePreview(disk: string, key: string): Promise<void> {
+  async function handlePreview(disk: string, key: string, name: string): Promise<void> {
     setBusyKey(key);
     try {
       const detail = await mediaConsoleClient.object(disk, key);
-      window.open(detail.url, '_blank', 'noopener,noreferrer');
+      setPreview({ ...detail, disk, name });
     } catch (error) {
       window.alert(`Failed to open "${key}": ${describeError(error)}`);
     } finally {
@@ -189,186 +178,250 @@ export function DisksView({ route, actions }: { route: Route; actions: boolean }
     }
   }
 
+  /** The full object key for a name dropped into the current folder: the browsed prefix + the name. */
+  function keyIn(name: string): string {
+    return prefix ? `${prefix}/${name}` : name;
+  }
+
+  async function handleUpload(disk: string, files: FileList | File[]): Promise<void> {
+    const list = Array.from(files);
+    if (list.length === 0) return;
+    setUploading(true);
+    try {
+      for (const file of list) {
+        await mediaConsoleClient.uploadObject(disk, keyIn(file.name), file);
+      }
+      await invalidateObjects(disk);
+    } catch (error) {
+      window.alert(`Upload failed: ${describeError(error)}`);
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  async function handleCreateFolder(disk: string): Promise<void> {
+    const name = window.prompt('New folder name:');
+    if (!name) return;
+    try {
+      await mediaConsoleClient.createFolder(disk, keyIn(name));
+      await invalidateObjects(disk);
+    } catch (error) {
+      window.alert(`Failed to create folder: ${describeError(error)}`);
+    }
+  }
+
   const crumbs = breadcrumbsFor(prefix);
+  const isEmpty =
+    !objectsQuery.isLoading &&
+    !objectsQuery.isError &&
+    page.folders.length === 0 &&
+    page.files.length === 0;
 
   return (
-    <section>
-      <h2 className="mb-2 text-base font-semibold">Disks</h2>
+    <section className="rise">
       <div className="grid grid-cols-[220px_1fr] gap-4">
-        <aside className="rounded border border-slate-200 bg-white p-2">
-          <h3 className="px-2 py-1 text-xs font-semibold uppercase text-slate-400">Disks</h3>
-          {disksQuery.isLoading && <p className="px-2 py-1 text-sm text-slate-500">Loading…</p>}
+        <Panel className="h-fit p-2">
+          <h3 className="mono px-2 py-1 text-[10px] uppercase tracking-wider text-zinc-600">
+            disks
+          </h3>
+          {disksQuery.isLoading && <Notice>Loading…</Notice>}
           {disksQuery.isError && (
-            <p className="px-2 py-1 text-sm text-red-600">{describeError(disksQuery.error)}</p>
+            <p className="px-2 py-1 text-sm s-error">{describeError(disksQuery.error)}</p>
           )}
-          {!disksQuery.isLoading && disks.length === 0 && (
-            <p className="px-2 py-1 text-sm text-slate-500">No disks configured.</p>
-          )}
+          {!disksQuery.isLoading && disks.length === 0 && <Notice>No disks configured.</Notice>}
           <ul className="space-y-0.5">
-            {disks.map((disk) => (
-              <li key={disk.name}>
-                <button
-                  type="button"
-                  onClick={() => navigateToDisk(disk.name)}
-                  className={`flex w-full items-center justify-between rounded px-2 py-1.5 text-left text-sm ${
-                    disk.name === selectedDisk
-                      ? 'bg-slate-900 text-white'
-                      : 'text-slate-700 hover:bg-slate-100'
-                  }`}
-                >
-                  <span className="truncate">{disk.name}</span>
-                  <span className="flex items-center gap-1">
-                    {disk.default && (
-                      <span
-                        className={`text-xs ${
-                          disk.name === selectedDisk ? 'text-slate-300' : 'text-slate-400'
-                        }`}
-                      >
-                        default
-                      </span>
-                    )}
-                    {!disk.capabilities.list && (
-                      <span
-                        title="Listing unsupported on this disk"
-                        className="h-1.5 w-1.5 rounded-full bg-amber-400"
-                      />
-                    )}
-                  </span>
-                </button>
-              </li>
-            ))}
+            {disks.map((disk) => {
+              const active = disk.name === selectedDisk;
+              return (
+                <li key={disk.name}>
+                  <button
+                    type="button"
+                    onClick={() => navigateToDisk(disk.name)}
+                    className={`mono flex w-full items-center justify-between gap-2 rounded-md border px-2 py-1.5 text-left text-xs transition-colors ${
+                      active
+                        ? 'border-[var(--line)] bg-zinc-900 text-zinc-100'
+                        : 'border-transparent text-zinc-400 hover:bg-zinc-900/50 hover:text-zinc-200'
+                    }`}
+                  >
+                    <span className="truncate">{disk.name}</span>
+                    <span className="flex shrink-0 items-center gap-1.5">
+                      {disk.default && (
+                        <span className="text-[9px] uppercase tracking-wider text-zinc-600">
+                          default
+                        </span>
+                      )}
+                      {!disk.capabilities.list && (
+                        <span title="Listing unsupported on this disk">
+                          <Dot tone="warn" />
+                        </span>
+                      )}
+                    </span>
+                  </button>
+                </li>
+              );
+            })}
           </ul>
-        </aside>
+        </Panel>
 
-        <div className="rounded border border-slate-200 bg-white p-3">
-          {!selectedDisk && (
-            <p className="text-sm text-slate-500">Select a disk to browse its objects.</p>
-          )}
+        <Panel className="p-3">
+          {!selectedDisk && <Notice>Select a disk to browse its objects.</Notice>}
 
           {selectedDisk && !listSupported && (
-            <p className="text-sm text-slate-500">
-              Listing is not supported on disk <span className="font-medium">{selectedDisk}</span>.
-            </p>
+            <Notice>
+              Listing is not supported on disk{' '}
+              <span className="mono text-zinc-300">{selectedDisk}</span>.
+            </Notice>
           )}
 
           {selectedDisk && listSupported && (
-            <>
-              <nav className="mb-3 flex flex-wrap items-center gap-1 text-sm text-slate-500">
-                <button
-                  type="button"
-                  onClick={() => navigateToPrefix(selectedDisk, '')}
-                  className={`rounded px-1.5 py-0.5 hover:bg-slate-100 ${
-                    !prefix ? 'font-semibold text-slate-900' : ''
-                  }`}
-                >
-                  {selectedDisk}
-                </button>
-                {crumbs.map((crumb, index) => (
-                  <span key={crumb.prefix} className="flex items-center gap-1">
-                    <span className="text-slate-300">/</span>
-                    <button
-                      type="button"
-                      onClick={() => navigateToPrefix(selectedDisk, crumb.prefix)}
-                      className={`rounded px-1.5 py-0.5 hover:bg-slate-100 ${
-                        index === crumbs.length - 1 ? 'font-semibold text-slate-900' : ''
-                      }`}
+            <div
+              onDragOver={
+                actions
+                  ? (event) => {
+                      event.preventDefault();
+                      setDragOver(true);
+                    }
+                  : undefined
+              }
+              onDragLeave={actions ? () => setDragOver(false) : undefined}
+              onDrop={
+                actions
+                  ? (event) => {
+                      event.preventDefault();
+                      setDragOver(false);
+                      handleUpload(selectedDisk, event.dataTransfer.files);
+                    }
+                  : undefined
+              }
+              className={`rounded-md ${dragOver ? 'ring-2 ring-inset ring-emerald-500/50' : ''}`}
+            >
+              <div className="mb-3 flex items-center justify-between gap-2">
+                <nav className="mono flex flex-wrap items-center gap-1 text-xs text-zinc-500">
+                  <button
+                    type="button"
+                    onClick={() => navigateToPrefix(selectedDisk, '')}
+                    className={`rounded px-1.5 py-0.5 hover:bg-zinc-800/60 ${
+                      !prefix ? 'text-zinc-100' : ''
+                    }`}
+                  >
+                    {selectedDisk}
+                  </button>
+                  {crumbs.map((crumb, index) => (
+                    <span key={crumb.prefix} className="flex items-center gap-1">
+                      <span className="text-zinc-700">/</span>
+                      <button
+                        type="button"
+                        onClick={() => navigateToPrefix(selectedDisk, crumb.prefix)}
+                        className={`rounded px-1.5 py-0.5 hover:bg-zinc-800/60 ${
+                          index === crumbs.length - 1 ? 'text-zinc-100' : ''
+                        }`}
+                      >
+                        {crumb.label}
+                      </button>
+                    </span>
+                  ))}
+                </nav>
+                {actions && (
+                  <div className="flex shrink-0 items-center gap-1.5">
+                    <input
+                      ref={fileInputRef}
+                      type="file"
+                      multiple
+                      className="hidden"
+                      onChange={(event) => {
+                        if (event.target.files) handleUpload(selectedDisk, event.target.files);
+                        event.target.value = '';
+                      }}
+                    />
+                    <GhostButton
+                      tone="emerald"
+                      disabled={uploading}
+                      onClick={() => fileInputRef.current?.click()}
                     >
-                      {crumb.label}
-                    </button>
-                  </span>
-                ))}
-              </nav>
-
-              {objectsQuery.isLoading && <p className="text-sm text-slate-500">Loading objects…</p>}
-              {objectsQuery.isError && (
-                <p className="text-sm text-red-600">{describeError(objectsQuery.error)}</p>
-              )}
-              {!objectsQuery.isLoading &&
-                !objectsQuery.isError &&
-                page.folders.length === 0 &&
-                page.files.length === 0 && (
-                  <p className="text-sm text-slate-500">This folder is empty.</p>
+                      {uploading ? 'Uploading…' : '↑ Upload'}
+                    </GhostButton>
+                    <GhostButton onClick={() => handleCreateFolder(selectedDisk)}>
+                      + New folder
+                    </GhostButton>
+                  </div>
                 )}
+              </div>
+
+              {objectsQuery.isLoading && <Notice>Loading objects…</Notice>}
+              {objectsQuery.isError && (
+                <p className="text-sm s-error">{describeError(objectsQuery.error)}</p>
+              )}
+              {isEmpty && <Notice>This folder is empty.</Notice>}
 
               {(page.folders.length > 0 || page.files.length > 0) && (
                 <table className="w-full text-left text-sm">
                   <thead>
-                    <tr className="border-b border-slate-200 text-xs uppercase text-slate-400">
-                      <th className="py-1.5 pr-2 font-medium">Name</th>
-                      <th className="py-1.5 pr-2 font-medium">Size</th>
-                      <th className="py-1.5 pr-2 font-medium">Last modified</th>
-                      <th className="py-1.5 pr-2 font-medium">Actions</th>
+                    <tr className="mono border-b border-[var(--line)] text-[10px] uppercase tracking-wider text-zinc-600">
+                      <th className="py-2 pr-2 font-normal">Name</th>
+                      <th className="py-2 pr-2 font-normal">Size</th>
+                      <th className="py-2 pr-2 font-normal">Last modified</th>
+                      <th className="py-2 pr-2 font-normal">Actions</th>
                     </tr>
                   </thead>
-                  <tbody>
+                  <tbody className="divide-y divide-[var(--line-soft)]">
                     {page.folders.map((folder) => (
-                      <tr key={folder.prefix} className="border-b border-slate-100">
-                        <td className="py-1.5 pr-2">
+                      <tr key={folder.prefix} className="hover:bg-zinc-900/40">
+                        <td className="py-2 pr-2">
                           <button
                             type="button"
                             onClick={() => navigateToPrefix(selectedDisk, folder.prefix)}
-                            className="text-slate-700 hover:underline"
+                            className="flex items-center gap-2 text-zinc-200 hover:text-emerald-300"
                           >
-                            📁 {folder.name}
+                            <span className="text-zinc-600">▸</span>
+                            {folder.name}
                           </button>
                         </td>
-                        <td className="py-1.5 pr-2 text-slate-400">—</td>
-                        <td className="py-1.5 pr-2 text-slate-400">—</td>
-                        <td className="py-1.5 pr-2 text-slate-400">—</td>
+                        <td className="py-2 pr-2 text-zinc-700">—</td>
+                        <td className="py-2 pr-2 text-zinc-700">—</td>
+                        <td className="py-2 pr-2 text-zinc-700">—</td>
                       </tr>
                     ))}
                     {page.files.map((file) => (
-                      <tr key={file.key} className="border-b border-slate-100">
-                        <td className="py-1.5 pr-2 text-slate-700">{file.name}</td>
-                        <td className="py-1.5 pr-2 text-slate-500">
+                      <tr key={file.key} className="hover:bg-zinc-900/40">
+                        <td className="mono py-2 pr-2 text-[13px] text-zinc-200">{file.name}</td>
+                        <td className="mono tnum py-2 pr-2 text-xs text-zinc-500">
                           {formatBytes(file.sizeBytes)}
                         </td>
-                        <td className="py-1.5 pr-2 text-slate-500">
+                        <td className="py-2 pr-2 text-xs text-zinc-500">
                           {formatDate(file.lastModified)}
                         </td>
-                        <td className="py-1.5 pr-2">
-                          <div className="flex flex-wrap gap-2">
-                            <button
-                              type="button"
+                        <td className="py-2 pr-2">
+                          <div className="flex flex-wrap gap-1.5">
+                            <GhostButton
                               disabled={busyKey === file.key}
-                              onClick={() => handlePreview(selectedDisk, file.key)}
-                              className="rounded px-1.5 py-0.5 text-slate-600 hover:bg-slate-100 disabled:opacity-50"
+                              onClick={() => handlePreview(selectedDisk, file.key, file.name)}
                             >
                               Preview
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => handleCopyKey(file.key)}
-                              className="rounded px-1.5 py-0.5 text-slate-600 hover:bg-slate-100"
-                            >
+                            </GhostButton>
+                            <GhostButton onClick={() => handleCopyKey(file.key)}>
                               Copy key
-                            </button>
+                            </GhostButton>
                             {actions && (
                               <>
-                                <button
-                                  type="button"
+                                <GhostButton
                                   disabled={busyKey === file.key}
                                   onClick={() => handleCopyOrMove('copy', selectedDisk, file.key)}
-                                  className="rounded px-1.5 py-0.5 text-slate-600 hover:bg-slate-100 disabled:opacity-50"
                                 >
                                   Copy to…
-                                </button>
-                                <button
-                                  type="button"
+                                </GhostButton>
+                                <GhostButton
                                   disabled={busyKey === file.key}
                                   onClick={() => handleCopyOrMove('move', selectedDisk, file.key)}
-                                  className="rounded px-1.5 py-0.5 text-slate-600 hover:bg-slate-100 disabled:opacity-50"
                                 >
                                   Move to…
-                                </button>
-                                <button
-                                  type="button"
+                                </GhostButton>
+                                <GhostButton
+                                  tone="rose"
                                   disabled={busyKey === file.key}
                                   onClick={() => handleDelete(selectedDisk, file.key)}
-                                  className="rounded px-1.5 py-0.5 text-red-600 hover:bg-red-50 disabled:opacity-50"
                                 >
                                   Delete
-                                </button>
+                                </GhostButton>
                               </>
                             )}
                           </div>
@@ -381,20 +434,24 @@ export function DisksView({ route, actions }: { route: Route; actions: boolean }
 
               {page.cursor !== undefined && (
                 <div className="mt-3">
-                  <button
-                    type="button"
+                  <GhostButton
                     disabled={objectsQuery.isFetching}
                     onClick={() => setCursor(page.cursor)}
-                    className="rounded border border-slate-200 px-3 py-1.5 text-sm text-slate-600 hover:bg-slate-50 disabled:opacity-50"
                   >
                     {objectsQuery.isFetching ? 'Loading…' : 'Load more'}
-                  </button>
+                  </GhostButton>
                 </div>
               )}
-            </>
+              {actions && dragOver && (
+                <p className="mono mt-3 rounded-md border border-dashed border-emerald-500/40 bg-emerald-500/5 px-3 py-4 text-center text-xs text-emerald-300/80">
+                  Drop files to upload to {prefix ? `/${prefix}` : selectedDisk}
+                </p>
+              )}
+            </div>
           )}
-        </div>
+        </Panel>
       </div>
+      <Lightbox item={preview} onClose={() => setPreview(null)} />
     </section>
   );
 }
