@@ -19,7 +19,6 @@ import {
   type Provider,
   type Type,
 } from '@nestjs/common';
-import { GUARDS_METADATA } from '@nestjs/common/constants';
 import { MediaDirectUploadController } from './media-direct-upload.controller';
 import { MediaMultipartUploadController } from './media-multipart-upload.controller';
 import { MediaUploadController } from './media-upload.controller';
@@ -153,6 +152,16 @@ function guardProviders(
   const bySurface = perSurfaceGuards(guards);
   return [...new Set([...bySurface.tus, ...bySurface.multipart, ...bySurface.direct])];
 }
+
+/**
+ * Nest's `GUARDS_METADATA` key (`@nestjs/common/constants`), inlined as a literal:
+ * `@nestjs/common` has no `exports` map and its ESM-facing files are CJS, so a deep
+ * `import ... from '@nestjs/common/constants'` in our ESM build is emitted
+ * extensionless and rejected by Node's strict ESM resolver (surfaced by a consumer's
+ * vitest externalizing this package). `media-guards.spec.ts` asserts this literal
+ * still matches the real constant, so upstream drift fails loudly.
+ */
+const GUARDS_METADATA = '__guards__';
 
 /**
  * Stamp (or clear) `@UseGuards`-equivalent metadata on the three shared upload
