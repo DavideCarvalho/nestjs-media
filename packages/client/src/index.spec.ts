@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { mediaUrl, streamChunksParallel, uploadMedia } from './index';
+import { mediaUrl, streamChunks, streamChunksParallel, uploadMedia } from './index';
 
 function mockFetch() {
   return vi.fn(async (_url: string, init: RequestInit) => {
@@ -157,5 +157,110 @@ describe('uploadMedia (back-compat)', () => {
       fetchImpl,
     });
     expect(result.location).toBe('/media/uploads/abc');
+  });
+});
+
+describe('getHeaders', () => {
+  it('is resolved once per request across a multi-part parallel upload (streamChunksParallel)', async () => {
+    const capturedHeaders: Array<Record<string, string>> = [];
+    const fetchImpl = vi.fn(async (_url: string, init: any) => {
+      capturedHeaders.push({ ...(init.headers as Record<string, string>) });
+      return { ok: true, headers: new Map() } as any;
+    });
+    const getHeaders = vi.fn(async () => ({ Authorization: 'Bearer live-token' }));
+
+    // 25 bytes @ 10-byte chunks => 3 parts + 1 complete POST = 4 requests.
+    await streamChunksParallel('/api/media/uploads/xyz', blobOf(25), {
+      chunkSize: 10,
+      concurrency: 2,
+      fetchImpl: fetchImpl as any,
+      getHeaders,
+    });
+
+    expect(getHeaders).toHaveBeenCalledTimes(4);
+    for (const headers of capturedHeaders) {
+      expect(headers.Authorization).toBe('Bearer live-token');
+    }
+  });
+
+  it('is resolved once per request across a sequential upload (streamChunks: HEAD + each PATCH)', async () => {
+    const capturedHeaders: Array<Record<string, string>> = [];
+    const fetchImpl = vi.fn(async (_url: string, init: any) => {
+      capturedHeaders.push({ ...(init.headers as Record<string, string>) });
+      if (init.method === 'HEAD') {
+        return { ok: true, headers: new Headers({ 'Upload-Offset': '0' }) } as any;
+      }
+      const offset = Number((init.headers as Record<string, string>)['Upload-Offset']);
+      const body = init.body as Blob;
+      return {
+        ok: true,
+        headers: new Headers({ 'Upload-Offset': String(offset + body.size) }),
+      } as any;
+    });
+    const getHeaders = vi.fn(async () => ({ Authorization: 'Bearer live-token' }));
+
+    // 25 bytes @ 10-byte chunks => 1 HEAD + 3 PATCH = 4 requests.
+    await streamChunks('/api/media/uploads/seq', blobOf(25), {
+      chunkSize: 10,
+      fetchImpl: fetchImpl as any,
+      getHeaders,
+    });
+
+    expect(getHeaders).toHaveBeenCalledTimes(4);
+    for (const headers of capturedHeaders) {
+      expect(headers.Authorization).toBe('Bearer live-token');
+    }
+  });
+
+  it('merges dynamic headers over static headers, dynamic wins on key conflict', async () => {
+    let capturedHeaders: Record<string, string> = {};
+    const fetchImpl = vi.fn(async (_url: string, init: any) => {
+      capturedHeaders = { ...(init.headers as Record<string, string>) };
+      return { ok: true, headers: new Headers({ 'Upload-Offset': '5' }) } as any;
+    });
+
+    await streamChunks('/api/media/uploads/merge', blobOf(5), {
+      resume: false,
+      fetchImpl: fetchImpl as any,
+      headers: { Authorization: 'static-token', 'X-Custom': 'keep-me' },
+      getHeaders: () => ({ Authorization: 'fresh-token' }),
+    });
+
+    expect(capturedHeaders.Authorization).toBe('fresh-token');
+    expect(capturedHeaders['X-Custom']).toBe('keep-me');
+  });
+
+  it('supports an async getHeaders that resolves per request, through the uploadMedia wrapper', async () => {
+    const capturedHeaders: Array<Record<string, string>> = [];
+    const fetchImpl = vi.fn(async (_url: string, init: any) => {
+      capturedHeaders.push({ ...(init.headers as Record<string, string>) });
+      if (init.method === 'POST' && !String(_url).endsWith('/complete')) {
+        return { ok: true, headers: new Headers({ Location: '/media/uploads/tok' }) } as any;
+      }
+      const offset = Number((init.headers as Record<string, string>)['Upload-Offset'] ?? 0);
+      const body = init.body as Blob;
+      return {
+        ok: true,
+        headers: new Headers({ 'Upload-Offset': String(offset + body.size) }),
+      } as any;
+    });
+
+    let tokenCounter = 0;
+    const getHeaders = vi.fn(async () => {
+      tokenCounter += 1;
+      await new Promise((resolve) => setTimeout(resolve, 1));
+      return { Authorization: `Bearer token-${tokenCounter}` };
+    });
+
+    await uploadMedia(blobOf(5), {
+      filename: 'a.txt',
+      fetchImpl: fetchImpl as any,
+      getHeaders,
+    });
+
+    // 1 create-session POST + 1 PATCH (resume:false, single chunk) = 2 requests.
+    expect(getHeaders).toHaveBeenCalledTimes(2);
+    expect(capturedHeaders[0]?.Authorization).toBe('Bearer token-1');
+    expect(capturedHeaders[1]?.Authorization).toBe('Bearer token-2');
   });
 });

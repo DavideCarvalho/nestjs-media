@@ -54,7 +54,6 @@ export function runStorageDriverConformance(
 
     it('stat reports the size and a last-modified date', async () => {
       const driver = await makeDriver();
-      if (!driver.stat) throw new Error('driver does not implement stat');
       await driver.put('s/file.txt', Buffer.from('12345'));
       const meta = await driver.stat('s/file.txt');
       expect(meta.size).toBe(5);
