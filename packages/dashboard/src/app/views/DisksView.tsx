@@ -68,9 +68,12 @@ function describeError(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-/** The full object key for a name placed into `prefix`: the browsed prefix + the name. */
+/** The full object key for a name placed into `prefix`: the browsed prefix + the name. The prefix
+ *  arrives from S3 folder navigation with a trailing slash (CommonPrefixes end in the delimiter), so
+ *  strip it before joining — otherwise the key double-slashes (`a//file`) into a phantom subfolder. */
 function keyIn(prefix: string | undefined, name: string): string {
-  return prefix ? `${prefix}/${name}` : name;
+  const parent = prefix?.replace(/\/+$/, '');
+  return parent ? `${parent}/${name}` : name;
 }
 
 /** Modal file uploader: pick or drop files, see them listed, upload with per-file progress. */

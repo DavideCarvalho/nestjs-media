@@ -93,4 +93,45 @@ describe('MediaConsoleService', () => {
     expect(result.cursor).toBe('next');
     expect(service.topology().hasStore).toBe(true);
   });
+
+  it('deletes a folder recursively: flat listing (empty delimiter), paginated, marker last', async () => {
+    const listCalls: Array<{ prefix: string; delimiter?: string; cursor?: string }> = [];
+    const deleted: string[] = [];
+    const driver = {
+      capabilities: { presign: true, multipart: true, publicUrls: false, list: true },
+      list: async (
+        prefix: string,
+        options?: { delimiter?: string; cursor?: string; limit?: number },
+      ) => {
+        listCalls.push({ prefix, delimiter: options?.delimiter, cursor: options?.cursor });
+        if (options?.cursor === undefined) {
+          return {
+            folders: [],
+            files: [{ key: 'reports/deep/a.txt', name: 'deep/a.txt' }],
+            cursor: 'p2',
+          };
+        }
+        return { folders: [], files: [{ key: 'reports/b.txt', name: 'b.txt' }] };
+      },
+      delete: async (key: string) => {
+        deleted.push(key);
+      },
+    };
+    const storage = {
+      defaultDisk: 'primary',
+      diskNames: () => ['primary'],
+      disk: () => driver,
+    } as unknown as StorageManager;
+    const service = new MediaConsoleService(storage, null, null, true);
+
+    await service.deleteFolder('primary', 'reports');
+
+    // Every list call swept the folder prefix with an EMPTY delimiter (flat, so nested keys surface).
+    expect(listCalls.every((call) => call.prefix === 'reports/' && call.delimiter === '')).toBe(
+      true,
+    );
+    expect(listCalls.map((call) => call.cursor)).toEqual([undefined, 'p2']);
+    // Nested files across both pages, then the folder marker itself, deleted last.
+    expect(deleted).toEqual(['reports/deep/a.txt', 'reports/b.txt', 'reports/']);
+  });
 });

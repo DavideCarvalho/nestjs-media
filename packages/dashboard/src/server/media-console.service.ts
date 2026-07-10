@@ -209,8 +209,11 @@ export class MediaConsoleService {
   }
 
   /** Recursively deletes a "folder": every object under `<prefix>/` (nested included) plus the
-   *  zero-byte marker itself. Sweeps the prefix without a delimiter (flat listing) so it reaches
-   *  nested keys, paginating until the disk reports no more. Actions-gated. */
+   *  zero-byte marker itself. Passes an empty delimiter so the driver lists keys FLAT — the default
+   *  `/` delimiter would group nested keys into CommonPrefixes and the sweep would miss them, only
+   *  deleting direct children. Paginates until the disk reports no more. The marker's own key equals
+   *  the sweep prefix, which `list` filters out (Key === Prefix), so it's deleted explicitly at the
+   *  end. Actions-gated. */
   async deleteFolder(disk: string, prefix: string): Promise<void> {
     const driver = this.diskOrThrow(disk);
     const normalized = prefix.replace(/^\/+/, '').replace(/\/+$/, '');
@@ -219,6 +222,7 @@ export class MediaConsoleService {
     let cursor: string | undefined;
     do {
       const result = await driver.list(sweepPrefix, {
+        delimiter: '',
         limit: DELETE_SWEEP_LIMIT,
         ...(cursor ? { cursor } : {}),
       });
@@ -227,6 +231,7 @@ export class MediaConsoleService {
       }
       cursor = result.cursor;
     } while (cursor);
+    await driver.delete(sweepPrefix);
   }
 
   async copyObject(disk: string, from: string, to: string): Promise<void> {
