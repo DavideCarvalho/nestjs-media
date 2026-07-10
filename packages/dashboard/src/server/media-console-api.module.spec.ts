@@ -3,8 +3,12 @@ import { MediaConsoleActionsController } from './media-console-actions.controlle
 import { MediaConsoleApiModule } from './media-console-api.module.js';
 import { MediaConsoleAuthController } from './media-console-auth.controller.js';
 import { MediaConsoleReadController } from './media-console-read.controller.js';
+import { MEDIA_CONSOLE_AUTH } from './tokens.js';
 
-const base = { auth: null, cookiePath: '/api/media/console' };
+const base = {
+  cookiePath: '/api/media/console',
+  authProvider: { provide: MEDIA_CONSOLE_AUTH, useValue: null },
+};
 
 describe('MediaConsoleApiModule.register', () => {
   it('mounts the read + auth controllers when actions are disabled', () => {

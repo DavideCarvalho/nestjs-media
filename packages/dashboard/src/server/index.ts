@@ -1,4 +1,8 @@
-export { MediaDashboardModule, type MediaDashboardOptions } from './media-dashboard.module.js';
+export {
+  MediaDashboardModule,
+  type MediaDashboardOptions,
+  type MediaDashboardAsyncOptions,
+} from './media-dashboard.module.js';
 export { MediaConsoleApiModule } from './media-console-api.module.js';
 export { MediaConsoleService } from './media-console.service.js';
 export type {

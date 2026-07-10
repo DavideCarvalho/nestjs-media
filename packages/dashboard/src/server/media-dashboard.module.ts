@@ -1,9 +1,20 @@
-import { type DynamicModule, Module } from '@nestjs/common';
+import {
+  type DynamicModule,
+  Module,
+  type ModuleMetadata,
+  type OptionalFactoryDependency,
+  type Provider,
+} from '@nestjs/common';
+import type { InjectionToken } from '@nestjs/common';
 import { RouterModule } from '@nestjs/core';
 import { type ConsoleAuthOptions, resolveConsoleAuth } from './auth/config.js';
 import { MediaConsoleApiModule } from './media-console-api.module.js';
 import { MediaDashboardUiController } from './media-dashboard-ui.controller.js';
-import { MEDIA_DASHBOARD_API_PATH, MEDIA_DASHBOARD_BASE_PATH } from './tokens.js';
+import {
+  MEDIA_CONSOLE_AUTH,
+  MEDIA_DASHBOARD_API_PATH,
+  MEDIA_DASHBOARD_BASE_PATH,
+} from './tokens.js';
 
 export interface MediaDashboardOptions {
   /**
@@ -31,6 +42,26 @@ export interface MediaDashboardOptions {
   auth?: ConsoleAuthOptions;
 }
 
+/**
+ * Async variant of {@link MediaDashboardOptions}. The mount paths + `actions` stay static (the
+ * router needs them at module-definition time), but `auth` is built by an injected factory — so
+ * the `login`/`session` hooks can reach your DB/services (e.g. an EntityManager to validate an
+ * admin). Returning `undefined` from the factory leaves the console open.
+ */
+export interface MediaDashboardAsyncOptions {
+  basePath?: string;
+  apiBasePath?: string;
+  actions?: boolean;
+  /** Modules exporting the providers `inject` needs (omit when they're global). */
+  imports?: ModuleMetadata['imports'];
+  /** Providers injected into `useAuth`, in order. */
+  inject?: Array<InjectionToken | OptionalFactoryDependency>;
+  /** Build the `auth` config from injected deps (or `undefined` to leave the console open). */
+  useAuth: (
+    ...deps: any[]
+  ) => ConsoleAuthOptions | undefined | Promise<ConsoleAuthOptions | undefined>;
+}
+
 /** Leading slash, no trailing slash. */
 function normalize(path: string): string {
   return `/${path.replace(/^\/+|\/+$/g, '')}`;
@@ -38,21 +69,47 @@ function normalize(path: string): string {
 
 /**
  * Mounts the /media console: the bundled React SPA at `basePath` and its JSON API at `apiBasePath`
- * (default `<basePath>/api`). Import via `MediaDashboardModule.forRoot(...)` alongside
- * `MediaModule` (global), so it resolves the storage/store/upload tokens. No auth is built in —
- * front the routes with a guard, and exclude the UI/API paths from any global `/api` prefix.
+ * (default `<basePath>/api`). Import via `MediaDashboardModule.forRoot(...)` (or `forRootAsync` when
+ * the `auth` hooks need injected services) alongside `MediaModule` (global), so it resolves the
+ * storage/store/upload tokens. Exclude the UI/API paths from any global `/api` prefix.
  */
 @Module({})
 export class MediaDashboardModule {
   static forRoot(options: MediaDashboardOptions = {}): DynamicModule {
+    const apiBasePath = normalize(
+      options.apiBasePath ?? `${normalize(options.basePath ?? '/media')}/api`,
+    );
+    return MediaDashboardModule.build(options, apiBasePath, {
+      provide: MEDIA_CONSOLE_AUTH,
+      useValue: resolveConsoleAuth(options.auth),
+    });
+  }
+
+  static forRootAsync(options: MediaDashboardAsyncOptions): DynamicModule {
+    const apiBasePath = normalize(
+      options.apiBasePath ?? `${normalize(options.basePath ?? '/media')}/api`,
+    );
+    const authProvider: Provider = {
+      provide: MEDIA_CONSOLE_AUTH,
+      inject: options.inject ?? [],
+      useFactory: async (...deps: any[]) => resolveConsoleAuth(await options.useAuth(...deps)),
+    };
+    return MediaDashboardModule.build(options, apiBasePath, authProvider, options.imports);
+  }
+
+  /** Shared wiring: static routing + the API module, with `auth` supplied by the given provider. */
+  private static build(
+    options: { basePath?: string; apiBasePath?: string; actions?: boolean },
+    apiBasePath: string,
+    authProvider: Provider,
+    imports?: ModuleMetadata['imports'],
+  ): DynamicModule {
     const basePath = normalize(options.basePath ?? '/media');
-    const apiBasePath = normalize(options.apiBasePath ?? `${basePath}/api`);
     const actions = options.actions === true;
-    const auth = resolveConsoleAuth(options.auth);
     return {
       module: MediaDashboardModule,
       imports: [
-        MediaConsoleApiModule.register({ actions, auth, cookiePath: apiBasePath }),
+        MediaConsoleApiModule.register({ actions, cookiePath: apiBasePath, authProvider, imports }),
         RouterModule.register([
           { path: basePath, module: MediaDashboardModule }, // the UI controller below
           { path: apiBasePath, module: MediaConsoleApiModule },

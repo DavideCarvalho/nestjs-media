@@ -1,22 +1,19 @@
-import { type DynamicModule, Module } from '@nestjs/common';
-import type { ResolvedConsoleAuth } from './auth/config.js';
+import { type DynamicModule, Module, type ModuleMetadata, type Provider } from '@nestjs/common';
 import { MediaConsoleActionsController } from './media-console-actions.controller.js';
 import { MediaConsoleAuthController } from './media-console-auth.controller.js';
 import { MediaConsoleReadController } from './media-console-read.controller.js';
 import { MediaConsoleGuard } from './media-console.guard.js';
 import { MediaConsoleService } from './media-console.service.js';
-import {
-  MEDIA_CONSOLE_AUTH,
-  MEDIA_CONSOLE_COOKIE_PATH,
-  MEDIA_DASHBOARD_ACTIONS,
-} from './tokens.js';
+import { MEDIA_CONSOLE_COOKIE_PATH, MEDIA_DASHBOARD_ACTIONS } from './tokens.js';
 
 interface ApiModuleOptions {
   actions: boolean;
-  /** Resolved console-auth (or `null` for an open console). */
-  auth: ResolvedConsoleAuth | null;
   /** Cookie `Path` — the JSON API base — so the session cookie rides every console API request. */
   cookiePath: string;
+  /** Provider for `MEDIA_CONSOLE_AUTH` — a `useValue` (forRoot) or a `useFactory` (forRootAsync). */
+  authProvider: Provider;
+  /** Extra imports the auth factory's `inject` deps live in (empty when they're global). */
+  imports?: ModuleMetadata['imports'];
 }
 
 /**
@@ -30,6 +27,7 @@ export class MediaConsoleApiModule {
   static register(options: ApiModuleOptions): DynamicModule {
     return {
       module: MediaConsoleApiModule,
+      imports: options.imports ?? [],
       controllers: [
         MediaConsoleReadController,
         MediaConsoleAuthController,
@@ -39,8 +37,8 @@ export class MediaConsoleApiModule {
         MediaConsoleService,
         MediaConsoleGuard,
         { provide: MEDIA_DASHBOARD_ACTIONS, useValue: options.actions },
-        { provide: MEDIA_CONSOLE_AUTH, useValue: options.auth },
         { provide: MEDIA_CONSOLE_COOKIE_PATH, useValue: options.cookiePath },
+        options.authProvider,
       ],
       exports: [MediaConsoleService],
     };
