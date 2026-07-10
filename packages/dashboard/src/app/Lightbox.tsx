@@ -60,9 +60,10 @@ function textFlavor(item: PreviewItem): 'csv' | 'tsv' | 'json' | 'plain' {
   return 'plain';
 }
 
-/** Above this size we don't fetch the object for an inline text/CSV preview — a multi-MB CSV would
- *  pull the whole file into the tab and freeze parsing. The "Open ↗" link still serves the original. */
-const MAX_TEXT_PREVIEW_BYTES = 2 * 1024 * 1024;
+/** How much of a text/CSV file we pull into the tab. Small files arrive whole; a larger one is
+ *  *sampled* — we read this many bytes of its head and stop, so even a multi-GB CSV previews (its
+ *  start) without freezing. Filters/sort then operate on the loaded sample. */
+const SAMPLE_TEXT_BYTES = 8 * 1024 * 1024;
 
 /** The shared fallback surface: a glyph, a message, and a link to the original in a new tab. Used
  *  whenever inline rendering isn't available (unknown type, too large, or a read error). */
@@ -135,9 +136,10 @@ function DelimitedTable({ text, delimiter }: { text: string; delimiter: string }
   return <DataTable header={header} body={rows.slice(1)} />;
 }
 
-/** Above this compressed size we skip fetching a spreadsheet for inline preview — parsing a large
- *  workbook in the tab is slow. The "Open ↗" link still serves the original. */
-const MAX_SHEET_PREVIEW_BYTES = 5 * 1024 * 1024;
+/** Above this compressed size we skip fetching a spreadsheet for inline preview. Unlike text, a
+ *  workbook is a zip — it can't be head-sampled, so the whole file has to be parsed; past this the
+ *  parse is too slow/heavy for the tab. The "Open ↗" link still serves the original. */
+const MAX_SHEET_PREVIEW_BYTES = 15 * 1024 * 1024;
 
 /** Fetches an XLSX/XLS/ODS workbook's bytes and renders a sheet as a filterable table, with a tab per
  *  sheet when there's more than one. Parsed with SheetJS off the same-origin inline proxy. */
@@ -217,36 +219,45 @@ function prettyJson(text: string): string {
 /** Fetches the object's bytes as text through the same-origin inline proxy and renders it: a CSV/TSV
  *  table, pretty-printed JSON, or raw monospace text. */
 function TextPreview({ item }: { item: PreviewItem }): JSX.Element {
-  const tooLarge = item.size > MAX_TEXT_PREVIEW_BYTES;
   const query = useQuery({
-    queryKey: ['object-text', item.disk, item.key],
-    queryFn: () => mediaConsoleClient.objectText(item.disk, item.key),
+    queryKey: ['object-text-head', item.disk, item.key],
+    queryFn: () => mediaConsoleClient.objectTextHead(item.disk, item.key, SAMPLE_TEXT_BYTES),
     retry: false,
     staleTime: 60_000,
-    enabled: !tooLarge,
   });
 
-  if (tooLarge) {
-    return (
-      <FallbackCard
-        item={item}
-        message={`Too large to preview inline (${formatBytes(item.size)}). Open the original to view it.`}
-      />
-    );
-  }
   if (query.isLoading) return <Notice>Loading…</Notice>;
-  if (query.isError || query.data === undefined) {
+  if (query.isError || !query.data) {
     return <FallbackCard item={item} message="Could not read this file." />;
   }
 
+  const { text, bytesRead } = query.data;
+  const truncated = bytesRead < item.size;
+  // A truncated sample ends mid-line — drop the partial last line so the final row/character isn't
+  // garbled (an incomplete CSV row, a broken JSON tail).
+  const source = truncated ? text.slice(0, Math.max(0, text.lastIndexOf('\n'))) : text;
   const flavor = textFlavor(item);
-  if (flavor === 'csv') return <DelimitedTable text={query.data} delimiter="," />;
-  if (flavor === 'tsv') return <DelimitedTable text={query.data} delimiter={'\t'} />;
-  const body = flavor === 'json' ? prettyJson(query.data) : query.data;
+  const content =
+    flavor === 'csv' ? (
+      <DelimitedTable text={source} delimiter="," />
+    ) : flavor === 'tsv' ? (
+      <DelimitedTable text={source} delimiter={'\t'} />
+    ) : (
+      <pre className="mono min-h-0 flex-1 overflow-auto whitespace-pre-wrap break-words rounded-md border border-[var(--line)] bg-black/30 p-3 text-xs text-zinc-300">
+        {flavor === 'json' ? prettyJson(source) : source}
+      </pre>
+    );
+
   return (
-    <pre className="mono min-h-0 flex-1 overflow-auto whitespace-pre-wrap break-words rounded-md border border-[var(--line)] bg-black/30 p-3 text-xs text-zinc-300">
-      {body}
-    </pre>
+    <div className="flex min-h-0 flex-1 flex-col gap-2">
+      {truncated && (
+        <div className="mono shrink-0 rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-1.5 text-[11px] text-amber-300">
+          Sample — the first {formatBytes(bytesRead)} of {formatBytes(item.size)}. Filters and sort
+          apply to this sample; open the original ↗ for the whole file.
+        </div>
+      )}
+      {content}
+    </div>
   );
 }
 
