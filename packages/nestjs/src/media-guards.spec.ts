@@ -157,6 +157,62 @@ describe('guards option — forRoot', () => {
   });
 });
 
+describe('guards option — per-surface object form', () => {
+  it('gates each surface with its own guard list', async () => {
+    const baseUrl = await boot({
+      ...tusOptions(),
+      guards: { tus: [DenyGuard], multipart: [TokenGuard] },
+    });
+
+    const tusRes = await fetch(`${baseUrl}/media/uploads`, {
+      method: 'POST',
+      headers: { 'upload-length': '5', 'upload-metadata': `filename ${b64('a.txt')}` },
+    });
+    expect(tusRes.status).toBe(403); // DenyGuard, not TokenGuard's 401
+
+    const multipartNoToken = await fetch(`${baseUrl}/media/uploads/some-id/parts/1`, {
+      method: 'PUT',
+    });
+    expect(multipartNoToken.status).toBe(401); // TokenGuard, not DenyGuard's 403
+
+    const multipartWithToken = await fetch(`${baseUrl}/media/uploads/some-id/parts/1`, {
+      method: 'PUT',
+      headers: { 'x-test-token': TOKEN },
+    });
+    // Past the gate: fails later in the handler on the malformed body, but is
+    // neither TokenGuard's 401 nor DenyGuard's 403.
+    expect([401, 403]).not.toContain(multipartWithToken.status);
+  });
+
+  it('a surface omitted from the object stays open', async () => {
+    const baseUrl = await boot({ ...tusOptions(), guards: { tus: [DenyGuard] } });
+
+    const res = await fetch(`${baseUrl}/media/uploads/some-id/parts/1`, { method: 'PUT' });
+
+    expect([401, 403]).not.toContain(res.status);
+  });
+
+  it('works as the static field on forRootAsync too', async () => {
+    const baseUrl = await bootAsync(() => tusOptions(), { tus: [TokenGuard] });
+
+    const denied = await fetch(`${baseUrl}/media/uploads`, {
+      method: 'POST',
+      headers: { 'upload-length': '5', 'upload-metadata': `filename ${b64('a.txt')}` },
+    });
+    expect(denied.status).toBe(401);
+
+    const allowed = await fetch(`${baseUrl}/media/uploads`, {
+      method: 'POST',
+      headers: {
+        'upload-length': '5',
+        'upload-metadata': `filename ${b64('a.txt')}`,
+        'x-test-token': TOKEN,
+      },
+    });
+    expect(allowed.status).toBe(201);
+  });
+});
+
 describe('guards option — forRootAsync (static field)', () => {
   it('applies guards even though options are resolved async', async () => {
     const baseUrl = await bootAsync(() => tusOptions(), [TokenGuard]);
