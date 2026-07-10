@@ -1,8 +1,10 @@
 import { useQuery } from '@tanstack/react-query';
 import { useEffect, useMemo, useState } from 'react';
+import { createPortal } from 'react-dom';
 import * as XLSX from 'xlsx';
 import { mediaConsoleClient } from '../client/media-console-client.js';
 import type { ObjectDetailResponse } from '../client/types.js';
+import { DataTable } from './DataTable.js';
 import { Notice, formatBytes } from './ui.js';
 
 /** An object opened in the preview lightbox: the detail (signed `url`, size, type) plus the disk and
@@ -57,9 +59,6 @@ function textFlavor(item: PreviewItem): 'csv' | 'tsv' | 'json' | 'plain' {
   if (type.includes('json') || /\.json$/i.test(item.name)) return 'json';
   return 'plain';
 }
-
-/** Cap on rendered CSV rows — a preview, not a data grid; the "Open ↗" link has the full file. */
-const MAX_TABLE_ROWS = 500;
 
 /** Above this size we don't fetch the object for an inline text/CSV preview — a multi-MB CSV would
  *  pull the whole file into the tab and freeze parsing. The "Open ↗" link still serves the original. */
@@ -129,74 +128,6 @@ function parseDelimited(text: string, delimiter: string): string[][] {
   return rows;
 }
 
-/** A scrollable, filterable grid shared by the CSV/TSV and XLSX previews: a substring filter across
- *  all cells (case-insensitive), the first row as a sticky-styled header, and a cap on rendered rows
- *  (applied after filtering) — a preview, not a data grid. */
-function DataTable({ header, body }: { header: string[]; body: string[][] }): JSX.Element {
-  const [filter, setFilter] = useState('');
-  const needle = filter.trim().toLowerCase();
-  const filtered = useMemo(
-    () =>
-      needle
-        ? body.filter((cells) => cells.some((cell) => cell.toLowerCase().includes(needle)))
-        : body,
-    [body, needle],
-  );
-  const shown = filtered.slice(0, MAX_TABLE_ROWS);
-  return (
-    <div className="flex max-h-[78vh] min-h-0 flex-col gap-2">
-      <div className="flex items-center gap-2">
-        <div className="flex flex-1 items-center gap-1.5 rounded-md border border-[var(--line)] px-2">
-          <span className="text-zinc-600">⌕</span>
-          <input
-            value={filter}
-            onChange={(event) => setFilter(event.target.value)}
-            placeholder="filter rows…"
-            className="mono w-full bg-transparent py-1.5 text-xs text-zinc-200 placeholder:text-zinc-600 focus:outline-none"
-          />
-        </div>
-        <span className="mono tnum shrink-0 text-[10px] text-zinc-600">
-          {filtered.length}
-          {needle ? ` / ${body.length}` : ''} {body.length === 1 ? 'row' : 'rows'}
-        </span>
-      </div>
-      <div className="min-h-0 flex-1 overflow-auto rounded-md border border-[var(--line)]">
-        <table className="w-full text-left text-xs">
-          <thead className="sticky top-0 bg-[var(--panel)]">
-            <tr className="mono border-b border-[var(--line)] uppercase tracking-wider text-zinc-600">
-              {header.map((cell, index) => (
-                // biome-ignore lint/suspicious/noArrayIndexKey: table header cells have no stable id
-                <th key={index} className="whitespace-nowrap px-3 py-1.5 font-normal">
-                  {cell}
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-[var(--line-soft)]">
-            {shown.map((cells, rowIndex) => (
-              // biome-ignore lint/suspicious/noArrayIndexKey: table rows have no stable id
-              <tr key={rowIndex} className="hover:bg-zinc-900/40">
-                {header.map((_, cellIndex) => (
-                  // biome-ignore lint/suspicious/noArrayIndexKey: table cells have no stable id
-                  <td key={cellIndex} className="mono whitespace-nowrap px-3 py-1 text-zinc-300">
-                    {cells[cellIndex] ?? ''}
-                  </td>
-                ))}
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-      {filtered.length > shown.length && (
-        <p className="mono shrink-0 text-[10px] text-zinc-600">
-          Showing first {shown.length} of {filtered.length} rows — open the original for the full
-          file.
-        </p>
-      )}
-    </div>
-  );
-}
-
 function DelimitedTable({ text, delimiter }: { text: string; delimiter: string }): JSX.Element {
   const rows = parseDelimited(text.trimEnd(), delimiter);
   const header = rows[0];
@@ -251,7 +182,7 @@ function SheetPreview({ item }: { item: PreviewItem }): JSX.Element {
     return <FallbackCard item={item} message="Could not read this spreadsheet." />;
   }
   return (
-    <div className="flex flex-col gap-2">
+    <div className="flex min-h-0 flex-1 flex-col gap-2">
       {workbook.SheetNames.length > 1 && (
         <div className="flex flex-wrap gap-1">
           {workbook.SheetNames.map((name, index) => (
@@ -313,7 +244,7 @@ function TextPreview({ item }: { item: PreviewItem }): JSX.Element {
   if (flavor === 'tsv') return <DelimitedTable text={query.data} delimiter={'\t'} />;
   const body = flavor === 'json' ? prettyJson(query.data) : query.data;
   return (
-    <pre className="mono max-h-[74vh] overflow-auto whitespace-pre-wrap break-words rounded-md border border-[var(--line)] bg-black/30 p-3 text-xs text-zinc-300">
+    <pre className="mono min-h-0 flex-1 overflow-auto whitespace-pre-wrap break-words rounded-md border border-[var(--line)] bg-black/30 p-3 text-xs text-zinc-300">
       {body}
     </pre>
   );
@@ -323,22 +254,24 @@ function PreviewBody({ item, kind }: { item: PreviewItem; kind: PreviewKind }): 
   switch (kind) {
     case 'image':
       return (
-        <img
-          src={item.url}
-          alt={item.name}
-          className="mx-auto max-h-[78vh] max-w-full rounded-md object-contain"
-        />
+        <div className="grid min-h-0 flex-1 place-items-center">
+          <img
+            src={item.url}
+            alt={item.name}
+            className="max-h-full max-w-full rounded-md object-contain"
+          />
+        </div>
       );
     case 'video':
       return (
-        <div className="grid place-items-center">
+        <div className="grid min-h-0 flex-1 place-items-center">
           {/* biome-ignore lint/a11y/useMediaCaption: preview of an arbitrary stored object; no track available */}
-          <video src={item.url} controls className="mx-auto max-h-[78vh] max-w-full rounded-md" />
+          <video src={item.url} controls className="max-h-full max-w-full rounded-md" />
         </div>
       );
     case 'audio':
       return (
-        <div className="grid place-items-center py-16">
+        <div className="grid min-h-0 flex-1 place-items-center">
           {/* biome-ignore lint/a11y/useMediaCaption: preview of an arbitrary stored object */}
           <audio src={item.url} controls className="w-full max-w-md" />
         </div>
@@ -350,7 +283,7 @@ function PreviewBody({ item, kind }: { item: PreviewItem; kind: PreviewKind }): 
         <iframe
           src={mediaConsoleClient.objectRawUrl(item.disk, item.key)}
           title={item.name}
-          className="h-[78vh] w-full rounded-md border border-[var(--line)] bg-white"
+          className="min-h-0 w-full flex-1 rounded-md border border-[var(--line)] bg-white"
         />
       );
     case 'text':
@@ -389,7 +322,9 @@ export function Lightbox({
   if (!item) return null;
   const kind = previewKind(item);
 
-  return (
+  // Rendered into <body> via a portal so the fixed backdrop is positioned against the viewport, not a
+  // transformed/blurred ancestor (which would offset it and force the page to scroll to see it all).
+  return createPortal(
     // biome-ignore lint/a11y/useKeyWithClickEvents: closes only on a direct backdrop click; Escape is handled globally above
     <div
       className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-black/80 p-6 backdrop-blur-sm"
@@ -398,7 +333,7 @@ export function Lightbox({
       }}
     >
       <div
-        className="flex max-h-full w-full max-w-5xl flex-col overflow-hidden rounded-lg border border-[var(--line)] bg-[var(--panel)] shadow-2xl"
+        className="flex h-[86vh] max-h-full w-full max-w-5xl flex-col overflow-hidden rounded-lg border border-[var(--line)] bg-[var(--panel)] shadow-2xl"
         aria-label={`Preview of ${item.name}`}
       >
         <div className="flex items-center gap-3 border-b border-[var(--line)] px-4 py-2.5">
@@ -430,10 +365,11 @@ export function Lightbox({
             ✕
           </button>
         </div>
-        <div className="min-h-0 flex-1 overflow-auto p-4">
+        <div className="flex min-h-0 flex-1 flex-col overflow-hidden p-4">
           <PreviewBody item={item} kind={kind} />
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
