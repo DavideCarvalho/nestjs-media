@@ -52,6 +52,12 @@ export class MediaConsoleActionsController {
     return this.service.moveObject(disk, body.from, body.to);
   }
 
+  @Post('disks/:disk/move-folder')
+  @HttpCode(204)
+  moveFolder(@Param('disk') disk: string, @Body() body: CopyMoveBody): Promise<void> {
+    return this.service.moveFolder(disk, body.from, body.to);
+  }
+
   /**
    * Uploads a file to `key` on the disk. The body is the raw bytes sent as `application/octet-stream`
    * so the host's JSON/urlencoded body parsers never consume the stream; the real MIME rides as the

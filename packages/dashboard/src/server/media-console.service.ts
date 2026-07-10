@@ -242,6 +242,39 @@ export class MediaConsoleService {
     await this.diskOrThrow(disk).move(from, to);
   }
 
+  /** Moves a whole "folder" (every object under `<from>/`, nested included) to `<to>/`, preserving
+   *  each key's path relative to the source. Same flat-listing sweep as {@link deleteFolder}. Rejects
+   *  moving a folder into itself or a descendant (which would recurse forever). The destination folder
+   *  marker is written and the source marker removed so both listings stay consistent. Actions-gated. */
+  async moveFolder(disk: string, from: string, to: string): Promise<void> {
+    const driver = this.diskOrThrow(disk);
+    const fromNormalized = from.replace(/^\/+/, '').replace(/\/+$/, '');
+    const toNormalized = to.replace(/^\/+/, '').replace(/\/+$/, '');
+    if (fromNormalized === '') throw new BadRequestException('Source folder is required');
+    if (toNormalized === '') throw new BadRequestException('Destination folder is required');
+    const fromPrefix = `${fromNormalized}/`;
+    const toPrefix = `${toNormalized}/`;
+    if (toPrefix === fromPrefix || toPrefix.startsWith(fromPrefix)) {
+      throw new BadRequestException('Cannot move a folder into itself');
+    }
+    let cursor: string | undefined;
+    do {
+      const result = await driver.list(fromPrefix, {
+        delimiter: '',
+        limit: DELETE_SWEEP_LIMIT,
+        ...(cursor ? { cursor } : {}),
+      });
+      for (const entry of result.files) {
+        await driver.move(entry.key, `${toPrefix}${entry.key.slice(fromPrefix.length)}`);
+      }
+      cursor = result.cursor;
+    } while (cursor);
+    // Relocate the zero-byte marker (its key equals the sweep prefix, so the sweep skips it): create
+    // the destination marker, drop the source one. Idempotent if the folder had no explicit marker.
+    await driver.put(toPrefix, Buffer.alloc(0));
+    await driver.delete(fromPrefix);
+  }
+
   async listUploads(filter: { disk?: string; prefix?: string }): Promise<UploadListResponse> {
     if (!this.uploads || typeof this.uploads.list !== 'function') return { uploads: [] };
     const sessions = await this.uploads.list({

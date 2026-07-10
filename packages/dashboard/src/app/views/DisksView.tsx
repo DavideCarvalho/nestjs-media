@@ -7,7 +7,7 @@ import type {
   ObjectFolder,
   ObjectListResponse,
 } from '../../client/types.js';
-import { FolderTree } from '../FolderTree.js';
+import { DRAG_MIME, type DragItem, FolderTree } from '../FolderTree.js';
 import { Lightbox, type PreviewItem } from '../Lightbox.js';
 import { Button, GhostButton, Modal, Notice, Panel, formatBytes, formatDate } from '../ui.js';
 import type { Route } from '../useHashRoute.js';
@@ -64,6 +64,12 @@ function buildObjectsParams(
 
 function describeError(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+/** Arm a drag from a file/folder row: stash the item as JSON so a tree drop target can read it. */
+function startRowDrag(event: React.DragEvent, item: DragItem): void {
+  event.dataTransfer.setData(DRAG_MIME, JSON.stringify(item));
+  event.dataTransfer.effectAllowed = 'move';
 }
 
 /** The full object key for a name placed into `prefix`: the browsed prefix + the name. The prefix
@@ -269,44 +275,46 @@ function FolderDialog({
  *  place. Copy keeps the original; Move deletes it after a successful copy (server-side). */
 function CopyMoveDialog({
   kind,
-  disk,
+  diskInfo,
   sourceKey,
   onClose,
   onDone,
 }: {
   kind: 'copy' | 'move';
-  disk: string;
+  diskInfo: DiskInfo;
   sourceKey: string;
   onClose: () => void;
   onDone: () => Promise<void>;
 }): JSX.Element {
-  const [destination, setDestination] = useState(sourceKey);
+  const disk = diskInfo.name;
+  const lastSlash = sourceKey.lastIndexOf('/');
+  const sourceName = lastSlash === -1 ? sourceKey : sourceKey.slice(lastSlash + 1);
+  const sourceDir = lastSlash === -1 ? '' : sourceKey.slice(0, lastSlash + 1);
+  // Destination is a picked folder (from the tree) + an editable filename — no free-text keys.
+  const [destPrefix, setDestPrefix] = useState(sourceDir);
+  const [fileName, setFileName] = useState(sourceName);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    const input = inputRef.current;
-    if (!input) return;
-    input.focus();
-    // Select just the filename (after the last slash) so a rename is one keystroke, not a re-type.
-    const slash = sourceKey.lastIndexOf('/');
-    input.setSelectionRange(slash + 1, sourceKey.length);
-  }, [sourceKey]);
+    inputRef.current?.select();
+  }, []);
 
   const verb = kind === 'copy' ? 'Copy' : 'Move';
-  const target = destination.trim();
-  const unchanged = target === sourceKey;
+  const trimmedName = fileName.trim();
+  const destination = keyIn(destPrefix, trimmedName);
+  const unchanged = destination === sourceKey;
 
   async function submit(): Promise<void> {
-    if (target === '' || unchanged) return;
+    if (trimmedName === '' || unchanged) return;
     setBusy(true);
     setError(null);
     try {
       if (kind === 'copy') {
-        await mediaConsoleClient.copyObject(disk, sourceKey, target);
+        await mediaConsoleClient.copyObject(disk, sourceKey, destination);
       } else {
-        await mediaConsoleClient.moveObject(disk, sourceKey, target);
+        await mediaConsoleClient.moveObject(disk, sourceKey, destination);
       }
       await onDone();
       onClose();
@@ -328,31 +336,43 @@ function CopyMoveDialog({
           <Button
             tone={kind === 'move' ? 'rose' : 'emerald'}
             onClick={submit}
-            disabled={busy || target === '' || unchanged}
+            disabled={busy || trimmedName === '' || unchanged}
           >
             {busy ? `${verb === 'Copy' ? 'Copying' : 'Moving'}…` : verb}
           </Button>
         </>
       }
     >
-      <p className="mono mb-3 text-[11px] text-zinc-500">
+      <p className="mono mb-2 text-[11px] text-zinc-500">
         From <span className="text-zinc-300">{sourceKey}</span>
       </p>
-      <label className="mono flex flex-col gap-1 text-[10px] uppercase tracking-wider text-zinc-600">
-        Destination key
+      <div className="mono mb-1 text-[10px] uppercase tracking-wider text-zinc-600">
+        Destination folder
+      </div>
+      <div className="max-h-56 overflow-auto rounded-md border border-[var(--line)] bg-black/20 p-1">
+        <FolderTree
+          disks={[diskInfo]}
+          selectedDisk={disk}
+          currentPrefix={destPrefix}
+          onNavigate={(_navDisk, navPrefix) => setDestPrefix(navPrefix)}
+        />
+      </div>
+      <label className="mono mt-3 flex flex-col gap-1 text-[10px] uppercase tracking-wider text-zinc-600">
+        Name
         <input
           ref={inputRef}
-          value={destination}
-          onChange={(event) => setDestination(event.target.value)}
+          value={fileName}
+          onChange={(event) => setFileName(event.target.value)}
           onKeyDown={(event) => {
             if (event.key === 'Enter') submit();
           }}
           className="mono rounded-md border border-[var(--line)] bg-black/30 px-3 py-2 text-sm normal-case tracking-normal text-zinc-100 focus:border-emerald-500/40 focus:outline-none"
         />
       </label>
-      {unchanged && (
-        <p className="mono mt-2 text-[10px] text-zinc-600">Change the key to a new destination.</p>
-      )}
+      <p className="mono mt-2 text-[10px] text-zinc-600">
+        To <span className="text-zinc-400">{destination || '—'}</span>
+        {unchanged && ' (same as source — pick a different folder or name)'}
+      </p>
       {error && <p className="mono mt-3 text-[11px] s-error">{error}</p>}
     </Modal>
   );
@@ -443,6 +463,36 @@ export function DisksView({ route, actions }: { route: Route; actions: boolean }
     await navigator.clipboard.writeText(key);
   }
 
+  /** Drop a dragged file/folder onto a tree node: move it under that node. Same-disk only — moving
+   *  across buckets needs server-side cross-disk copy, not yet available. No-ops when the drop lands
+   *  where the item already is. */
+  async function handleTreeDrop(
+    item: DragItem,
+    targetDisk: string,
+    targetPrefix: string,
+  ): Promise<void> {
+    if (item.disk !== targetDisk) {
+      window.alert('Moving between buckets is not supported yet.');
+      return;
+    }
+    const destination = keyIn(targetPrefix, item.name);
+    setBusyKey('__move__');
+    try {
+      if (item.kind === 'file') {
+        if (destination === item.key) return;
+        await mediaConsoleClient.moveObject(targetDisk, item.key, destination);
+      } else {
+        if (destination === item.prefix.replace(/\/+$/, '')) return;
+        await mediaConsoleClient.moveFolder(targetDisk, item.prefix, destination);
+      }
+      await invalidateObjects(targetDisk);
+    } catch (error) {
+      window.alert(`Move failed: ${describeError(error)}`);
+    } finally {
+      setBusyKey(null);
+    }
+  }
+
   /** Quick drag-drop-to-panel upload (the modal is the click path). */
   async function handleDropUpload(disk: string, files: FileList): Promise<void> {
     const list = Array.from(files);
@@ -506,6 +556,7 @@ export function DisksView({ route, actions }: { route: Route; actions: boolean }
               selectedDisk={selectedDisk}
               currentPrefix={prefix}
               onNavigate={navigateToPrefix}
+              onDropMove={actions ? handleTreeDrop : undefined}
             />
           )}
         </Panel>
@@ -598,7 +649,22 @@ export function DisksView({ route, actions }: { route: Route; actions: boolean }
                   </thead>
                   <tbody className="divide-y divide-[var(--line-soft)]">
                     {page.folders.map((folder) => (
-                      <tr key={folder.prefix} className="hover:bg-zinc-900/40">
+                      <tr
+                        key={folder.prefix}
+                        draggable={actions}
+                        onDragStart={
+                          actions
+                            ? (event) =>
+                                startRowDrag(event, {
+                                  kind: 'folder',
+                                  disk: selectedDisk,
+                                  prefix: folder.prefix,
+                                  name: folder.name,
+                                })
+                            : undefined
+                        }
+                        className={`hover:bg-zinc-900/40 ${actions ? 'cursor-grab' : ''}`}
+                      >
                         <td className="py-2 pr-2">
                           <button
                             type="button"
@@ -630,7 +696,22 @@ export function DisksView({ route, actions }: { route: Route; actions: boolean }
                       </tr>
                     ))}
                     {page.files.map((file) => (
-                      <tr key={file.key} className="hover:bg-zinc-900/40">
+                      <tr
+                        key={file.key}
+                        draggable={actions}
+                        onDragStart={
+                          actions
+                            ? (event) =>
+                                startRowDrag(event, {
+                                  kind: 'file',
+                                  disk: selectedDisk,
+                                  key: file.key,
+                                  name: file.name,
+                                })
+                            : undefined
+                        }
+                        className={`hover:bg-zinc-900/40 ${actions ? 'cursor-grab' : ''}`}
+                      >
                         <td className="mono py-2 pr-2 text-[13px] text-zinc-200">{file.name}</td>
                         <td className="mono tnum py-2 pr-2 text-xs text-zinc-500">
                           {formatBytes(file.sizeBytes)}
@@ -723,10 +804,10 @@ export function DisksView({ route, actions }: { route: Route; actions: boolean }
           onCreated={() => invalidateObjects(selectedDisk)}
         />
       )}
-      {selectedDisk && (dialog?.kind === 'copy' || dialog?.kind === 'move') && (
+      {selectedDisk && selectedDiskInfo && (dialog?.kind === 'copy' || dialog?.kind === 'move') && (
         <CopyMoveDialog
           kind={dialog.kind}
-          disk={selectedDisk}
+          diskInfo={selectedDiskInfo}
           sourceKey={dialog.key}
           onClose={() => setDialog(null)}
           onDone={() => invalidateObjects(selectedDisk)}
