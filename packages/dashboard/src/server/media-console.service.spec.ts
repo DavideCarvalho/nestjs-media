@@ -164,7 +164,7 @@ describe('MediaConsoleService', () => {
     } as unknown as StorageManager;
     const service = new MediaConsoleService(storage, null, null, true);
 
-    await service.moveFolder('primary', 'bases', 'templates/bases');
+    await service.moveFolder('primary', 'bases', 'primary', 'templates/bases');
 
     // Each key relocates under the destination with its relative path intact.
     expect(moves).toEqual([{ from: 'bases/deep/a.txt', to: 'templates/bases/deep/a.txt' }]);
@@ -173,7 +173,7 @@ describe('MediaConsoleService', () => {
     expect(deletes).toEqual(['bases/']);
   });
 
-  it('rejects moving a folder into itself or a descendant', async () => {
+  it('rejects moving a folder into itself or a descendant (same disk)', async () => {
     const driver = {
       capabilities: { presign: true, multipart: true, publicUrls: false, list: true },
     };
@@ -183,8 +183,73 @@ describe('MediaConsoleService', () => {
       disk: () => driver,
     } as unknown as StorageManager;
     const service = new MediaConsoleService(storage, null, null, true);
-    await expect(service.moveFolder('primary', 'bases', 'bases/sub')).rejects.toThrow(
+    await expect(service.moveFolder('primary', 'bases', 'primary', 'bases/sub')).rejects.toThrow(
       /into itself/,
     );
+  });
+
+  it('moves an object across disks by streaming get→put→delete (no driver copy/move)', async () => {
+    const primaryOps: string[] = [];
+    const secondaryPuts: Array<{ key: string; contentType?: string }> = [];
+    const primary = {
+      capabilities: { presign: true, multipart: true, publicUrls: false, list: true },
+      stat: async () => ({ size: 12, contentType: 'image/png' }),
+      get: async () => {
+        primaryOps.push('get');
+        return Buffer.from('hello world!');
+      },
+      delete: async (key: string) => {
+        primaryOps.push(`delete:${key}`);
+      },
+      copy: async () => {
+        throw new Error('driver.copy must not be used across disks');
+      },
+      move: async () => {
+        throw new Error('driver.move must not be used across disks');
+      },
+    };
+    const secondary = {
+      capabilities: { presign: true, multipart: true, publicUrls: false, list: true },
+      put: async (key: string, _body: Buffer, options?: { contentType?: string }) => {
+        secondaryPuts.push({
+          key,
+          ...(options?.contentType ? { contentType: options.contentType } : {}),
+        });
+      },
+    };
+    const storage = {
+      defaultDisk: 'primary',
+      diskNames: () => ['primary', 'secondary'],
+      disk: (name: string) => (name === 'secondary' ? secondary : primary),
+    } as unknown as StorageManager;
+    const service = new MediaConsoleService(storage, null, null, true);
+
+    await service.moveObject('primary', 'a/logo.png', 'secondary', 'b/logo.png');
+
+    // Bytes stream through the pod, content type is preserved, and the source is removed for a move.
+    expect(primaryOps).toEqual(['get', 'delete:a/logo.png']);
+    expect(secondaryPuts).toEqual([{ key: 'b/logo.png', contentType: 'image/png' }]);
+  });
+
+  it('rejects a cross-disk transfer larger than the buffered ceiling', async () => {
+    const primary = {
+      capabilities: { presign: true, multipart: true, publicUrls: false, list: true },
+      stat: async () => ({ size: 200 * 1024 * 1024, contentType: 'application/octet-stream' }),
+      get: async () => Buffer.alloc(0),
+    };
+    const secondary = {
+      capabilities: { presign: true, multipart: true, publicUrls: false, list: true },
+      put: async () => undefined,
+    };
+    const storage = {
+      defaultDisk: 'primary',
+      diskNames: () => ['primary', 'secondary'],
+      disk: (name: string) => (name === 'secondary' ? secondary : primary),
+    } as unknown as StorageManager;
+    const service = new MediaConsoleService(storage, null, null, true);
+
+    await expect(
+      service.copyObject('primary', 'huge.bin', 'secondary', 'huge.bin'),
+    ).rejects.toThrow(/too large|limit/i);
   });
 });

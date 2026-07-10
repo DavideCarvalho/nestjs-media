@@ -42,6 +42,10 @@ const DEFAULT_PAGE_LIMIT = 50;
 const MAX_UPLOAD_BYTES = 100 * 1024 * 1024;
 /** Page size when sweeping a folder's objects for a recursive delete. */
 const DELETE_SWEEP_LIMIT = 1000;
+/** Ceiling for a cross-disk copy/move. The driver has no server-side cross-bucket copy, so the object
+ *  is streamed through the pod (get→put, buffered) — bounded to protect the heap. Same-disk transfers
+ *  use the driver's native copy/move and are not subject to this cap. */
+const MAX_CROSS_DISK_BYTES = 100 * 1024 * 1024;
 
 /** Last path segment of a folder prefix, ignoring a trailing slash. */
 function lastSegment(prefix: string): string {
@@ -234,45 +238,97 @@ export class MediaConsoleService {
     await driver.delete(sweepPrefix);
   }
 
-  async copyObject(disk: string, from: string, to: string): Promise<void> {
-    await this.diskOrThrow(disk).copy(from, to);
+  async copyObject(fromDisk: string, from: string, toDisk: string, to: string): Promise<void> {
+    await this.transferKey('copy', fromDisk, from, toDisk, to);
   }
 
-  async moveObject(disk: string, from: string, to: string): Promise<void> {
-    await this.diskOrThrow(disk).move(from, to);
+  async moveObject(fromDisk: string, from: string, toDisk: string, to: string): Promise<void> {
+    await this.transferKey('move', fromDisk, from, toDisk, to);
   }
 
-  /** Moves a whole "folder" (every object under `<from>/`, nested included) to `<to>/`, preserving
-   *  each key's path relative to the source. Same flat-listing sweep as {@link deleteFolder}. Rejects
-   *  moving a folder into itself or a descendant (which would recurse forever). The destination folder
-   *  marker is written and the source marker removed so both listings stay consistent. Actions-gated. */
-  async moveFolder(disk: string, from: string, to: string): Promise<void> {
-    const driver = this.diskOrThrow(disk);
+  /** Copies or moves a single object, on the same disk or across disks. Same-disk uses the driver's
+   *  native `copy`/`move` (server-side, no bytes through the pod). Cross-disk has no driver primitive,
+   *  so the object is streamed through the pod (get→put, buffered), preserving its content type and
+   *  bounded at {@link MAX_CROSS_DISK_BYTES}; a `move` then deletes the source. */
+  private async transferKey(
+    op: 'copy' | 'move',
+    fromDisk: string,
+    from: string,
+    toDisk: string,
+    to: string,
+  ): Promise<void> {
+    const fromDriver = this.diskOrThrow(fromDisk);
+    if (fromDisk === toDisk) {
+      if (op === 'move') await fromDriver.move(from, to);
+      else await fromDriver.copy(from, to);
+      return;
+    }
+    const toDriver = this.diskOrThrow(toDisk);
+    const stat = await fromDriver.stat(from);
+    if (stat.size > MAX_CROSS_DISK_BYTES) {
+      throw new PayloadTooLargeException(
+        `"${from}" is ${Math.round(stat.size / (1024 * 1024))} MB — over the ${
+          MAX_CROSS_DISK_BYTES / (1024 * 1024)
+        } MB limit for copying across disks from the console.`,
+      );
+    }
+    const bytes = await fromDriver.get(from);
+    await toDriver.put(to, bytes, stat.contentType ? { contentType: stat.contentType } : undefined);
+    if (op === 'move') await fromDriver.delete(from);
+  }
+
+  /** Moves a whole "folder" (every object under `<from>/`, nested included) to `<to>/`, on the same
+   *  disk or across disks, preserving each key's path relative to the source. */
+  async moveFolder(fromDisk: string, from: string, toDisk: string, to: string): Promise<void> {
+    await this.transferFolder('move', fromDisk, from, toDisk, to);
+  }
+
+  /** Copies a whole "folder" (every object under `<from>/`, nested included) to `<to>/`, same disk or
+   *  across disks, preserving each key's path relative to the source. */
+  async copyFolder(fromDisk: string, from: string, toDisk: string, to: string): Promise<void> {
+    await this.transferFolder('copy', fromDisk, from, toDisk, to);
+  }
+
+  /** Shared engine for {@link moveFolder}/{@link copyFolder}. Same flat-listing sweep as
+   *  {@link deleteFolder}; each key is relocated via {@link transferKey} (so cross-disk transfers work
+   *  transparently). On the SAME disk, rejects a destination inside the source (which would recurse
+   *  forever); across disks that constraint doesn't apply. The destination folder marker is written,
+   *  and for a move the source marker is removed, so both listings stay consistent. Actions-gated. */
+  private async transferFolder(
+    op: 'copy' | 'move',
+    fromDisk: string,
+    from: string,
+    toDisk: string,
+    to: string,
+  ): Promise<void> {
+    const fromDriver = this.diskOrThrow(fromDisk);
+    const toDriver = this.diskOrThrow(toDisk);
     const fromNormalized = from.replace(/^\/+/, '').replace(/\/+$/, '');
     const toNormalized = to.replace(/^\/+/, '').replace(/\/+$/, '');
     if (fromNormalized === '') throw new BadRequestException('Source folder is required');
     if (toNormalized === '') throw new BadRequestException('Destination folder is required');
     const fromPrefix = `${fromNormalized}/`;
     const toPrefix = `${toNormalized}/`;
-    if (toPrefix === fromPrefix || toPrefix.startsWith(fromPrefix)) {
-      throw new BadRequestException('Cannot move a folder into itself');
+    if (fromDisk === toDisk && (toPrefix === fromPrefix || toPrefix.startsWith(fromPrefix))) {
+      throw new BadRequestException(`Cannot ${op} a folder into itself`);
     }
     let cursor: string | undefined;
     do {
-      const result = await driver.list(fromPrefix, {
+      const result = await fromDriver.list(fromPrefix, {
         delimiter: '',
         limit: DELETE_SWEEP_LIMIT,
         ...(cursor ? { cursor } : {}),
       });
       for (const entry of result.files) {
-        await driver.move(entry.key, `${toPrefix}${entry.key.slice(fromPrefix.length)}`);
+        const destKey = `${toPrefix}${entry.key.slice(fromPrefix.length)}`;
+        await this.transferKey(op, fromDisk, entry.key, toDisk, destKey);
       }
       cursor = result.cursor;
     } while (cursor);
-    // Relocate the zero-byte marker (its key equals the sweep prefix, so the sweep skips it): create
-    // the destination marker, drop the source one. Idempotent if the folder had no explicit marker.
-    await driver.put(toPrefix, Buffer.alloc(0));
-    await driver.delete(fromPrefix);
+    // Relocate/replicate the zero-byte marker (its key equals the sweep prefix, so the sweep skips it):
+    // write the destination marker, and for a move drop the source one. Idempotent if there was none.
+    await toDriver.put(toPrefix, Buffer.alloc(0));
+    if (op === 'move') await fromDriver.delete(fromPrefix);
   }
 
   async listUploads(filter: { disk?: string; prefix?: string }): Promise<UploadListResponse> {
