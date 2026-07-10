@@ -30,6 +30,7 @@ interface Breadcrumb {
 type Dialog =
   | { kind: 'upload' }
   | { kind: 'folder' }
+  | { kind: 'copy' | 'move'; key: string; name: string }
   | { kind: 'delete-file'; key: string; name: string }
   | { kind: 'delete-folder'; prefix: string; name: string };
 
@@ -267,6 +268,99 @@ function FolderDialog({
   );
 }
 
+/** Modal copy/move: a destination-key input pre-filled with the source key, so the user edits in
+ *  place. Copy keeps the original; Move deletes it after a successful copy (server-side). */
+function CopyMoveDialog({
+  kind,
+  disk,
+  sourceKey,
+  onClose,
+  onDone,
+}: {
+  kind: 'copy' | 'move';
+  disk: string;
+  sourceKey: string;
+  onClose: () => void;
+  onDone: () => Promise<void>;
+}): JSX.Element {
+  const [destination, setDestination] = useState(sourceKey);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    const input = inputRef.current;
+    if (!input) return;
+    input.focus();
+    // Select just the filename (after the last slash) so a rename is one keystroke, not a re-type.
+    const slash = sourceKey.lastIndexOf('/');
+    input.setSelectionRange(slash + 1, sourceKey.length);
+  }, [sourceKey]);
+
+  const verb = kind === 'copy' ? 'Copy' : 'Move';
+  const target = destination.trim();
+  const unchanged = target === sourceKey;
+
+  async function submit(): Promise<void> {
+    if (target === '' || unchanged) return;
+    setBusy(true);
+    setError(null);
+    try {
+      if (kind === 'copy') {
+        await mediaConsoleClient.copyObject(disk, sourceKey, target);
+      } else {
+        await mediaConsoleClient.moveObject(disk, sourceKey, target);
+      }
+      await onDone();
+      onClose();
+    } catch (actionError) {
+      setError(describeError(actionError));
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Modal
+      title={`${verb} object`}
+      onClose={onClose}
+      footer={
+        <>
+          <Button onClick={onClose} disabled={busy}>
+            Cancel
+          </Button>
+          <Button
+            tone={kind === 'move' ? 'rose' : 'emerald'}
+            onClick={submit}
+            disabled={busy || target === '' || unchanged}
+          >
+            {busy ? `${verb === 'Copy' ? 'Copying' : 'Moving'}…` : verb}
+          </Button>
+        </>
+      }
+    >
+      <p className="mono mb-3 text-[11px] text-zinc-500">
+        From <span className="text-zinc-300">{sourceKey}</span>
+      </p>
+      <label className="mono flex flex-col gap-1 text-[10px] uppercase tracking-wider text-zinc-600">
+        Destination key
+        <input
+          ref={inputRef}
+          value={destination}
+          onChange={(event) => setDestination(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter') submit();
+          }}
+          className="mono rounded-md border border-[var(--line)] bg-black/30 px-3 py-2 text-sm normal-case tracking-normal text-zinc-100 focus:border-emerald-500/40 focus:outline-none"
+        />
+      </label>
+      {unchanged && (
+        <p className="mono mt-2 text-[10px] text-zinc-600">Change the key to a new destination.</p>
+      )}
+      {error && <p className="mono mt-3 text-[11px] s-error">{error}</p>}
+    </Modal>
+  );
+}
+
 export function DisksView({ route, actions }: { route: Route; actions: boolean }): JSX.Element {
   const queryClient = useQueryClient();
   const disksQuery = useQuery({ queryKey: ['disks'], queryFn: () => mediaConsoleClient.disks() });
@@ -350,24 +444,6 @@ export function DisksView({ route, actions }: { route: Route; actions: boolean }
 
   async function handleCopyKey(key: string): Promise<void> {
     await navigator.clipboard.writeText(key);
-  }
-
-  async function handleCopyOrMove(kind: 'copy' | 'move', disk: string, key: string): Promise<void> {
-    const destination = window.prompt(`${kind === 'copy' ? 'Copy' : 'Move'} "${key}" to key:`, key);
-    if (!destination || destination === key) return;
-    setBusyKey(key);
-    try {
-      if (kind === 'copy') {
-        await mediaConsoleClient.copyObject(disk, key, destination);
-      } else {
-        await mediaConsoleClient.moveObject(disk, key, destination);
-      }
-      await invalidateObjects(disk);
-    } catch (error) {
-      window.alert(`Failed to ${kind} "${key}": ${describeError(error)}`);
-    } finally {
-      setBusyKey(null);
-    }
   }
 
   /** Quick drag-drop-to-panel upload (the modal is the click path). */
@@ -601,14 +677,16 @@ export function DisksView({ route, actions }: { route: Route; actions: boolean }
                             {actions && (
                               <>
                                 <GhostButton
-                                  disabled={busyKey === file.key}
-                                  onClick={() => handleCopyOrMove('copy', selectedDisk, file.key)}
+                                  onClick={() =>
+                                    setDialog({ kind: 'copy', key: file.key, name: file.name })
+                                  }
                                 >
                                   Copy to…
                                 </GhostButton>
                                 <GhostButton
-                                  disabled={busyKey === file.key}
-                                  onClick={() => handleCopyOrMove('move', selectedDisk, file.key)}
+                                  onClick={() =>
+                                    setDialog({ kind: 'move', key: file.key, name: file.name })
+                                  }
                                 >
                                   Move to…
                                 </GhostButton>
@@ -668,6 +746,15 @@ export function DisksView({ route, actions }: { route: Route; actions: boolean }
           prefix={prefix}
           onClose={() => setDialog(null)}
           onCreated={() => invalidateObjects(selectedDisk)}
+        />
+      )}
+      {selectedDisk && (dialog?.kind === 'copy' || dialog?.kind === 'move') && (
+        <CopyMoveDialog
+          kind={dialog.kind}
+          disk={selectedDisk}
+          sourceKey={dialog.key}
+          onClose={() => setDialog(null)}
+          onDone={() => invalidateObjects(selectedDisk)}
         />
       )}
       {selectedDisk && (dialog?.kind === 'delete-file' || dialog?.kind === 'delete-folder') && (
