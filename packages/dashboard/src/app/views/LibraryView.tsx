@@ -1,24 +1,9 @@
 import { useInfiniteQuery, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useState } from 'react';
+import { type ReactNode, useState } from 'react';
 import { mediaConsoleClient } from '../../client/media-console-client.js';
 import type { CollectionInfo, LibraryRecord } from '../../client/types.js';
+import { GhostButton, Notice, Panel, formatBytes, formatDate } from '../ui.js';
 import type { Route } from '../useHashRoute.js';
-
-const BYTE_UNITS: ReadonlyArray<string> = ['B', 'KB', 'MB', 'GB', 'TB'];
-
-function formatBytes(bytes: number): string {
-  if (bytes <= 0) return '0 B';
-  const exponent = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), BYTE_UNITS.length - 1);
-  const value = bytes / 1024 ** exponent;
-  const unit = BYTE_UNITS[exponent] ?? 'B';
-  return exponent === 0 ? `${value} ${unit}` : `${value.toFixed(1)} ${unit}`;
-}
-
-function formatDate(iso: string): string {
-  const date = new Date(iso);
-  if (Number.isNaN(date.getTime())) return iso;
-  return date.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
-}
 
 function libraryHash(collection: string | undefined): string {
   return collection === undefined
@@ -38,14 +23,16 @@ function CollectionsBar({
   selected: string | undefined;
 }): JSX.Element {
   const chipClass = (active: boolean): string =>
-    `rounded-full px-3 py-1 text-xs font-medium ${
-      active ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+    `mono flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-xs transition-colors ${
+      active
+        ? 'border-zinc-600 bg-zinc-900 text-zinc-100'
+        : 'border-transparent text-zinc-500 hover:text-zinc-300'
     }`;
 
   return (
-    <div className="mb-4 flex flex-wrap gap-2">
+    <div className="mb-4 flex flex-wrap gap-1">
       <a href={libraryHash(undefined)} className={chipClass(selected === undefined)}>
-        All
+        all
       </a>
       {collections.map((collection) => (
         <a
@@ -53,7 +40,10 @@ function CollectionsBar({
           href={libraryHash(collection.key)}
           className={chipClass(selected === collection.key)}
         >
-          {collection.key} · {collection.count} · {formatBytes(collection.sumSize)}
+          {collection.key}
+          <span className="tnum text-zinc-600">
+            {collection.count} · {formatBytes(collection.sumSize)}
+          </span>
         </a>
       ))}
     </div>
@@ -68,9 +58,7 @@ function RecordGrid({
   collection: string | undefined;
 }): JSX.Element {
   if (records.length === 0) {
-    return (
-      <p className="text-sm text-slate-500">No records{collection ? ` in "${collection}"` : ''}.</p>
-    );
+    return <Notice>No records{collection ? ` in "${collection}"` : ''}.</Notice>;
   }
   return (
     <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
@@ -80,17 +68,26 @@ function RecordGrid({
           href={`#/library/${encodeURIComponent(record.id)}${
             collection ? `?collection=${encodeURIComponent(collection)}` : ''
           }`}
-          className="rounded border border-slate-200 bg-white p-3 text-sm hover:border-slate-300"
+          className="rounded-lg border border-[var(--line)] bg-[var(--panel)] p-3 text-sm transition-colors hover:border-zinc-600"
         >
-          <div className="truncate font-medium">{record.fileName}</div>
-          <div className="mt-1 text-xs text-slate-500">{record.mimeType}</div>
-          <div className="mt-1 flex justify-between text-xs text-slate-500">
+          <div className="truncate font-medium text-zinc-200">{record.fileName}</div>
+          <div className="mono mt-1 text-[10px] text-zinc-500">{record.mimeType}</div>
+          <div className="mono tnum mt-2 flex justify-between text-[10px] text-zinc-600">
             <span>{formatBytes(record.size)}</span>
             <span>{formatDate(record.createdAt)}</span>
           </div>
         </a>
       ))}
     </div>
+  );
+}
+
+function DetailRow({ label, children }: { label: string; children: ReactNode }): JSX.Element {
+  return (
+    <>
+      <dt className="mono text-[10px] uppercase tracking-wider text-zinc-600">{label}</dt>
+      <dd className="truncate text-zinc-200">{children}</dd>
+    </>
   );
 }
 
@@ -125,75 +122,78 @@ function RecordDetail({ route }: { route: Route }): JSX.Element {
 
   return (
     <div>
-      <a href={libraryHash(route.collection)} className="text-sm text-slate-600 hover:underline">
-        ← Back to library
+      <a
+        href={libraryHash(route.collection)}
+        className="mono text-xs text-zinc-500 hover:text-zinc-300"
+      >
+        ← back to library
       </a>
-      {detailQuery.isLoading && <p className="mt-3 text-sm text-slate-500">Loading record…</p>}
-      {detailQuery.isError && <p className="mt-3 text-sm text-red-600">Failed to load record.</p>}
+      {detailQuery.isLoading && <Notice>Loading record…</Notice>}
+      {detailQuery.isError && <p className="mt-3 text-sm s-error">Failed to load record.</p>}
       {detail && (
         <div className="mt-3">
-          <div className="rounded border border-slate-200 bg-white p-4 text-sm">
-            <h3 className="font-semibold">{detail.record.fileName}</h3>
-            <dl className="mt-2 grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-slate-600">
-              <dt className="text-slate-400">Collection</dt>
-              <dd>{detail.record.collection}</dd>
-              <dt className="text-slate-400">Mime type</dt>
-              <dd>{detail.record.mimeType}</dd>
-              <dt className="text-slate-400">Size</dt>
-              <dd>{formatBytes(detail.record.size)}</dd>
-              <dt className="text-slate-400">Disk</dt>
-              <dd>{detail.record.disk}</dd>
-              <dt className="text-slate-400">Path</dt>
-              <dd className="truncate">{detail.record.path}</dd>
-              <dt className="text-slate-400">Owner</dt>
-              <dd>
+          <Panel className="p-4">
+            <h3 className="font-semibold text-zinc-100">{detail.record.fileName}</h3>
+            <dl className="mt-3 grid grid-cols-[110px_1fr] gap-x-4 gap-y-2 text-xs">
+              <DetailRow label="Collection">{detail.record.collection}</DetailRow>
+              <DetailRow label="Mime type">
+                <span className="mono">{detail.record.mimeType}</span>
+              </DetailRow>
+              <DetailRow label="Size">{formatBytes(detail.record.size)}</DetailRow>
+              <DetailRow label="Disk">
+                <span className="mono">{detail.record.disk}</span>
+              </DetailRow>
+              <DetailRow label="Path">
+                <span className="mono">{detail.record.path}</span>
+              </DetailRow>
+              <DetailRow label="Owner">
                 {detail.record.ownerType} · {detail.record.ownerId}
-              </dd>
-              <dt className="text-slate-400">Created</dt>
-              <dd>{formatDate(detail.record.createdAt)}</dd>
+              </DetailRow>
+              <DetailRow label="Created">{formatDate(detail.record.createdAt)}</DetailRow>
             </dl>
-            <button
-              type="button"
-              onClick={handleDelete}
-              className="mt-4 rounded border border-red-200 px-3 py-1.5 text-xs font-medium text-red-600 hover:bg-red-50"
-            >
-              Delete
-            </button>
-            {deleteError && <p className="mt-2 text-xs text-red-600">{deleteError}</p>}
-          </div>
-          <div className="mt-4">
-            <h4 className="mb-2 text-sm font-semibold">Variants</h4>
-            {detail.variants.length === 0 ? (
-              <p className="text-sm text-slate-500">No variants.</p>
-            ) : (
-              <div className="flex flex-wrap gap-3">
-                {detail.variants.map((variant) => (
-                  <div
-                    key={variant.name}
-                    className="rounded border border-slate-200 bg-white p-2 text-xs"
-                  >
-                    <div className="mb-1 font-medium text-slate-600">{variant.name}</div>
-                    {isImage(detail.record.mimeType) ? (
-                      <img
-                        src={variant.url}
-                        alt={variant.name}
-                        className="max-h-40 rounded border"
-                      />
-                    ) : (
-                      <a
-                        href={variant.url}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="text-slate-600 hover:underline"
-                      >
-                        Open
-                      </a>
-                    )}
+            <div className="mt-4">
+              <GhostButton tone="rose" onClick={handleDelete}>
+                Delete
+              </GhostButton>
+              {deleteError && <p className="mt-2 text-xs s-error">{deleteError}</p>}
+            </div>
+          </Panel>
+
+          <h4 className="mono mb-2 mt-4 text-[10px] uppercase tracking-wider text-zinc-600">
+            variants
+          </h4>
+          {detail.variants.length === 0 ? (
+            <Notice>No variants.</Notice>
+          ) : (
+            <div className="flex flex-wrap gap-3">
+              {detail.variants.map((variant) => (
+                <div
+                  key={variant.name}
+                  className="rounded-lg border border-[var(--line)] bg-[var(--panel)] p-2 text-xs"
+                >
+                  <div className="mono mb-1.5 text-[10px] uppercase tracking-wider text-zinc-500">
+                    {variant.name}
                   </div>
-                ))}
-              </div>
-            )}
-          </div>
+                  {isImage(detail.record.mimeType) ? (
+                    <img
+                      src={variant.url}
+                      alt={variant.name}
+                      className="max-h-40 rounded border border-[var(--line)]"
+                    />
+                  ) : (
+                    <a
+                      href={variant.url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-emerald-300 hover:text-emerald-200"
+                    >
+                      Open ↗
+                    </a>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -236,18 +236,18 @@ function LibraryGrid({ route, hasStore }: { route: Route; hasStore: boolean }): 
         collections={collectionsQuery.data?.collections ?? []}
         selected={route.collection}
       />
-      {libraryQuery.isLoading && <p className="text-sm text-slate-500">Loading library…</p>}
-      {libraryQuery.isError && <p className="text-sm text-red-600">Failed to load library.</p>}
+      {libraryQuery.isLoading && <Notice>Loading library…</Notice>}
+      {libraryQuery.isError && <p className="text-sm s-error">Failed to load library.</p>}
       <RecordGrid records={records} collection={route.collection} />
       {libraryQuery.hasNextPage && (
-        <button
-          type="button"
-          onClick={() => libraryQuery.fetchNextPage()}
-          disabled={libraryQuery.isFetchingNextPage}
-          className="mt-4 rounded border border-slate-200 bg-white px-3 py-1.5 text-sm font-medium text-slate-600 hover:bg-slate-100 disabled:opacity-50"
-        >
-          {libraryQuery.isFetchingNextPage ? 'Loading…' : 'Load more'}
-        </button>
+        <div className="mt-4">
+          <GhostButton
+            onClick={() => libraryQuery.fetchNextPage()}
+            disabled={libraryQuery.isFetchingNextPage}
+          >
+            {libraryQuery.isFetchingNextPage ? 'Loading…' : 'Load more'}
+          </GhostButton>
+        </div>
       )}
     </div>
   );
@@ -256,17 +256,24 @@ function LibraryGrid({ route, hasStore }: { route: Route; hasStore: boolean }): 
 export function LibraryView({ route, hasStore }: { route: Route; hasStore: boolean }): JSX.Element {
   if (!hasStore) {
     return (
-      <section>
-        <h2 className="mb-2 text-base font-semibold">Library</h2>
-        <p className="text-sm text-slate-500">
-          No media store configured. Configure a <code>MediaStore</code> to browse the library.
-        </p>
+      <section className="rise">
+        <div className="grid place-items-center py-16 text-center">
+          <div className="max-w-sm">
+            <div className="mono mb-2 text-[10px] uppercase tracking-[0.2em] text-zinc-600">
+              library
+            </div>
+            <p className="text-sm text-zinc-500">
+              No media store configured. Bind a{' '}
+              <code className="mono text-zinc-300">MediaStore</code> to browse collections and their
+              variants here.
+            </p>
+          </div>
+        </div>
       </section>
     );
   }
   return (
-    <section>
-      <h2 className="mb-2 text-base font-semibold">Library</h2>
+    <section className="rise">
       {route.recordId ? (
         <RecordDetail route={route} />
       ) : (

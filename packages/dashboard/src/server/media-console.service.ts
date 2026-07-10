@@ -1,3 +1,4 @@
+import type { Readable } from 'node:stream';
 import type {
   MediaRecord,
   MediaStore,
@@ -6,7 +7,13 @@ import type {
   UploadSession,
   UploadSessionStore,
 } from '@dudousxd/nestjs-media-core';
-import { Inject, Injectable, NotFoundException, Optional } from '@nestjs/common';
+import {
+  BadRequestException,
+  Inject,
+  Injectable,
+  NotFoundException,
+  Optional,
+} from '@nestjs/common';
 import type {
   CollectionsResponse,
   DiskListResponse,
@@ -118,12 +125,16 @@ export class MediaConsoleService {
     });
     return {
       folders: result.folders.map((prefix) => ({ name: lastSegment(prefix), prefix })),
-      files: result.files.map((entry) => ({
-        key: entry.key,
-        name: entry.name,
-        sizeBytes: entry.sizeBytes,
-        lastModified: entry.lastModified ? entry.lastModified.toISOString() : null,
-      })),
+      // Drop the zero-byte "folder marker" (a key ending in `/`, whose name is empty after the
+      // prefix) that `createFolder` writes — it's the folder itself, not a file inside it.
+      files: result.files
+        .filter((entry) => entry.name !== '')
+        .map((entry) => ({
+          key: entry.key,
+          name: entry.name,
+          sizeBytes: entry.sizeBytes,
+          lastModified: entry.lastModified ? entry.lastModified.toISOString() : null,
+        })),
       ...(result.cursor ? { cursor: result.cursor } : {}),
     };
   }
@@ -141,6 +152,33 @@ export class MediaConsoleService {
       ...(stat.lastModified ? { lastModified: stat.lastModified.toISOString() } : {}),
       url,
     };
+  }
+
+  /** The object's raw byte stream plus the metadata the controller needs to serve it inline. Used by
+   *  the console's same-origin preview proxy so text/PDF render in the browser instead of downloading
+   *  (and so a CORS-locked bucket is still previewable). */
+  async objectStream(
+    disk: string,
+    key: string,
+  ): Promise<{ stream: Readable; contentType: string; size: number }> {
+    const driver = this.diskOrThrow(disk);
+    const stat = driver.stat ? await driver.stat(key) : { size: await driver.size(key) };
+    const stream = await driver.stream(key);
+    return { stream, contentType: stat.contentType ?? 'application/octet-stream', size: stat.size };
+  }
+
+  /** Writes an object from a byte stream (a browser upload). The caller supplies the full key
+   *  (prefix + filename); an unknown disk 404s via {@link diskOrThrow}. Actions-gated. */
+  async putObject(disk: string, key: string, body: Readable, contentType?: string): Promise<void> {
+    await this.diskOrThrow(disk).put(key, body, contentType ? { contentType } : undefined);
+  }
+
+  /** Creates a "folder" — a zero-byte marker object at `<prefix>/`, which S3-style listing surfaces
+   *  as a navigable folder. Normalizes to exactly one trailing slash; rejects an empty prefix. */
+  async createFolder(disk: string, prefix: string): Promise<void> {
+    const normalized = prefix.replace(/^\/+/, '').replace(/\/+$/, '');
+    if (normalized === '') throw new BadRequestException('Folder name is required');
+    await this.diskOrThrow(disk).put(`${normalized}/`, Buffer.alloc(0));
   }
 
   async deleteObject(disk: string, key: string): Promise<void> {

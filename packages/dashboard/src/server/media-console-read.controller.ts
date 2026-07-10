@@ -1,4 +1,4 @@
-import { Controller, Get, Inject, Param, Query } from '@nestjs/common';
+import { Controller, Get, Inject, Param, Query, StreamableFile } from '@nestjs/common';
 import type {
   CollectionsResponse,
   DiskListResponse,
@@ -50,6 +50,18 @@ export class MediaConsoleReadController {
   @Get('disks/:disk/object')
   object(@Param('disk') disk: string, @Query('key') key: string): Promise<ObjectDetailResponse> {
     return this.service.objectDetail(disk, key);
+  }
+
+  /** Streams the object's bytes inline (Content-Disposition: inline) from the same origin, so the SPA
+   *  can render text/PDF previews the browser would otherwise download, and read text past CORS. */
+  @Get('disks/:disk/object/raw')
+  async objectRaw(@Param('disk') disk: string, @Query('key') key: string): Promise<StreamableFile> {
+    const { stream, contentType, size } = await this.service.objectStream(disk, key);
+    return new StreamableFile(stream, {
+      type: contentType,
+      disposition: 'inline',
+      ...(Number.isFinite(size) ? { length: size } : {}),
+    });
   }
 
   @Get('uploads')

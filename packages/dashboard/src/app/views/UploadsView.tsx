@@ -1,34 +1,25 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import type { ReactNode } from 'react';
 import { mediaConsoleClient } from '../../client/media-console-client.js';
+import { Dot, GhostButton, Notice, Panel, relativeAge } from '../ui.js';
 import type { Route } from '../useHashRoute.js';
 
 const UPLOADS_QUERY_KEY = ['uploads'];
 
-function formatAge(createdAt: string | undefined): string | undefined {
-  if (!createdAt) return undefined;
-  const createdMs = new Date(createdAt).getTime();
-  if (Number.isNaN(createdMs)) return undefined;
-  const deltaSeconds = Math.max(0, Math.floor((Date.now() - createdMs) / 1000));
-  if (deltaSeconds < 60) return 'just now';
-  const deltaMinutes = Math.floor(deltaSeconds / 60);
-  if (deltaMinutes < 60) return `${deltaMinutes}m ago`;
-  const deltaHours = Math.floor(deltaMinutes / 60);
-  if (deltaHours < 24) return `${deltaHours}h ago`;
-  const deltaDays = Math.floor(deltaHours / 24);
-  return `${deltaDays}d ago`;
-}
-
 function ProgressBar({ percent }: { percent: number | null }): JSX.Element {
   if (percent === null) {
-    return <span className="text-xs text-slate-400">unknown size</span>;
+    return <span className="mono text-[10px] text-zinc-600">unknown size</span>;
   }
   const clamped = Math.min(100, Math.max(0, percent));
   return (
     <div className="flex items-center gap-2">
-      <div className="h-2 w-24 rounded bg-slate-200">
-        <div className="h-2 rounded bg-slate-900" style={{ width: `${clamped}%` }} />
+      <div className="h-1.5 w-28 overflow-hidden rounded-full bg-zinc-800">
+        <div
+          className="h-full rounded-full bg-emerald-500/80 transition-[width]"
+          style={{ width: `${clamped}%` }}
+        />
       </div>
-      <span className="text-xs text-slate-500">{clamped}%</span>
+      <span className="mono tnum text-[10px] text-zinc-500">{clamped}%</span>
     </div>
   );
 }
@@ -41,60 +32,72 @@ function UploadsListView({ actions }: { actions: boolean }): JSX.Element {
   });
 
   if (uploadsQuery.isLoading) {
-    return <p className="text-sm text-slate-500">Loading uploads…</p>;
+    return <Notice>Loading uploads…</Notice>;
   }
   if (uploadsQuery.isError) {
-    return <p className="text-sm text-slate-500">Failed to load uploads.</p>;
+    return <Notice>Failed to load uploads.</Notice>;
   }
 
   const uploads = uploadsQuery.data?.uploads ?? [];
 
   return (
-    <section>
-      <h2 className="mb-1 text-base font-semibold">Uploads</h2>
-      <p className="mb-3 text-xs text-slate-500">
-        Live resumable upload sessions, refreshed every 2 seconds.
-        {actions ? ' Cancel a session from its detail view.' : ''}
-      </p>
+    <section className="rise">
+      <div className="mb-3 flex items-center gap-2">
+        <Dot tone="live" pulse />
+        <span className="mono text-[11px] text-zinc-500">
+          Live resumable sessions · refreshed every 2s
+          {actions ? ' · cancel from a session detail' : ''}
+        </span>
+      </div>
       {uploads.length === 0 ? (
-        <p className="text-sm text-slate-500">No uploads in progress</p>
+        <Notice>No uploads in progress.</Notice>
       ) : (
-        <table className="w-full border-collapse text-sm">
-          <thead>
-            <tr className="border-b border-slate-200 text-left text-xs uppercase text-slate-500">
-              <th className="py-2 pr-4">Key</th>
-              <th className="py-2 pr-4">Disk</th>
-              <th className="py-2 pr-4">Progress</th>
-              <th className="py-2 pr-4">Parts</th>
-              <th className="py-2 pr-4">Age</th>
-            </tr>
-          </thead>
-          <tbody>
-            {uploads.map((upload) => {
-              const age = formatAge(upload.createdAt);
-              return (
-                <tr key={upload.id} className="border-b border-slate-100 hover:bg-slate-50">
-                  <td className="max-w-xs truncate py-2 pr-4 font-mono text-xs">
+        <Panel className="overflow-hidden">
+          <table className="w-full text-left text-sm">
+            <thead>
+              <tr className="mono border-b border-[var(--line)] text-[10px] uppercase tracking-wider text-zinc-600">
+                <th className="px-4 py-2 font-normal">Key</th>
+                <th className="px-4 py-2 font-normal">Disk</th>
+                <th className="px-4 py-2 font-normal">Progress</th>
+                <th className="px-4 py-2 font-normal">Parts</th>
+                <th className="px-4 py-2 font-normal">Age</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-[var(--line-soft)]">
+              {uploads.map((upload) => (
+                <tr key={upload.id} className="hover:bg-zinc-900/40">
+                  <td className="max-w-xs truncate px-4 py-2">
                     <a
                       href={`#/uploads/${encodeURIComponent(upload.id)}`}
-                      className="text-slate-900 hover:underline"
+                      className="mono text-xs text-zinc-200 hover:text-emerald-300"
                     >
                       {upload.key}
                     </a>
                   </td>
-                  <td className="py-2 pr-4">{upload.disk}</td>
-                  <td className="py-2 pr-4">
+                  <td className="mono px-4 py-2 text-xs text-zinc-400">{upload.disk}</td>
+                  <td className="px-4 py-2">
                     <ProgressBar percent={upload.percent} />
                   </td>
-                  <td className="py-2 pr-4">{upload.parts}</td>
-                  <td className="py-2 pr-4 text-slate-500">{age ?? '—'}</td>
+                  <td className="mono tnum px-4 py-2 text-xs text-zinc-400">{upload.parts}</td>
+                  <td className="px-4 py-2 text-xs text-zinc-500">
+                    {relativeAge(upload.createdAt) ?? '—'}
+                  </td>
                 </tr>
-              );
-            })}
-          </tbody>
-        </table>
+              ))}
+            </tbody>
+          </table>
+        </Panel>
       )}
     </section>
+  );
+}
+
+function DetailRow({ label, children }: { label: string; children: ReactNode }): JSX.Element {
+  return (
+    <>
+      <dt className="mono text-[10px] uppercase tracking-wider text-zinc-600">{label}</dt>
+      <dd className="text-zinc-200">{children}</dd>
+    </>
   );
 }
 
@@ -119,71 +122,86 @@ function UploadDetailView({
   });
 
   return (
-    <section>
-      <a href="#/uploads" className="text-sm text-slate-500 hover:underline">
-        ← Back
+    <section className="rise">
+      <a href="#/uploads" className="mono text-xs text-zinc-500 hover:text-zinc-300">
+        ← back
       </a>
-      <h2 className="mb-2 mt-1 text-base font-semibold">Upload detail</h2>
-      {uploadQuery.isLoading && <p className="text-sm text-slate-500">Loading upload…</p>}
-      {uploadQuery.isError && <p className="text-sm text-slate-500">Failed to load upload.</p>}
+      {uploadQuery.isLoading && <Notice>Loading upload…</Notice>}
+      {uploadQuery.isError && <Notice>Failed to load upload.</Notice>}
       {uploadQuery.data && (
-        <>
-          <dl className="mb-4 grid grid-cols-2 gap-x-4 gap-y-1 text-sm">
-            <dt className="text-slate-500">Key</dt>
-            <dd className="truncate font-mono text-xs">{uploadQuery.data.upload.key}</dd>
-            <dt className="text-slate-500">Disk</dt>
-            <dd>{uploadQuery.data.upload.disk}</dd>
-            <dt className="text-slate-500">Progress</dt>
-            <dd>
-              <ProgressBar percent={uploadQuery.data.upload.percent} />
-            </dd>
-            <dt className="text-slate-500">Offset</dt>
-            <dd>{uploadQuery.data.upload.offset}</dd>
-            <dt className="text-slate-500">Size</dt>
-            <dd>{uploadQuery.data.upload.size ?? 'unknown'}</dd>
-            <dt className="text-slate-500">Multipart</dt>
-            <dd>{uploadQuery.data.upload.multipart ? 'yes' : 'no'}</dd>
-            <dt className="text-slate-500">Age</dt>
-            <dd>{formatAge(uploadQuery.data.upload.createdAt) ?? '—'}</dd>
-          </dl>
+        <div className="mt-2">
+          <Panel className="p-4">
+            <dl className="grid grid-cols-[120px_1fr] gap-x-4 gap-y-2 text-sm">
+              <DetailRow label="Key">
+                <span className="mono truncate text-xs">{uploadQuery.data.upload.key}</span>
+              </DetailRow>
+              <DetailRow label="Disk">
+                <span className="mono text-xs">{uploadQuery.data.upload.disk}</span>
+              </DetailRow>
+              <DetailRow label="Progress">
+                <ProgressBar percent={uploadQuery.data.upload.percent} />
+              </DetailRow>
+              <DetailRow label="Offset">
+                <span className="mono tnum text-xs">{uploadQuery.data.upload.offset}</span>
+              </DetailRow>
+              <DetailRow label="Size">
+                <span className="mono tnum text-xs">
+                  {uploadQuery.data.upload.size ?? 'unknown'}
+                </span>
+              </DetailRow>
+              <DetailRow label="Multipart">
+                {uploadQuery.data.upload.multipart ? 'yes' : 'no'}
+              </DetailRow>
+              <DetailRow label="Age">
+                {relativeAge(uploadQuery.data.upload.createdAt) ?? '—'}
+              </DetailRow>
+            </dl>
 
-          {actions && (
-            <button
-              type="button"
-              onClick={() => abortMutation.mutate()}
-              disabled={abortMutation.isPending}
-              title="Removes the resumable session so it stops here. An incomplete underlying multipart upload is reaped by the bucket lifecycle policy, not by this action."
-              className="mb-4 rounded border border-slate-200 px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-100 disabled:opacity-50"
-            >
-              {abortMutation.isPending ? 'Canceling…' : 'Cancel session'}
-            </button>
-          )}
-          {abortMutation.isError && (
-            <p className="mb-4 text-sm text-slate-500">Failed to cancel session.</p>
-          )}
+            {actions && (
+              <div className="mt-4">
+                <GhostButton
+                  tone="rose"
+                  onClick={() => abortMutation.mutate()}
+                  disabled={abortMutation.isPending}
+                  title="Removes the resumable session so it stops here. An incomplete underlying multipart upload is reaped by the bucket lifecycle policy, not by this action."
+                >
+                  {abortMutation.isPending ? 'Canceling…' : 'Cancel session'}
+                </GhostButton>
+                {abortMutation.isError && (
+                  <p className="mt-2 text-xs s-error">Failed to cancel session.</p>
+                )}
+              </div>
+            )}
+          </Panel>
 
-          <h3 className="mb-1 text-sm font-semibold">Parts</h3>
+          <h3 className="mono mb-1 mt-4 text-[10px] uppercase tracking-wider text-zinc-600">
+            parts
+          </h3>
           {uploadQuery.data.parts.length === 0 ? (
-            <p className="text-sm text-slate-500">No parts uploaded yet</p>
+            <Notice>No parts uploaded yet.</Notice>
           ) : (
-            <table className="w-full border-collapse text-sm">
-              <thead>
-                <tr className="border-b border-slate-200 text-left text-xs uppercase text-slate-500">
-                  <th className="py-2 pr-4">Part</th>
-                  <th className="py-2 pr-4">ETag</th>
-                </tr>
-              </thead>
-              <tbody>
-                {uploadQuery.data.parts.map((part) => (
-                  <tr key={part.partNumber} className="border-b border-slate-100">
-                    <td className="py-2 pr-4">{part.partNumber}</td>
-                    <td className="py-2 pr-4 font-mono text-xs">{part.etag}</td>
+            <Panel className="overflow-hidden">
+              <table className="w-full text-left text-sm">
+                <thead>
+                  <tr className="mono border-b border-[var(--line)] text-[10px] uppercase tracking-wider text-zinc-600">
+                    <th className="px-4 py-2 font-normal">Part</th>
+                    <th className="px-4 py-2 font-normal">ETag</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody className="divide-y divide-[var(--line-soft)]">
+                  {uploadQuery.data.parts.map((part) => (
+                    <tr key={part.partNumber} className="hover:bg-zinc-900/40">
+                      <td className="mono tnum px-4 py-2 text-xs text-zinc-300">
+                        {part.partNumber}
+                      </td>
+                      <td className="mono px-4 py-2 text-xs text-zinc-500">{part.etag}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </Panel>
           )}
-        </>
+        </div>
       )}
     </section>
   );
