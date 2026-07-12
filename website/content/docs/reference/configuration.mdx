@@ -36,6 +36,10 @@ interface MediaModuleOptions {
     basePath?: string;
     partSize?: number;                      // default 8 MiB
   };
+
+  // ── guarding the upload controllers ──────────────────────────────────
+  guards?: Type<CanActivate>[] | MediaUploadGuards; // plain array = uniform, object = per-surface
+  imports?: DynamicModule['imports'];       // modules providing DI deps for `guards`
 }
 ```
 
@@ -50,20 +54,40 @@ interface MediaModuleOptions {
 | `uploadTmpPrefix` | — | Where in-progress chunks are staged on the disk |
 | `tus` | — | Mounts `MediaUploadController` (needs `uploadSessions`) |
 | `direct` | — | Enables `media.directUploads` + mounts `MediaDirectUploadController` (needs a presign/multipart disk, e.g. S3) |
+| `guards` | — | Gate the upload controllers; plain array = uniform, `{ tus?, multipart?, direct? }` = per-surface. **Omitted → unauthenticated.** |
+| `imports` | — | Modules providing DI deps for `guards` (or anything else you inject into them) |
+
+## `MediaUploadGuards`
+
+Per-surface guard lists for the `guards` option — each key gates one controller; an omitted key leaves that controller unguarded (it does not fall back to another surface's guards). The plain-array form of `guards` gates all three uniformly instead.
+
+```ts
+interface MediaUploadGuards {
+  tus?: Type<CanActivate>[];        // MediaUploadController (tus session create/HEAD/PATCH)
+  multipart?: Type<CanActivate>[];  // MediaMultipartUploadController (part PUTs + /complete)
+  direct?: Type<CanActivate>[];     // MediaDirectUploadController (S3 presign endpoints)
+}
+```
 
 ## `MediaModule.forRootAsync(options)`
 
-Same options, resolved through a factory with DI:
+Same options, resolved through a factory with DI — **except `guards` and `mount`**, which are static fields on the config object itself, not part of what `useFactory` resolves (controllers, and the enhancers bound to them, are wired at module-build time, before any async factory runs):
 
 ```ts
 interface MediaModuleAsyncOptions {
   imports?: any[];
   inject?: any[];
   useFactory: (...args: any[]) => MediaModuleOptions | Promise<MediaModuleOptions>;
+  guards?: Type<CanActivate>[] | MediaUploadGuards;                  // static — see MediaModuleOptions.guards
+  mount?: { tus?: boolean; multipart?: boolean; direct?: boolean };  // static, default all true
 }
 ```
 
 Use this whenever a disk or store needs an injected dependency (an `S3Client`, a `DataSource`, config service).
+
+<Callout type="warn" title="`mount` is forRootAsync-only">
+`forRootAsync` can't know at module-build time whether `tus`/`direct` will end up configured by `useFactory`, so by default it mounts all three controllers and each 501s if its feature is left unconfigured. Set the ones you never use to `false` in `mount` so they don't exist as dead, always-501 surface — e.g. `mount: { direct: false }`. `forRoot` doesn't need this: it already only mounts a controller when the matching option is present.
+</Callout>
 
 ## `MediaCollectionConfig`
 

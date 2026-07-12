@@ -54,9 +54,31 @@ When `tus` is configured, `MediaUploadController` is mounted at `media/uploads`,
 app.use('/media/uploads', express.raw({ type: 'application/offset+octet-stream' }));
 ```
 
-<Callout type="warn" title="The upload controllers are unguarded">
-`MediaUploadController` (tus) and `MediaDirectUploadController` (mounted when `direct` is configured) carry **no authentication or authorization guard**. Anyone able to reach `media/uploads` / `media/uploads/direct` can drive uploads. Add your own guard (a global `APP_GUARD` or a guard/middleware scoped to `media/uploads`) to protect them.
+<Callout type="warn" title="Uploads are unauthenticated unless you set `guards`">
+`MediaUploadController` (tus), `MediaMultipartUploadController`, and `MediaDirectUploadController` carry no guard by default. Pass `guards` to `MediaModule.forRoot`/`forRootAsync` to gate them — a plain array gates all three uniformly, or a per-surface object gates each independently, since the surfaces often carry different sensitivity (session creation admin-only, part PUTs any authenticated user):
+
+```ts
+MediaModule.forRoot({
+  // …
+  guards: { tus: [AdminGuard], multipart: [AuthenticatedGuard] }, // direct omitted → unguarded
+});
+```
+
+An omitted key (or the whole option) leaves that surface unguarded — **uploads remain unauthenticated by default**. On `forRootAsync`, `guards` is a *static* field on the config object, not resolved via `useFactory`, since controllers are wired at module-build time; a guard that needs async-resolved config (e.g. a `ConfigService` secret) should inject it itself via DI, with its providing module passed through `imports`.
 </Callout>
+
+## Mounting only what you use
+
+`forRootAsync` mounts all three upload controllers unconditionally by default — each one 501s if you never configure its feature in the factory — since Nest wires controllers at module-build time, before the async factory runs. Pass a static `mount` object to drop the ones you never use entirely, so they 404 instead of existing as dead, always-501 surface:
+
+```ts
+MediaModule.forRootAsync({
+  useFactory: () => ({ /* … */ }),
+  mount: { direct: false }, // no direct-upload config → don't mount the controller at all
+});
+```
+
+`forRoot` doesn't need this: it already only mounts a controller when the matching option (`tus`/`direct`) is present.
 
 ## Direct upload controller
 
@@ -85,6 +107,17 @@ import {
 <Callout type="info">
 Inject `MediaService` for normal use; reach for the tokens only when you need the raw `StorageManager`/`MediaLibrary`/`ResumableUploadManager`/`DirectUploadManager` (e.g. wiring a custom controller).
 </Callout>
+
+## Facade re-exports
+
+`@dudousxd/nestjs-media`'s entrypoint also re-exports the error classes (`FileNotFoundError`, etc.), `ResumableUploadManager`, `mediaDiagnosticKey`, `MediaDiagnosticEvent`, `publishMedia`, and the storage-consumer/upload-session types (`StatResult`, `TemporaryUrlOptions`, `ListResult`, `ListEntry`, `ListOptions`, `MultipartPart`, `UploadSession`, `UploadSessionStore`, `UploadSessionListFilter`, `CreateUploadInput`) from `@dudousxd/nestjs-media-core` — so a consumer app doesn't need its own dependency on `-core` just to reach these:
+
+```ts
+import {
+  FileNotFoundError, ResumableUploadManager, mediaDiagnosticKey, publishMedia,
+  type MediaDiagnosticEvent, type UploadSession, type UploadSessionStore,
+} from '@dudousxd/nestjs-media';
+```
 
 ## Peer dependencies
 

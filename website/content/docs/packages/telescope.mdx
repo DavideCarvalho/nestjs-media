@@ -22,6 +22,10 @@ The watcher is the *only* link between media and Telescope, and it's one-directi
 
 Each entry carries the event payload — id, owner, collection, disk, path, size, mime — so you can answer "what did this request upload, and where did it land?" without grepping logs. Conversions appear as their own entries, so a slow first-thumbnail request is visible; resumable uploads show their start and completion. Per-chunk `upload.progress` is intentionally **not** recorded — it would flood the timeline on a large upload — but it's still on its channel if you want to consume it yourself.
 
+## Alongside the generic diagnostics bridge
+
+Running `MediaWatcher` next to `@dudousxd/nestjs-diagnostics-telescope`'s generic bridge is safe by default — no manual exclude list required. `register()` claims every event this watcher records, so the generic bridge skips them automatically and you get exactly one Telescope entry per event, not two. `upload.progress` stays unclaimed (this watcher doesn't record it either); mute it on the generic bridge yourself with `mediaDiagnosticKey('upload.progress')` if you don't want it landing there either.
+
 ## Peer dependencies
 
 `@dudousxd/nestjs-telescope` (^1) and `@dudousxd/nestjs-media-core`. See [Diagnostics & the glue points](/docs/concepts/diagnostics) for the wider picture.

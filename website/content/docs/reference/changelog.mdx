@@ -5,6 +5,27 @@ description: Release history for the nestjs-media packages.
 
 All packages are versioned together via [changesets](https://github.com/changesets/changesets).
 
+## 0.8.0
+
+Guards can now be scoped **per upload surface**.
+
+- **Per-surface `guards`**: `guards: { tus: [AdminGuard], multipart: [AuthenticatedGuard] }` gates each upload controller with its own list, since the surfaces often carry different sensitivity (session creation admin-only, part PUTs any authenticated user). The plain-array form still gates all three uniformly; an omitted key leaves that surface unguarded.
+
+## 0.7.0
+
+Three fixes for consumer friction on the upload controllers.
+
+- **`guards` option** on `MediaModule.forRoot`/`forRootAsync` — gate all three upload controllers instead of reimplementing auth in a `NestMiddleware`, since third-party controller classes can't take `@UseGuards`. Uploads remain unauthenticated by default when `guards` is omitted.
+- **`mount` option** on `forRootAsync` (`{ tus?, multipart?, direct? }`, default all `true`) — previously always mounted all three controllers, 501-ing the ones you never configured; set the unused ones to `false` so they 404 instead.
+- **Facade re-exports** — `@dudousxd/nestjs-media` now re-exports the error classes, `ResumableUploadManager`, `mediaDiagnosticKey`, `MediaDiagnosticEvent`, `publishMedia`, and the storage-consumer/upload-session types from `-core`, so consumers no longer need a direct dependency on it for these.
+
+## 0.6.0
+
+- **Native S3 multipart streaming**: proxy/tus uploads now stream each chunk straight into a native S3 multipart upload instead of buffering the whole file at `complete()`.
+- **`MediaMultipartUploadController`**: `PUT /media/uploads/:id/parts/:partNumber` + `POST /media/uploads/:id/complete` for the proxy-parallel multipart path.
+- **`StorageManager.diskNames()`** (+ `StorageDriver.stat()`/`deleteMany()`) and `MediaService.diskNames()`.
+- **Telescope media dashboard** (`mediaTelescopeExtension()`) — a `media.overview` dashboard with 12 data providers (uploads, storage, attachments, disks), backed by optional `list()`/`count()`/`aggregate()` SPI additions on the upload/store adapters.
+
 ## 0.5.0
 
 Adds the **direct (presigned multipart) upload path** end-to-end: the browser PUTs each part straight to S3 while the backend only orchestrates.

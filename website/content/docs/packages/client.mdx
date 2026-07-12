@@ -44,6 +44,17 @@ mediaUrl('abc', 'thumb');   // → /media/abc?conversion=thumb
 await uploadMedia(file, { filename, fetchImpl: authedFetch });
 ```
 
+## Per-request auth headers
+
+`headers` sets static headers on every request. `getHeaders?: () => HeadersInit | Promise<HeadersInit>` is resolved fresh **before every request** — each chunk PATCH, the session-initiate POST, and (on the parallel/direct variants) every part PUT and the completion call — and merged over `headers`, with `getHeaders` winning on key conflict. Use it for a bearer token that might expire during a long-running upload:
+
+```ts
+await uploadMedia(file, {
+  filename: file.name,
+  getHeaders: () => ({ Authorization: `Bearer ${getFreshToken()}` }),
+});
+```
+
 <Callout type="info" title="Why a separate package">
 Keeping the protocol in one zero-dependency package means it works in any browser app — React, Vue, Svelte, or none — and a protocol change is a one-file change that every surface inherits.
 </Callout>

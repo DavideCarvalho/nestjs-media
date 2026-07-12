@@ -61,6 +61,10 @@ import { MediaWatcher } from '@dudousxd/nestjs-media-telescope';
 
 That's the entire integration: media emits, the watcher records. No changes to your media code, no coupling between the packages beyond the channel name.
 
+### Running alongside the generic diagnostics bridge
+
+If you also run `@dudousxd/nestjs-diagnostics-telescope`'s generic bridge, you don't need to hand-maintain an exclude list to avoid double-recording. `MediaWatcher.register()` claims every event it records via the diagnostics claim registry, so the generic bridge's watcher skips them automatically at record time — you get one Telescope entry per event, not two. The one thing that doesn't change: `upload.progress` isn't claimed (this watcher doesn't record it either), so if you don't want it flooding the generic bridge too, mute it there yourself with `mediaDiagnosticKey('upload.progress')` in that bridge's `exclude` option.
+
 ## 3. Codegen
 
 [`@dudousxd/nestjs-media-codegen`](/docs/packages/codegen) contributes a typed media client to your generated output, so the front-end gets `uploadMedia()` + `mediaUrl()` with no hand-written upload protocol. The emitted file is a *thin binding* over the runtime client (it bakes in your tus base path and re-exports), which is the point of the next section. See [Codegen](/docs/codegen).
