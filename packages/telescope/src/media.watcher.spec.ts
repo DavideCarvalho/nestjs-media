@@ -1,7 +1,19 @@
+import { isDiagnosticClaimed } from '@dudousxd/nestjs-diagnostics';
 import { publishMedia } from '@dudousxd/nestjs-media-core';
 import type { WatcherContext } from '@dudousxd/nestjs-telescope';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { MediaWatcher } from './media.watcher';
+
+const RECORDED_EVENTS = [
+  'attach',
+  'delete',
+  'conversion',
+  'upload.start',
+  'upload.complete',
+  'upload.abort',
+  'attachment.create',
+  'attachment.delete',
+] as const;
 
 let watcher: MediaWatcher;
 
@@ -42,5 +54,25 @@ describe('MediaWatcher', () => {
     watcher.dispose();
     publishMedia('delete', { id: 'gone' });
     expect(ctx.record).not.toHaveBeenCalled();
+  });
+
+  it('claims every recorded event, but not upload.progress', () => {
+    watcher = new MediaWatcher();
+    watcher.register(mockCtx());
+
+    for (const event of RECORDED_EVENTS) {
+      expect(isDiagnosticClaimed('media', event)).toBe(true);
+    }
+    expect(isDiagnosticClaimed('media', 'upload.progress')).toBe(false);
+  });
+
+  it('releases the claim on dispose', () => {
+    watcher = new MediaWatcher();
+    watcher.register(mockCtx());
+    watcher.dispose();
+
+    for (const event of RECORDED_EVENTS) {
+      expect(isDiagnosticClaimed('media', event)).toBe(false);
+    }
   });
 });

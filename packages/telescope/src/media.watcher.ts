@@ -1,5 +1,5 @@
 import { subscribe, unsubscribe } from 'node:diagnostics_channel';
-import { channelName } from '@dudousxd/nestjs-diagnostics';
+import { channelName, claimDiagnostics } from '@dudousxd/nestjs-diagnostics';
 import type { DiagnosticEvent } from '@dudousxd/nestjs-diagnostics';
 import { MEDIA_DIAGNOSTIC_EVENTS, type MediaDiagnosticEvent } from '@dudousxd/nestjs-media-core';
 import type { Watcher, WatcherContext } from '@dudousxd/nestjs-telescope';
@@ -20,6 +20,13 @@ const EVENTS: MediaDiagnosticEvent[] = MEDIA_DIAGNOSTIC_EVENTS.filter(
  * registry — prefer that when the generic bridge is already in use. This watcher is
  * kept for standalone use without the diagnostics telescope bridge.
  *
+ * Since diagnostics 0.7, double-recording when both watchers run is handled
+ * automatically: `register()` claims every event in {@link EVENTS} via
+ * `claimDiagnostics('media', ...)`, so the generic bridge's `DiagnosticWatcher`
+ * skips them at record time and no exclude list needs hand-maintaining. The
+ * `mediaDiagnosticKey`/`exclude` advice on the generic bridge still applies to
+ * mute events nobody records at all, e.g. `mediaDiagnosticKey('upload.progress')`.
+ *
  * Register it with the telescope module's watcher list.
  */
 export class MediaWatcher implements Watcher {
@@ -27,6 +34,7 @@ export class MediaWatcher implements Watcher {
   private readonly disposers: Array<() => void> = [];
 
   register(ctx: WatcherContext): void {
+    this.disposers.push(claimDiagnostics('media', EVENTS));
     for (const event of EVENTS) {
       const channel = channelName('media', event);
       const onMessage = (message: unknown) => {
