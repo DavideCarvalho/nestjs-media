@@ -66,6 +66,8 @@ MediaDashboardModule.forRoot({
 
 The SPA renders a login screen until a valid cookie exists. A cookie past half its TTL is silently renewed on the next request (sliding session).
 
+The password submitted is passed through to `login` verbatim — including an empty string, since the built-in login screen never requires one — the hook owns whether it matters.
+
 ## Securing the console with your own guards
 
 `auth` is the console's own turnkey login. If your app already has an auth guard — a session/cookie check, an `InertiaAuthGuard`, whatever fronts the rest of your app — you don't need a second login system. `guards` (+ `imports` for its dependencies) lets you front the console with THAT guard instead, on a single `forRoot`/`forRootAsync` call:
