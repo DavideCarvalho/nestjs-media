@@ -16,6 +16,7 @@
     "codegen",
     "react",
     "upload-redis",
-    "testing"
+    "testing",
+    "dashboard"
   ]
 }

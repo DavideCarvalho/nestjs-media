@@ -1,0 +1,98 @@
+---
+title: '@dudousxd/nestjs-media-dashboard'
+description: Standalone /media console — disks, live uploads, and the media library, with your choice of auth.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+A bundled React SPA + JSON API you mount alongside [`MediaModule`](/docs/packages/nestjs) to browse disks, watch live uploads, and inspect the media library — without writing an admin UI of your own.
+
+```ts
+import { MediaDashboardModule } from '@dudousxd/nestjs-media-dashboard';
+
+@Module({
+  imports: [
+    MediaModule.forRoot({ /* … */ }),
+    MediaDashboardModule.forRoot({
+      basePath: '/media',
+      apiBasePath: '/api/media/console',
+    }),
+  ],
+})
+export class AppModule {}
+```
+
+Exclude both paths from any global `/api` prefix — the SPA (`basePath`) is a page route, not an endpoint.
+
+## `MediaDashboardModule.forRoot(options)`
+
+```ts
+interface MediaDashboardOptions {
+  basePath?: string;       // default '/media'
+  apiBasePath?: string;    // default '<basePath>/api'
+  actions?: boolean;       // enable delete/copy/move/abort — default false (read-only)
+  auth?: ConsoleAuthOptions;                 // built-in session-cookie login
+  guards?: Array<Type<CanActivate> | CanActivate>; // bring-your-own guard(s)
+  imports?: DynamicModule['imports'];        // DI resolution path for `guards`
+}
+```
+
+| Option | Purpose |
+|---|---|
+| `basePath` | Where the SPA is served. Keep it out of an `/api` prefix so it reads as a UI, not an endpoint. |
+| `apiBasePath` | Where the JSON API is mounted (what the SPA fetches). Put it under your app's `/api` prefix so it inherits the app's proxy/auth rules. |
+| `actions` | Enables the destructive endpoints (delete object/record, copy/move, abort upload). The read API is always available. |
+| `auth` | Telescope-style built-in session-cookie login — see below. |
+| `guards` / `imports` | Front the console with your own `CanActivate`(s) instead of, or alongside, `auth` — see [Securing the console](#securing-the-console-with-your-own-guards). |
+
+`MediaDashboardModule.forRootAsync(options)` mirrors this, resolving `auth` through an injected `useAuth(...deps)` factory (for hooks that need your DB/services). `guards` and the mount paths stay static fields on the async options object — guard stamping happens at module-build time, before any factory runs.
+
+## Built-in auth
+
+Omit `auth` to leave the console open (front it another way — a reverse proxy, or `guards` below). Set it to gate the console behind a signed session cookie with your own `login`/`session` hooks:
+
+```ts
+MediaDashboardModule.forRoot({
+  auth: {
+    secret: process.env.CONSOLE_SECRET!,
+    ttl: '8h',
+    login: async (username, password) => {
+      const user = await accounts.verify(username, password);
+      return user ? { id: user.id, roles: user.roles } : null;
+    },
+  },
+});
+```
+
+The SPA renders a login screen until a valid cookie exists. A cookie past half its TTL is silently renewed on the next request (sliding session).
+
+## Securing the console with your own guards
+
+`auth` is the console's own turnkey login. If your app already has an auth guard — a session/cookie check, an `InertiaAuthGuard`, whatever fronts the rest of your app — you don't need a second login system. `guards` (+ `imports` for its dependencies) lets you front the console with THAT guard instead, on a single `forRoot`/`forRootAsync` call:
+
+```ts
+MediaDashboardModule.forRoot({
+  guards: [ConsoleAuthGuard],
+  imports: [AuthModule], // resolves ConsoleAuthGuard's own dependencies
+});
+```
+
+<Callout type="warn">
+  The guard fronts BOTH the page (a full-page `GET` to `basePath`) and the JSON API (`fetch`/XHR calls the SPA makes). A full-page navigation carries only **cookies**, never an `Authorization` header — a guard that only reads a bearer token will 401 every browser visit to the console, even an already-logged-in admin's. Authenticate from a cookie (optionally falling back to a header for callers that do carry one), and respond differently per surface: a **redirect** for the page, a plain **401/403** for the API.
+</Callout>
+
+`guards` is stamped on the read + action JSON API controllers **alongside** their own built-in `MediaConsoleGuard` (a no-op unless you also configured `auth`) — a request must pass BOTH. It is deliberately **not** applied to the auth controller that mints the `auth` session cookie itself (`/login`, `/session`, `/logout`, `/me`): that controller can't be made to require the very auth it grants. `guards` and `auth` compose — set one, the other, or both:
+
+```ts
+MediaDashboardModule.forRoot({
+  auth: { secret: process.env.CONSOLE_SECRET!, login: /* … */ },
+  guards: [ConsoleAuthGuard], // e.g. "must already be signed into the app"
+  imports: [AuthModule],
+});
+```
+
+With both configured, a request needs a valid `ConsoleAuthGuard` pass **and** a valid console session cookie — useful when the console should require your app's own SSO on top of its own separate login.
+
+## Peer dependencies
+
+`@dudousxd/nestjs-media-core`, `@nestjs/common` / `@nestjs/core` (^10 or ^11), and `rxjs`. The bundled SPA ships its own React copy — no extra frontend install needed.

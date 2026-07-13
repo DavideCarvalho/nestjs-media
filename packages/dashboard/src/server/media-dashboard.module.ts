@@ -1,13 +1,16 @@
 import {
+  type CanActivate,
   type DynamicModule,
   Module,
   type ModuleMetadata,
   type OptionalFactoryDependency,
   type Provider,
+  type Type,
 } from '@nestjs/common';
 import type { InjectionToken } from '@nestjs/common';
 import { RouterModule } from '@nestjs/core';
 import { type ConsoleAuthOptions, resolveConsoleAuth } from './auth/config.js';
+import { isGuardClass, stampGuards } from './guards.js';
 import { MediaConsoleApiModule } from './media-console-api.module.js';
 import { MediaDashboardUiController } from './media-dashboard-ui.controller.js';
 import {
@@ -40,6 +43,35 @@ export interface MediaDashboardOptions {
    * hook that returns a session user (or `null` to deny) — see {@link ConsoleAuthOptions}.
    */
   auth?: ConsoleAuthOptions;
+  /**
+   * Guard classes (or already-instantiated `CanActivate`s) fronting BOTH the page/asset controller
+   * (`MediaDashboardUiController` — a plain REPLACE, since it ships with no guard of its own) and
+   * the read/action JSON API controllers (APPENDED to their own built-in `MediaConsoleGuard`
+   * session-cookie gate — a request must pass BOTH). Deliberately NOT applied to the auth
+   * controller that MINTS that session cookie — see `MediaConsoleApiModule`'s own `guards` doc.
+   *
+   * These two surfaces (page vs. API) live in the same package here, unlike a split dashboard —
+   * but they're still SEPARATE controllers on separate host modules, so `guards` is stamped onto
+   * each independently by this one option.
+   *
+   * Full-page navigations to `basePath` carry only cookies, never an `Authorization` header — a
+   * guard passed here must be able to authenticate from a cookie (see the "Securing the console"
+   * guide) or it will 401 every browser visit to the console, even an already-logged-in admin's.
+   *
+   * `guards` and `auth` (the built-in cookie login) are independent and compose: with both set, a
+   * request must pass the host guard AND (when a route carries `MediaConsoleGuard`) present a valid
+   * built-in session cookie too. Configure one, the other, or both.
+   *
+   * A guard's own DEPENDENCIES resolve from this option's `imports` (see {@link imports}) — the
+   * dashboard module has no application context of its own to pull them from otherwise.
+   */
+  guards?: Array<Type<CanActivate> | CanActivate>;
+  /**
+   * Extra `imports` merged into the dashboard's dynamic module — the DI resolution path for a class
+   * passed to {@link guards} (or any other provider the controllers need reachable). Typically the
+   * host's own auth module, e.g. `imports: [AuthModule]` alongside `guards: [SessionGuard]`.
+   */
+  imports?: DynamicModule['imports'];
 }
 
 /**
@@ -52,14 +84,22 @@ export interface MediaDashboardAsyncOptions {
   basePath?: string;
   apiBasePath?: string;
   actions?: boolean;
-  /** Modules exporting the providers `inject` needs (omit when they're global). */
-  imports?: ModuleMetadata['imports'];
+  /** Modules exporting the providers `inject` needs, or a guard class's own dependencies (omit
+   *  when they're global). Shared with {@link guards}. */
+  imports?: DynamicModule['imports'];
   /** Providers injected into `useAuth`, in order. */
   inject?: Array<InjectionToken | OptionalFactoryDependency>;
   /** Build the `auth` config from injected deps (or `undefined` to leave the console open). */
   useAuth: (
     ...deps: any[]
   ) => ConsoleAuthOptions | undefined | Promise<ConsoleAuthOptions | undefined>;
+  /**
+   * Guard classes (or instances) fronting the console — see {@link MediaDashboardOptions.guards}.
+   * Passed here directly (not resolved via `useAuth`'s factory) because guard stamping happens at
+   * module-build time, synchronously — the SAME constraint as `basePath`/`apiBasePath` above. A
+   * class guard's own dependencies resolve from `imports` above (shared with `useAuth`'s `inject`).
+   */
+  guards?: Array<Type<CanActivate> | CanActivate>;
 }
 
 /** Leading slash, no trailing slash. */
@@ -72,6 +112,9 @@ function normalize(path: string): string {
  * (default `<basePath>/api`). Import via `MediaDashboardModule.forRoot(...)` (or `forRootAsync` when
  * the `auth` hooks need injected services) alongside `MediaModule` (global), so it resolves the
  * storage/store/upload tokens. Exclude the UI/API paths from any global `/api` prefix.
+ *
+ * Front it with your own auth via `guards` (+ `imports` for their dependencies) — see
+ * {@link MediaDashboardOptions.guards} — instead of, or alongside, the built-in `auth` cookie login.
  */
 @Module({})
 export class MediaDashboardModule {
@@ -79,10 +122,12 @@ export class MediaDashboardModule {
     const apiBasePath = normalize(
       options.apiBasePath ?? `${normalize(options.basePath ?? '/media')}/api`,
     );
-    return MediaDashboardModule.build(options, apiBasePath, {
-      provide: MEDIA_CONSOLE_AUTH,
-      useValue: resolveConsoleAuth(options.auth),
-    });
+    return MediaDashboardModule.build(
+      options,
+      apiBasePath,
+      { provide: MEDIA_CONSOLE_AUTH, useValue: resolveConsoleAuth(options.auth) },
+      options.imports,
+    );
   }
 
   static forRootAsync(options: MediaDashboardAsyncOptions): DynamicModule {
@@ -99,17 +144,33 @@ export class MediaDashboardModule {
 
   /** Shared wiring: static routing + the API module, with `auth` supplied by the given provider. */
   private static build(
-    options: { basePath?: string; apiBasePath?: string; actions?: boolean },
+    options: {
+      basePath?: string;
+      apiBasePath?: string;
+      actions?: boolean;
+      guards?: Array<Type<CanActivate> | CanActivate>;
+    },
     apiBasePath: string,
     authProvider: Provider,
-    imports?: ModuleMetadata['imports'],
+    imports?: DynamicModule['imports'],
   ): DynamicModule {
     const basePath = normalize(options.basePath ?? '/media');
     const actions = options.actions === true;
+    // MediaDashboardUiController ships with no guard of its own, so this is a plain REPLACE (base
+    // `[]`) — matches `MediaConsoleApiModule`'s own `stampGuards` call for the read/action
+    // controllers, which DOES have a built-in base to append onto.
+    stampGuards(options.guards, [[MediaDashboardUiController, []]]);
     return {
       module: MediaDashboardModule,
       imports: [
-        MediaConsoleApiModule.register({ actions, cookiePath: apiBasePath, authProvider, imports }),
+        ...(imports ?? []),
+        MediaConsoleApiModule.register({
+          actions,
+          cookiePath: apiBasePath,
+          authProvider,
+          imports,
+          ...(options.guards ? { guards: options.guards } : {}),
+        }),
         RouterModule.register([
           { path: basePath, module: MediaDashboardModule }, // the UI controller below
           { path: apiBasePath, module: MediaConsoleApiModule },
@@ -119,6 +180,9 @@ export class MediaDashboardModule {
       providers: [
         { provide: MEDIA_DASHBOARD_BASE_PATH, useValue: basePath },
         { provide: MEDIA_DASHBOARD_API_PATH, useValue: apiBasePath },
+        // MediaDashboardUiController is hosted HERE, so its guards DI-instantiate from this
+        // module — class guards need a provider; an already-instantiated guard needs none.
+        ...(options.guards ?? []).filter(isGuardClass),
       ],
       // Re-export the API module so its MediaConsoleService reaches importers if they want it.
       exports: [MediaConsoleApiModule],
