@@ -28,6 +28,7 @@ import {
   type TemporaryUrlOptions,
   UnsupportedOperationError,
 } from '@dudousxd/nestjs-media-core';
+import { hardenBodyStream } from './harden-body-stream';
 import {
   extractListObjectsV2FromXml,
   isXmlEntityDeserializationError,
@@ -107,7 +108,7 @@ export class S3Driver implements StorageDriver, MultipartUploadDriver {
         new GetObjectCommand({ Bucket: this.bucket, Key: this.key(path) }),
       );
       if (!res.Body) throw new FileNotFoundError(path);
-      return res.Body as Readable;
+      return hardenBodyStream(res.Body as Readable);
     } catch (err) {
       if (isNotFound(err)) throw new FileNotFoundError(path);
       throw err;
