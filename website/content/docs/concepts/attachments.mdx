@@ -1,5 +1,6 @@
 ---
 title: Attachments (column model)
+icon: Paperclip
 description: The adonis-attachment-style persistence model — a file stored as a JSON value object on your own entity's column, instead of in a separate media table. When to reach for it, the Attachment value object, the AttachmentManager API, and how each ORM serializes it.
 ---
 
@@ -97,7 +98,28 @@ export class UsersService {
 | `temporaryUrl(att, ttl, variant?)` | Signed, expiring URL on presign-capable disks |
 | `delete(att)` | Removes the original **and** every variant from storage |
 
-`createFromFile` options mirror the library: `disk` (override the default), `keyPrefix` (default `attachments`), `variants` (image presets — requires an image processor), `name`, and `meta`.
+`createFromFile` options mirror the library: `disk` (override the default), `keyPrefix` (default `attachments`), `variants` (image presets — requires an image processor), `name`, `meta`, and `id` (see below).
+
+### Idempotent overwrites with `id`
+
+By default each `createFromFile` mints a fresh UUID and stores the file under `attachments/<uuid>/<fileName>`. That's what you want for one-shot uploads — every attachment gets its own, collision-free home. But it makes **retries** messy: run the same logical upload twice (a durable step that re-renders a report, a webhook that fires again) and you get two objects under two UUIDs, the first orphaned in storage.
+
+`id` replaces the generated UUID with a **deterministic** segment you choose. A fixed `id` yields a fixed key, so a second run `put()`s straight over the first instead of leaking a new object:
+
+```ts
+async function renderInvoicePdf(invoice: Invoice) {
+  const pdf = await this.pdf.render(invoice);
+  // Same invoice → same id → same key. Re-running overwrites in place; no orphan.
+  return this.media.attachments.createFromFile(
+    { fileName: 'invoice.pdf', mimeType: 'application/pdf', contents: pdf },
+    { disk: 's3', id: `invoice-${invoice.id}` }, // key: attachments/invoice-<id>/invoice.pdf
+  );
+}
+```
+
+<Callout type="info" title="Deterministic id, deterministic variants">
+Variants are keyed off the same `id` (`attachments/<id>/variants/<name>.<ext>`), so they overwrite in place on retry too — a re-render replaces both the original and its thumbnails at stable keys. Choose an `id` that's unique per logical file (an invoice id, a `${userId}-avatar`), not per attempt, or two different files will clobber each other.
+</Callout>
 
 <Callout type="info" title="Variants are eager">
 Attachment variants are generated **at upload time** and recorded on the value object, because the column carries no row of its own to lazily update later. (The media-library, which owns a `media` row, generates conversions lazily on first request instead.) Request variants you'll actually use.

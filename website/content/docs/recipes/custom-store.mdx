@@ -1,5 +1,6 @@
 ---
 title: Writing a custom store
+icon: Database
 description: Implement the MediaStore contract for any persistence backend, verified by the shared conformance suite.
 ---
 
@@ -37,6 +38,73 @@ export class MyMediaStore implements MediaStore {
 <Callout type="warn">
 These four behaviors are exactly what the conformance suite checks — they're the assumptions the media-library relies on.
 </Callout>
+
+## The query SPI (admin)
+
+The five methods above are all the media-library needs at runtime. The [console](/docs/packages/dashboard) asks more of a store — it browses *every* owner's records, not one owner's collection — so `MediaStore` carries three **optional** query methods on top:
+
+```ts
+interface MediaStore {
+  // …the five required methods…
+
+  count?(filter?: MediaCountFilter): Promise<number>;
+  aggregate?(query: MediaAggregateQuery): Promise<MediaAggregateResult>;
+  list?(filter?: MediaListFilter, page?: MediaListPage): Promise<MediaListResult>;
+}
+
+interface MediaCountFilter { ownerType?: string; collection?: string; disk?: string }
+
+interface MediaAggregateQuery {
+  groupBy: 'collection' | 'disk';   // column to group rows by
+  sum?: 'size';                      // include a summed byte total per group when 'size'
+}
+type MediaAggregateResult = MediaAggregateBucket[];
+interface MediaAggregateBucket { key: string; count: number; sumSize: number } // sumSize 0 if sum omitted
+
+interface MediaListFilter { ownerType?: string; collection?: string; disk?: string }
+interface MediaListPage { cursor?: string; limit?: number }   // limit defaults to 50
+interface MediaListResult { records: MediaRecord[]; cursor?: string } // cursor absent on the last page
+```
+
+- **`count`** — a global record count across all owners, optionally narrowed by the filter (fields AND together; omit for everything). Powers the console's totals.
+- **`aggregate`** — a group-by rollup: one `{ key, count, sumSize }` bucket per distinct `collection` (or `disk`), with `sumSize` populated only when you request `sum: 'size'`. Powers the console's per-collection view.
+- **`list`** — a paginated global listing across all owners, filtered like `count`. Ordered by `(createdAt, id)` ascending with an **opaque keyset cursor**: pass the returned `cursor` back as `page.cursor` for the next page, stop when it's absent.
+
+<Callout type="info" title="Optional means non-breaking">
+These are additive — an external store that omits them still boots and serves the whole media-library. The dashboard providers **degrade gracefully**: a store without them just reports empty/zero shapes in the admin views (`listLibrary` → `{ records: [] }`, `listCollections` → `{ collections: [] }`). Implement them only if you want your custom store to light up the [console](/docs/packages/dashboard#programmatic-access-with-mediaconsoleservice).
+</Callout>
+
+```ts
+export class MyMediaStore implements MediaStore {
+  // …required methods…
+
+  async count(filter?: MediaCountFilter): Promise<number> {
+    return this.db.media.count({ where: whereFrom(filter) }); // AND the given fields
+  }
+
+  async aggregate(query: MediaAggregateQuery): Promise<MediaAggregateResult> {
+    const rows = await this.db.media.groupBy({
+      by: [query.groupBy],
+      _count: true,
+      ...(query.sum === 'size' ? { _sum: { size: true } } : {}),
+    });
+    return rows.map((r) => ({ key: r[query.groupBy], count: r._count, sumSize: r._sum?.size ?? 0 }));
+  }
+
+  async list(filter?: MediaListFilter, page?: MediaListPage): Promise<MediaListResult> {
+    const limit = page?.limit ?? 50;
+    const rows = await this.db.media.findMany({
+      where: whereFrom(filter),
+      orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+      take: limit + 1,                              // fetch one extra to detect a next page
+      ...(page?.cursor ? { cursor: decodeCursor(page.cursor), skip: 1 } : {}),
+    });
+    const hasMore = rows.length > limit;
+    const records = hasMore ? rows.slice(0, limit) : rows;
+    return { records, ...(hasMore ? { cursor: encodeCursor(records.at(-1)!) } : {}) };
+  }
+}
+```
 
 ## Verify it
 

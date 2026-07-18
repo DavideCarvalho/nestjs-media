@@ -1,4 +1,13 @@
 {
   "title": "Concepts",
-  "pages": ["two-layers", "uploads", "conversions", "persistence", "attachments", "diagnostics"]
+  "icon": "Lightbulb",
+  "pages": [
+    "two-layers",
+    "uploads",
+    "conversions",
+    "folders",
+    "persistence",
+    "attachments",
+    "diagnostics"
+  ]
 }

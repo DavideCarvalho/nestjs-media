@@ -1,5 +1,6 @@
 ---
 title: '@dudousxd/nestjs-media-dashboard'
+icon: LayoutDashboard
 description: Standalone /media console — disks, live uploads, and the media library, with your choice of auth.
 ---
 
@@ -94,6 +95,133 @@ MediaDashboardModule.forRoot({
 ```
 
 With both configured, a request needs a valid `ConsoleAuthGuard` pass **and** a valid console session cookie — useful when the console should require your app's own SSO on top of its own separate login.
+
+## Programmatic access with `MediaConsoleService`
+
+Everything the console UI does, it does through one injectable — `MediaConsoleService`. It's the read + action logic behind the JSON API, and because `MediaDashboardModule` re-exports it you can inject it into **your own** code (a cron that prunes stale uploads, a support tool, a custom admin screen) without going through HTTP:
+
+```ts
+import { MediaConsoleService } from '@dudousxd/nestjs-media-dashboard';
+
+@Injectable()
+export class HousekeepingService {
+  constructor(private readonly console: MediaConsoleService) {}
+
+  async report() {
+    const { disks } = this.console.listDisks();
+    const topology = this.console.topology(); // { hasStore, hasUploads, disks, actions }
+
+    for (const disk of disks) {
+      const { folders, files, cursor } = await this.console.listObjects(disk.name, { prefix: '' });
+      // …walk folders, page with `cursor`…
+    }
+
+    // Library (needs a MediaStore that implements the query SPI — see Custom store)
+    const { records } = await this.console.listLibrary({ collection: 'gallery', limit: 100 });
+  }
+}
+```
+
+It resolves the storage manager, the `MediaStore`, and the upload-session store as **optional** dependencies, so a host missing any of them still boots — each method degrades to an empty shape (`{ disks: [] }`, `{ records: [] }`, …) instead of throwing. The full surface:
+
+| Method | Returns | Notes |
+|---|---|---|
+| `listDisks()` | `DiskListResponse` | Registered disks + each one's capabilities. |
+| `listObjects(disk, { prefix, cursor, limit })` | `ObjectListResponse` | One level of a disk — `{ folders, files, cursor }`. See [Folders](/docs/concepts/folders). |
+| `objectDetail(disk, key)` | `ObjectDetailResponse` | Size, content type, and a preview/download URL (signed on presign-capable disks). |
+| `objectStream(disk, key)` | `{ stream, contentType, size }` | Raw byte stream for the inline preview proxy. |
+| `putObject(disk, key, body, contentType?)` | `void` | Writes an object from a stream. Buffered + size-capped. **Action.** |
+| `createFolder` / `deleteFolder` | `void` | Folder marker create / recursive delete. **Action.** |
+| `copyObject` / `moveObject` | `void` | Single-object copy/move, same disk or cross-disk. **Action.** |
+| `moveFolder` / `copyFolder` | `void` | Whole-subtree copy/move. **Action.** See [Folders](/docs/concepts/folders#the-dashboard-folder-feature). |
+| `listUploads({ disk?, prefix? })` | `UploadListResponse` | In-progress resumable sessions. |
+| `uploadDetail(id)` / `abortUpload(id)` | `UploadDetailResponse` / `void` | Inspect / cancel a session (`abort` is an **action**). |
+| `listCollections()` | `CollectionsResponse` | Per-collection counts + byte totals (uses `MediaStore.aggregate`). |
+| `listLibrary({ collection?, disk?, cursor?, limit? })` | `LibraryListResponse` | Paginated media records (uses `MediaStore.list`). |
+| `libraryDetail(id)` / `deleteLibraryRecord(id)` | `LibraryDetailResponse` / `void` | One record + variant URLs / delete (`delete` is an **action**). |
+| `topology()` | `Topology` | What's wired: `{ hasStore, hasUploads, disks, actions }`. |
+
+<Callout type="info" title="Library methods need the query SPI">
+`listCollections`/`listLibrary` require a `MediaStore` that implements the optional `count`/`aggregate`/`list` methods. The four bundled ORM stores do; a custom store returns empty shapes until it adds them — see [the MediaStore query SPI](/docs/recipes/custom-store#the-query-spi-admin).
+</Callout>
+
+## The JSON API
+
+The SPA talks to the service over a small JSON API mounted at `apiBasePath`. It's split across three controllers, and every route below is **relative to `apiBasePath`** (e.g. `/media/api`). The [read controller](#read-endpoints) is always mounted; the [action controller](#actions) only when `actions: true`; the auth controller (`/me`, `/login`, `/logout`, `/session`) is always mounted and never guarded (it mints the very session the guard checks).
+
+The response shapes are exported as types — see [the client subpath](#the-typed-browser-client-client-subpath).
+
+### Read endpoints
+
+| Method + path | Query | Response |
+|---|---|---|
+| `GET disks` | — | `DiskListResponse` |
+| `GET disks/:disk/objects` | `prefix?`, `cursor?`, `limit?` | `ObjectListResponse` |
+| `GET disks/:disk/object` | `key` | `ObjectDetailResponse` |
+| `GET disks/:disk/object/raw` | `key` | raw bytes, `Content-Disposition: inline` |
+| `GET uploads` | `disk?`, `prefix?` | `UploadListResponse` |
+| `GET uploads/:id` | — | `UploadDetailResponse` |
+| `GET library/collections` | — | `CollectionsResponse` |
+| `GET library` | `collection?`, `disk?`, `cursor?`, `limit?` | `LibraryListResponse` |
+| `GET library/:id` | — | `LibraryDetailResponse` |
+| `GET topology` | — | `Topology` |
+
+### Actions
+
+Present only with `actions: true`. All return `204 No Content`. On copy/move routes the `:disk` in the path is the **source**; the JSON body's optional `toDisk` names a cross-disk destination.
+
+| Method + path | Body / query |
+|---|---|
+| `DELETE disks/:disk/object` | `key` (query) |
+| `POST   disks/:disk/copy` | `{ from, to, toDisk? }` |
+| `POST   disks/:disk/move` | `{ from, to, toDisk? }` |
+| `POST   disks/:disk/upload` | `key` + `type?` (query); raw `application/octet-stream` body |
+| `POST   disks/:disk/folder` | `{ prefix }` |
+| `DELETE disks/:disk/folder` | `prefix` (query) |
+| `POST   disks/:disk/move-folder` | `{ from, to, toDisk? }` |
+| `POST   disks/:disk/copy-folder` | `{ from, to, toDisk? }` |
+| `POST   uploads/:id/abort` | — |
+| `DELETE library/:id` | — |
+
+The folder routes are covered in depth on the [Folders](/docs/concepts/folders#dashboard-rest-folder-routes) page.
+
+## The typed browser client (`/client` subpath)
+
+`@dudousxd/nestjs-media-dashboard/client` is a **pure-types + tiny-runtime** entry, safe to import into any browser bundle — it carries no NestJS. It exports `mediaConsoleClient`, a typed wrapper over every endpoint above (it rides the session cookie via `credentials: 'same-origin'`), plus every response type. This is what the bundled SPA uses, and what you'd import to build your own admin screen against the same API:
+
+```ts
+import {
+  mediaConsoleClient,
+  type MediaConsoleClient,
+  type ObjectListResponse,
+} from '@dudousxd/nestjs-media-dashboard/client';
+
+// Auth gate: 'open' | 'authenticated' | 'login'
+const state = await mediaConsoleClient.me();
+
+const { disks } = await mediaConsoleClient.disks();
+const page: ObjectListResponse = await mediaConsoleClient.objects('s3', { prefix: 'photos/' });
+const { record, variants } = await mediaConsoleClient.libraryRecord('abc123');
+
+// Actions (need `actions: true` on the server)
+await mediaConsoleClient.createFolder('s3', 'invoices/2024');
+await mediaConsoleClient.moveObject('s3', 'a/x.jpg', 's3', 'b/x.jpg');
+await mediaConsoleClient.uploadObject('s3', 'imports/data.csv', file); // raw bytes, MIME preserved
+```
+
+It also carries a few browser-only conveniences the raw API doesn't: `objectRawUrl(disk, key)` (a same-origin inline URL to embed a preview a signed cross-origin URL would force-download), `objectTextHead(disk, key, maxBytes)` (sample the head of a large text file without pulling it all down), and `objectBytes(disk, key)` (fetch raw bytes for binary previews). `MediaConsoleClient` is the type of the whole client object, handy for wrapping or mocking it.
+
+By default it fetches from `/media/api`; the UI controller injects the real base at runtime via `window.__MEDIA_API__` / `window.__MEDIA_BASE__`, so a non-default `apiBasePath` is picked up automatically.
+
+## `MediaConsoleApiModule`
+
+`MediaDashboardModule` is the batteries-included mount — SPA **plus** API at fixed paths. Underneath it sits `MediaConsoleApiModule`, the API-only dynamic module that holds the three controllers and `MediaConsoleService`. `MediaDashboardModule` composes it (and re-exports it, which is why `MediaConsoleService` is injectable in importers). You rarely register it yourself, but it's exported for hosts that serve the SPA their own way (a separate static host, a different framework) and only want the JSON API wired into Nest with custom routing:
+
+```ts
+import { MediaConsoleApiModule } from '@dudousxd/nestjs-media-dashboard';
+```
+
+Its `register()` takes the same building blocks `MediaDashboardModule` feeds it — `actions`, the auth provider, `guards`/`imports`, and the cookie `Path` — and exports `MediaConsoleService`. Prefer `MediaDashboardModule.forRoot`/`forRootAsync` unless you specifically need to own the mount.
 
 ## Peer dependencies
 

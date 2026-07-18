@@ -1,0 +1,206 @@
+---
+title: Folders & prefix navigation
+icon: FolderTree
+description: 'Object stores have no real folders — only keys. How media fakes them — the delimiter rollup that turns a flat key space into a navigable tree (ListResult.folders / ListOptions.delimiter), and the dashboard folder feature (create, delete, move, copy) built on top of it.'
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+import { Steps, Step } from 'fumadocs-ui/components/steps';
+
+An object store (S3, and the local driver that mimics it) has **no folders**. There is only a flat map of keys to bytes — `photos/2024/paris/eiffel.jpg` is one opaque string, not a `paris` directory living inside a `2024` directory. The slashes are a *convention*, nothing more.
+
+Yet every file browser — including this library's [console](/docs/packages/dashboard) — shows you folders you can open, create, and drag things between. That illusion is built entirely from **prefix rollups**: ask the driver to list a prefix and to *stop at the next delimiter*, and it hands back the distinct sub-prefixes it found. Those become your folders.
+
+## The `delimiter` rollup
+
+Every [`StorageDriver`](/docs/packages/core) whose `capabilities.list` is `true` implements:
+
+```ts
+list(prefix: string, options?: ListOptions): Promise<ListResult>;
+
+interface ListOptions {
+  /** Delimiter that rolls deeper keys up into folder prefixes. Default '/'. */
+  delimiter?: string;
+  /** Opaque pagination cursor from a previous ListResult. */
+  cursor?: string;
+  /** Max entries per page. */
+  limit?: number;
+  /** Override the driver's configured bucket/root (admin cross-bucket browse). */
+  bucket?: string;
+}
+
+interface ListResult {
+  /** Sub-folder prefixes (each ends in the delimiter), from CommonPrefixes. */
+  folders: string[];
+  /** File entries directly under the prefix. */
+  files: ListEntry[];
+  /** Present when the result is truncated; pass back as ListOptions.cursor. */
+  cursor?: string;
+}
+
+interface ListEntry {
+  key: string;                    // full key relative to the bucket/root
+  name: string;                   // last path segment (no trailing slash)
+  sizeBytes: number | null;
+  lastModified: Date | null;
+}
+```
+
+The `delimiter` defaults to `/`. With it, `list` behaves exactly like `ls` of a single directory: **files directly under the prefix** land in `files`, and **everything deeper** collapses into `folders` (S3 calls these `CommonPrefixes`). Nothing nested is enumerated — that's what makes a huge bucket cheap to browse one level at a time.
+
+Given these keys on a disk:
+
+```
+photos/logo.png
+photos/2023/summer/a.jpg
+photos/2023/winter/b.jpg
+photos/2024/paris/eiffel.jpg
+```
+
+listing the `photos/` prefix rolls the two years up into folders and returns only the file that sits directly there:
+
+```ts
+const result = await storage.disk('s3').list('photos/');
+// result.folders → ['photos/2023/', 'photos/2024/']   (each ends in the delimiter)
+// result.files   → [{ key: 'photos/logo.png', name: 'logo.png', sizeBytes: 5123, … }]
+```
+
+Open a folder by feeding its prefix straight back in — the `folders` entries are already valid prefixes:
+
+```ts
+const inner = await storage.disk('s3').list('photos/2024/');
+// inner.folders → ['photos/2024/paris/']
+// inner.files   → []
+```
+
+That single call, repeated as the user clicks, is the whole navigation model.
+
+<Callout type="info" title="Folder names vs. folder prefixes">
+Each entry in `folders` is a **full prefix** ending in the delimiter (`photos/2024/`), not just a name. To render a label, take the last non-empty segment. The dashboard does this for you and returns `{ name, prefix }` pairs — see [the console object types](/docs/packages/dashboard#the-json-api).
+</Callout>
+
+### Listing flat: `delimiter: ''`
+
+Pass an **empty** delimiter and the rollup disappears — you get *every* key under the prefix, nested included, with `folders` empty. This is how you sweep a subtree, e.g. to size it or to delete it recursively:
+
+```ts
+// Every object under photos/2024/, however deep — no folders, all files.
+let cursor: string | undefined;
+const all: string[] = [];
+do {
+  const page = await storage.disk('s3').list('photos/2024/', { delimiter: '', cursor, limit: 1000 });
+  all.push(...page.files.map((f) => f.key));
+  cursor = page.cursor;
+} while (cursor);
+```
+
+The dashboard's recursive folder delete and folder move/copy are exactly this loop — a flat sweep, then an operation per key. The default `/` delimiter would have hidden the nested keys inside `folders`, and the sweep would have missed them.
+
+### Pagination
+
+`list` is paginated. When a result is truncated it carries a `cursor`; pass it back as `ListOptions.cursor` for the next page, and stop when it's absent:
+
+```ts
+let cursor: string | undefined;
+do {
+  const page = await storage.disk('s3').list('photos/', { cursor, limit: 100 });
+  render(page.folders, page.files);
+  cursor = page.cursor;
+} while (cursor);
+```
+
+The cursor is **opaque** — don't parse it. It encodes the S3 continuation token (or the local driver's equivalent offset); treat it as a "give me more" token that only means anything to the driver that issued it.
+
+### Cross-bucket browse: `bucket`
+
+`ListOptions.bucket` overrides the driver's configured bucket/root for one call — an admin escape hatch to browse a *different* bucket through the same credentials, without registering a second disk. Drivers without a bucket concept (e.g. the local driver) ignore it.
+
+```ts
+await storage.disk('s3').list('', { bucket: 'some-other-bucket' });
+```
+
+## The dashboard folder feature
+
+Because object stores have no folders, "create a folder" can't mean "make a directory" — there's nothing to make. The [console](/docs/packages/dashboard) fakes it with a **zero-byte marker object** whose key is the prefix itself, ending in a slash (`invoices/2024/`). S3-style listing then surfaces that prefix as a navigable, and now *empty-but-real*, folder. `MediaConsoleService` owns the four folder operations:
+
+| Method | What it does |
+|---|---|
+| `createFolder(disk, prefix)` | Writes a zero-byte marker at `<prefix>/`. Normalizes to exactly one trailing slash; rejects an empty name. |
+| `deleteFolder(disk, prefix)` | Recursively deletes **every** object under `<prefix>/` (nested included), then the marker itself — via a flat (`delimiter: ''`) paginated sweep. |
+| `moveFolder(fromDisk, from, toDisk, to)` | Relocates the whole subtree to `<to>/`, preserving each key's relative path. Same disk or across disks. |
+| `copyFolder(fromDisk, from, toDisk, to)` | Same as move, but leaves the source in place. |
+
+Marker objects are why the console filters listings the way it does: a folder marker's key ends in `/`, so after stripping the prefix its `name` is empty — the console drops those empty-named entries so the marker shows up as the *folder*, never as a phantom file inside it.
+
+<Callout type="warn" title="Folder ops are destructive — gate them">
+`deleteFolder`, `moveFolder`, and `copyFolder` mutate storage, so they live on the **actions** surface. They only exist when the host opts in with `MediaDashboardModule.forRoot({ actions: true })` (default off — the console is read-only otherwise). See [the dashboard package](/docs/packages/dashboard#actions).
+</Callout>
+
+Same-disk moves and copies use the driver's native, server-side `copy`/`move` (no bytes through your pod). A **cross-disk** folder transfer has no driver primitive, so each object is streamed through the process (`get` → `put`, buffered) — bounded per object to protect the heap. A move into a destination *inside* its own source is rejected on the same disk (it would recurse forever).
+
+### Dashboard REST folder routes
+
+The folder operations are reachable over the console's JSON API. All are on the **actions** controller (present only with `actions: true`) and return `204 No Content`. The disk in the path is the *source* disk; the JSON body's optional `toDisk` names the destination for a cross-disk transfer (omit it to stay on the same disk).
+
+| Method + path | Body / query | Service call |
+|---|---|---|
+| `POST   disks/:disk/folder` | `{ "prefix": "invoices/2024" }` | `createFolder` |
+| `DELETE disks/:disk/folder?prefix=…` | `prefix` query param | `deleteFolder` |
+| `POST   disks/:disk/move-folder` | `{ "from", "to", "toDisk"? }` | `moveFolder` |
+| `POST   disks/:disk/copy-folder` | `{ "from", "to", "toDisk"? }` | `copyFolder` |
+
+```bash
+# Create a folder
+curl -X POST https://app.example.com/media/api/disks/s3/folder \
+  -H 'Content-Type: application/json' \
+  -d '{"prefix":"invoices/2024"}'
+
+# Move a folder to another disk, keeping its subtree layout
+curl -X POST https://app.example.com/media/api/disks/s3/move-folder \
+  -H 'Content-Type: application/json' \
+  -d '{"from":"invoices/2024","to":"archive/2024","toDisk":"cold"}'
+
+# Recursively delete a folder and everything under it
+curl -X DELETE 'https://app.example.com/media/api/disks/s3/folder?prefix=invoices/2024'
+```
+
+From the browser, the [typed console client](/docs/packages/dashboard#the-typed-browser-client-client-subpath) wraps every one of these:
+
+```ts
+import { mediaConsoleClient } from '@dudousxd/nestjs-media-dashboard/client';
+
+await mediaConsoleClient.createFolder('s3', 'invoices/2024');
+await mediaConsoleClient.moveFolder('s3', 'invoices/2024', 'cold', 'archive/2024');
+await mediaConsoleClient.deleteFolder('s3', 'invoices/2024');
+```
+
+## Building your own folder browser
+
+You don't need the console — the SPI is enough to build navigation into your own admin. The pattern is always the same three steps:
+
+<Steps>
+<Step>
+### List the current prefix
+Start at the root (`''`) or wherever the user is, with the default `/` delimiter. Render `folders` as clickable rows and `files` as leaves.
+
+```ts
+const { folders, files, cursor } = await storage.disk('s3').list(prefix);
+```
+</Step>
+<Step>
+### Descend on click
+A clicked folder's `prefix` (or the console's `{ name, prefix }`) is the next argument — no path math required.
+
+```ts
+const next = await storage.disk('s3').list(clickedFolder /* already a prefix */);
+```
+</Step>
+<Step>
+### Page and sweep as needed
+Follow `cursor` for more of a busy folder; switch to `delimiter: ''` when you need the whole subtree (a size total, a bulk action) rather than one level.
+</Step>
+</Steps>
+
+<Callout type="info">
+Only drivers that advertise `capabilities.list === true` support any of this. The bundled [local](/docs/packages/disk-local) and [S3](/docs/packages/disk-s3) drivers do; a custom driver can opt out (see [Writing a custom disk driver](/docs/recipes/custom-driver)).
+</Callout>

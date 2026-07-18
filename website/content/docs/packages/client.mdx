@@ -1,5 +1,6 @@
 ---
 title: '@dudousxd/nestjs-media-client'
+icon: Globe
 description: The framework-agnostic browser client — one implementation of the resumable tus upload, plus a URL helper.
 ---
 
@@ -23,7 +24,117 @@ const { location } = await uploadMedia(file, {
 });
 ```
 
-It POSTs to create the upload (sending `Upload-Length` + base64 `Upload-Metadata`), reads the `Location`, then PATCHes chunks while tracking `Upload-Offset` — the server assembles them on completion.
+It POSTs to create the upload (sending `Upload-Length` + base64 `Upload-Metadata`), reads the `Location`, then PATCHes chunks while tracking `Upload-Offset` — the server assembles them on completion. It resolves to an `UploadMediaResult`:
+
+```ts
+interface UploadMediaResult {
+  location: string; // the created resource's URL, from the session's Location header
+}
+```
+
+## `uploadMediaParallel`
+
+Same signature as `uploadMedia` plus a `concurrency` knob, but instead of streaming chunks sequentially it opens a session and **PUTs parts by number concurrently**, then POSTs a completion call. On a fast connection with a high-latency backend, uploading N parts at once is dramatically quicker than one-at-a-time — this is the client half of the [direct presigned-multipart](/docs/concepts/uploads#direct-presigned-multipart-server) path.
+
+```ts
+import { uploadMediaParallel } from '@dudousxd/nestjs-media-client';
+
+const { location } = await uploadMediaParallel(file, {
+  filename: file.name,
+  contentType: file.type,
+  chunkSize: 8 * 1024 * 1024, // part size; default 5 MiB
+  concurrency: 4,             // max in-flight part PUTs; default 3
+  onProgress: (sent, total) => setPct(sent / total),
+});
+```
+
+Progress is reported as **total bytes acknowledged across all parts**, so it climbs monotonically even though parts finish out of order. If any part fails all its retries, every sibling part is aborted and the whole call rejects — you won't be left with a half-assembled object silently "completed".
+
+<Callout type="info" title="Which one?">
+Reach for `uploadMediaParallel` for large files over high-latency links where throughput matters. Stick with `uploadMedia` for smaller files, flaky connections where clean resume matters more than speed, or backends that don't expose the numbered-part endpoints. Both return the same `{ location }`.
+</Callout>
+
+## Lower-level primitives
+
+`uploadMedia`/`uploadMediaParallel` are thin compositions of three exported building blocks. Reach for them when you need to own the lifecycle — e.g. create the session on the server, hand the browser only the location, and stream from there; or resume a session your app persisted earlier.
+
+### `createSession`
+
+Opens a tus session with the lib's own `POST` and returns its `Location`. This is the "initiate" step both high-level helpers call first:
+
+```ts
+import { createSession } from '@dudousxd/nestjs-media-client';
+
+const { location } = await createSession('/media/uploads', {
+  filename: file.name,
+  contentType: file.type,
+  length: file.size, // Upload-Length — required
+});
+```
+
+### `streamChunks`
+
+Sequentially PATCHes a `Blob` into an **already-opened** session location. By default it first `HEAD`s the session and resumes from the server's `Upload-Offset` — so a fresh call continues an interrupted upload rather than restarting it:
+
+```ts
+import { streamChunks } from '@dudousxd/nestjs-media-client';
+
+await streamChunks(location, file, {
+  chunkSize: 5 * 1024 * 1024,
+  onProgress: (sent, total) => setPct(sent / total),
+  resume: true,          // HEAD first and resume from the server's offset (default)
+  retries: 3,            // per-chunk retry attempts (default 3)
+  signal: controller.signal, // AbortSignal to cancel mid-upload
+});
+
+interface StreamChunksOptions {
+  chunkSize?: number;
+  onProgress?: (sent: number, total: number) => void;
+  fetchImpl?: typeof fetch;
+  headers?: Record<string, string>;
+  getHeaders?: () => HeadersInit | Promise<HeadersInit>;
+  resume?: boolean;      // default true
+  retries?: number;      // default 3
+  signal?: AbortSignal;
+}
+```
+
+### `streamChunksParallel`
+
+PUTs numbered parts against a session location with a bounded concurrency pool, then POSTs `<location>/complete`. This is the engine under `uploadMediaParallel`:
+
+```ts
+import { streamChunksParallel } from '@dudousxd/nestjs-media-client';
+
+await streamChunksParallel(location, file, {
+  chunkSize: 8 * 1024 * 1024,
+  concurrency: 4,        // max in-flight part PUTs (default 3)
+  onProgress: (sentBytes, total) => setPct(sentBytes / total),
+  retries: 3,
+  signal: controller.signal,
+});
+
+interface StreamChunksParallelOptions {
+  chunkSize?: number;
+  concurrency?: number;  // default 3
+  onProgress?: (sentBytes: number, total: number) => void;
+  fetchImpl?: typeof fetch;
+  headers?: Record<string, string>;
+  getHeaders?: () => HeadersInit | Promise<HeadersInit>;
+  retries?: number;      // default 3
+  signal?: AbortSignal;
+}
+```
+
+A composed upload from the primitives is just: open, then stream.
+
+```ts
+const { location } = await createSession('/media/uploads', {
+  filename: file.name, contentType: file.type, length: file.size,
+});
+await streamChunksParallel(location, file, { concurrency: 4 });
+// `location` is now the finished resource
+```
 
 ## `mediaUrl`
 
