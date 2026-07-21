@@ -1,5 +1,12 @@
 # @dudousxd/nestjs-media-disk-local
 
+## 1.0.0
+
+### Patch Changes
+
+- Updated dependencies [8852c83]
+  - @dudousxd/nestjs-media-core@0.8.0
+
 ## 0.5.8
 
 ### Patch Changes
