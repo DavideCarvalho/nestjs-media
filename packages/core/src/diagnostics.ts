@@ -98,6 +98,8 @@ export interface UploadStartPayload {
   key: string;
   size: number | undefined;
   contentType: string | undefined;
+  /** Opaque application data supplied at createUpload. See `UploadSession.metadata`. */
+  metadata?: Record<string, unknown>;
 }
 export interface UploadProgressPayload {
   id: string;
@@ -110,6 +112,13 @@ export interface UploadCompletePayload {
   disk: string;
   key: string;
   size: number;
+  /**
+   * Opaque application data supplied at createUpload. Subscribing to `upload.complete` and reading
+   * this is what lets a host act on a finished upload (index it, attach it, kick off a workflow)
+   * without a client round-trip after the bytes land — so an abandoned client can't leave the object
+   * orphaned. See `UploadSession.metadata`.
+   */
+  metadata?: Record<string, unknown>;
 }
 export interface UploadAbortPayload {
   id: string;

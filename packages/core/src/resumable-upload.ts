@@ -26,6 +26,14 @@ export interface UploadSession {
   multipartUploadId?: string;
   /** When the session was created. Optional/additive — consumers (dashboard) omit age when absent. */
   createdAt?: Date;
+  /**
+   * Opaque application data attached at {@link ResumableUploadManager.createUpload} and carried
+   * through to the `upload.start` / `upload.complete` diagnostics events. This library never reads
+   * it — it exists so a host can correlate a finished upload back to whatever it was for (which
+   * record, which collection, which workflow) without keeping its own side-table keyed by upload id,
+   * and without the client having to call back in after the bytes land.
+   */
+  metadata?: Record<string, unknown>;
 }
 
 /** Optional filter for {@link UploadSessionStore.list}. */
@@ -59,6 +67,8 @@ export interface CreateUploadInput {
   key: string;
   size?: number;
   contentType?: string;
+  /** Opaque application data echoed back on the upload diagnostics events. See {@link UploadSession.metadata}. */
+  metadata?: Record<string, unknown>;
 }
 
 export interface ResumableUploadManagerOptions {
@@ -116,6 +126,7 @@ export class ResumableUploadManager {
       size: input.size,
       offset: 0,
       parts: 0,
+      ...(input.metadata !== undefined ? { metadata: input.metadata } : {}),
       ...multipart,
     });
     this.emit('upload.start', {
@@ -124,6 +135,7 @@ export class ResumableUploadManager {
       key: session.key,
       size: session.size,
       contentType: session.contentType,
+      ...(session.metadata !== undefined ? { metadata: session.metadata } : {}),
     });
     return session;
   }
@@ -238,6 +250,7 @@ export class ResumableUploadManager {
       disk: session.disk,
       key: session.key,
       size,
+      ...(session.metadata !== undefined ? { metadata: session.metadata } : {}),
     });
     return { key: session.key, disk: session.disk, size };
   }

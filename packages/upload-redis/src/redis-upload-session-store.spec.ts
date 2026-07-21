@@ -228,6 +228,38 @@ describe('RedisUploadSessionStore', () => {
     const result = await store.get('s1');
     expect(result?.multipartUploadId).toBe('mpu-1');
   });
+
+  it('round-trips host metadata through serialization', async () => {
+    // create() serialises the whole session, but deserialize() picks fields explicitly — without
+    // restoring metadata there it would be silently dropped on read and never reach upload.complete.
+    await store.create({
+      id: 'meta-1',
+      disk: 'd',
+      key: 'k',
+      contentType: undefined,
+      size: 10,
+      offset: 0,
+      parts: 0,
+      metadata: { collectionId: 'c1', audience: ['role:ADMIN'] },
+    });
+
+    const loaded = await store.get('meta-1');
+    expect(loaded?.metadata).toEqual({ collectionId: 'c1', audience: ['role:ADMIN'] });
+  });
+
+  it('omits metadata when none was stored', async () => {
+    await store.create({
+      id: 'meta-2',
+      disk: 'd',
+      key: 'k',
+      contentType: undefined,
+      size: 1,
+      offset: 0,
+      parts: 0,
+    });
+    const loaded = await store.get('meta-2');
+    expect(loaded).not.toHaveProperty('metadata');
+  });
 });
 
 describe('RedisUploadSessionStore parts (HSET)', () => {

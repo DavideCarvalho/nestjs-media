@@ -40,6 +40,8 @@ function isUploadSession(value: unknown): value is UploadSession {
   if (obj.multipartUploadId !== undefined && typeof obj.multipartUploadId !== 'string')
     return false;
   if (obj.createdAt !== undefined && typeof obj.createdAt !== 'string') return false;
+  if (obj.metadata !== undefined && (typeof obj.metadata !== 'object' || obj.metadata === null))
+    return false;
   return true;
 }
 
@@ -83,6 +85,9 @@ export class RedisUploadSessionStore implements UploadSessionStore {
         ? { multipartUploadId: parsed.multipartUploadId }
         : {}),
       ...(parsed.createdAt !== undefined ? { createdAt: new Date(parsed.createdAt) } : {}),
+      // Round-trips the host's opaque metadata. `create` serialises the whole session, so without
+      // restoring it here it would be silently dropped on read and never reach `upload.complete`.
+      ...(parsed.metadata !== undefined ? { metadata: parsed.metadata } : {}),
     };
     return session;
   }
