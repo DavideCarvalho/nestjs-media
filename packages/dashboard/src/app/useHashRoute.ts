@@ -8,6 +8,8 @@ export interface Route {
   disk?: string;
   /** Current folder prefix within the disk. */
   prefix?: string;
+  /** Object key whose preview panel is open (Disks tab). */
+  preview?: string;
   /** Selected upload id (Uploads tab drill-in). */
   uploadId?: string;
   /** Selected media record id (Library tab drill-in). */
@@ -32,10 +34,12 @@ export function parseHash(hash: string): Route {
 
   const route: Route = { tab };
   const prefix = params.get('prefix');
+  const preview = params.get('preview');
   const collection = params.get('collection');
   if (tab === 'disks' && segments[1]) {
     route.disk = decodeURIComponent(segments[1]);
     if (prefix) route.prefix = prefix;
+    if (preview) route.preview = decodeURIComponent(preview);
   }
   if (tab === 'uploads' && segments[1]) route.uploadId = decodeURIComponent(segments[1]);
   if (tab === 'library') {

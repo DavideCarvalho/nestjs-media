@@ -69,6 +69,18 @@ function navigateToPrefix(disk: string, prefix: string): void {
   window.location.hash = `#/disks/${encodeURIComponent(disk)}${query}`;
 }
 
+/** Rebuild the Disks-tab hash preserving `prefix` while setting (key) or clearing (null) the open
+ *  preview. Uses URLSearchParams so params are percent-encoded exactly once — `parseHash` reads them
+ *  back via `params.get(...)`, which decodes, so keys containing slashes round-trip. */
+function navigateToPreview(disk: string, prefix: string | undefined, key: string | null): void {
+  const base = `#/disks/${encodeURIComponent(disk)}`;
+  const params = new URLSearchParams();
+  if (prefix) params.set('prefix', prefix);
+  if (key) params.set('preview', key);
+  const qs = params.toString();
+  window.location.hash = qs ? `${base}?${qs}` : base;
+}
+
 function buildObjectsParams(
   prefix: string | undefined,
   cursor: string | undefined,
@@ -605,12 +617,24 @@ export function DisksView({ route, actions }: { route: Route; actions: boolean }
     try {
       const detail = await mediaConsoleClient.object(disk, key);
       setPreview({ ...detail, disk, name });
+      navigateToPreview(disk, prefix, key);
     } catch (error) {
       pushToast('error', `Failed to open "${key}": ${describeError(error)}`);
     } finally {
       setBusyKey(null);
     }
   }
+
+  // Deep-link: when the URL carries `preview=<key>` (and the disk is resolved), open that file's
+  // preview panel. Guard against the key already being open so this never loops with the write in
+  // `handlePreview`/`navigateToPreview`.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: handlePreview + preview are intentionally omitted; keying on route.preview/selectedDisk (with the open-key guard) is what prevents a re-open loop.
+  useEffect(() => {
+    if (!route.preview || !selectedDisk) return;
+    if (preview?.key === route.preview) return;
+    const basename = route.preview.split('/').pop() ?? route.preview;
+    void handlePreview(selectedDisk, route.preview, basename);
+  }, [route.preview, selectedDisk]);
 
   async function handleCopyKey(key: string): Promise<void> {
     await navigator.clipboard.writeText(key);
@@ -1067,7 +1091,13 @@ export function DisksView({ route, actions }: { route: Route; actions: boolean }
         </Modal>
       )}
 
-      <Lightbox item={preview} onClose={() => setPreview(null)} />
+      <Lightbox
+        item={preview}
+        onClose={() => {
+          setPreview(null);
+          if (selectedDisk) navigateToPreview(selectedDisk, prefix, null);
+        }}
+      />
       <ToastStack toasts={toasts} onDismiss={dismissToast} />
     </section>
   );
