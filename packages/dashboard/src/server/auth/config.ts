@@ -11,6 +11,14 @@ export type LoginHook = (
   password: string,
 ) => Promise<ConsoleSessionUser | null> | ConsoleSessionUser | null;
 
+/**
+ * Re-checks a LIVE session when the cookie is slid forward. Runs at most once per `ttl/2` per
+ * session, so a DB round-trip here is cheap. Return `false` to revoke (the cookie is cleared and
+ * the request denied). Distinct from `session`: that hook reads the host's auth off a fresh
+ * request, which a console XHR does not carry — this one receives the already-minted session.
+ */
+export type RevalidateHook = (session: ConsoleSessionUser) => Promise<boolean> | boolean;
+
 /** Author-facing `auth` option on `MediaDashboardModule.forRoot`. Mirrors telescope's dashboardAuth. */
 export interface ConsoleAuthOptions {
   /** REQUIRED HMAC-SHA256 signing key. Missing/empty => boot error (fail closed). */
@@ -21,6 +29,8 @@ export interface ConsoleAuthOptions {
   session?: SessionHook;
   /** Mode B: validate credentials from the built-in login screen. */
   login?: LoginHook;
+  /** Re-checks the session on sliding renewal. Not a mode — it cannot mint a session on its own. */
+  revalidate?: RevalidateHook;
 }
 
 export type AuthMode = 'session' | 'login';
@@ -32,6 +42,7 @@ export interface ResolvedConsoleAuth {
   modes: AuthMode[];
   session?: SessionHook;
   login?: LoginHook;
+  revalidate?: RevalidateHook;
 }
 
 const DEFAULT_TTL_MS = 8 * 60 * 60 * 1000;
@@ -76,5 +87,6 @@ export function resolveConsoleAuth(
     modes,
     ...(options.session ? { session: options.session } : {}),
     ...(options.login ? { login: options.login } : {}),
+    ...(options.revalidate ? { revalidate: options.revalidate } : {}),
   };
 }
