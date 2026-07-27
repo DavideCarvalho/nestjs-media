@@ -6,10 +6,14 @@ import {
   Inject,
   Injectable,
   Module,
+  UnauthorizedException,
 } from '@nestjs/common';
 import { GUARDS_METADATA as REAL_GUARDS_METADATA } from '@nestjs/common/constants.js';
 import { NestFactory } from '@nestjs/core';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { type ConsoleAuthOptions, resolveConsoleAuth } from './auth/config.js';
+import { SESSION_COOKIE_NAME } from './auth/session-cookie-io.js';
+import { signSessionCookie } from './auth/session-cookie.js';
 import { GUARDS_METADATA } from './guards.js';
 import { MediaConsoleActionsController } from './media-console-actions.controller.js';
 import { MediaConsoleReadController } from './media-console-read.controller.js';
@@ -321,5 +325,117 @@ describe('MediaDashboardModule.forRoot guards (integration)', () => {
       headers: { cookie: cookie ?? '', 'x-host-auth': 'yes' },
     });
     expect(both.status).toBe(200);
+  });
+});
+
+/** Secret used by the revalidate fixtures below. */
+const REVALIDATE_SECRET = 's'.repeat(32);
+/** `resolveConsoleAuth`'s default TTL ('8h'), in ms — matches the `guardWith` fixtures, which don't set `ttl`. */
+const REVALIDATE_TTL_MS = 8 * 60 * 60 * 1000;
+
+/** Minimal Node-response double recording Set-Cookie writes, over the `appendSetCookie` contract. */
+function makeResponse(): {
+  raw: { getHeader: (n: string) => unknown; setHeader: (n: string, v: unknown) => void };
+  setCookies: () => string[];
+} {
+  const headers: Record<string, unknown> = {};
+  return {
+    raw: {
+      getHeader: (name) => headers[name.toLowerCase()],
+      setHeader: (name, value) => {
+        headers[name.toLowerCase()] = value;
+      },
+    },
+    setCookies: () => {
+      const current = headers['set-cookie'];
+      return Array.isArray(current)
+        ? current.filter((c): c is string => typeof c === 'string')
+        : [];
+    },
+  };
+}
+
+function contextFor(request: unknown, response: unknown = makeResponse().raw): ExecutionContext {
+  return {
+    switchToHttp: () => ({ getRequest: () => request, getResponse: () => response }),
+  } as unknown as ExecutionContext;
+}
+
+/** `MediaConsoleGuard` resolved from `authOptions`, mounted at the console's default `'/'` cookie path. */
+function guardWith(authOptions: ConsoleAuthOptions): MediaConsoleGuard {
+  return new MediaConsoleGuard(resolveConsoleAuth(authOptions), '/');
+}
+
+/** A request bearing a signed cookie issued `now` (well within the first 50% of the TTL). */
+function requestWithFreshCookie(): { headers: { cookie: string } } {
+  const value = signSessionCookie(
+    { id: 'u1', roles: ['admin'] },
+    { secret: REVALIDATE_SECRET, ttlMs: REVALIDATE_TTL_MS, now: Date.now() },
+  );
+  return { headers: { cookie: `${SESSION_COOKIE_NAME}=${value}` } };
+}
+
+/** A request bearing a signed cookie issued just past 50% of the TTL (renewal/revalidation due). */
+function requestWithHalfLifeCookie(): { headers: { cookie: string } } {
+  const issuedAt = Date.now() - (REVALIDATE_TTL_MS / 2 + 60_000);
+  const value = signSessionCookie(
+    { id: 'u1', roles: ['admin'] },
+    { secret: REVALIDATE_SECRET, ttlMs: REVALIDATE_TTL_MS, now: issuedAt },
+  );
+  return { headers: { cookie: `${SESSION_COOKIE_NAME}=${value}` } };
+}
+
+describe('MediaConsoleGuard revalidate hook (on the renewal path)', () => {
+  it('does not call revalidate before half the TTL has passed', async () => {
+    const revalidate = vi.fn().mockResolvedValue(true);
+    const guard = guardWith({ secret: REVALIDATE_SECRET, session: () => null, revalidate });
+    await expect(guard.canActivate(contextFor(requestWithFreshCookie()))).resolves.toBe(true);
+    expect(revalidate).not.toHaveBeenCalled();
+  });
+
+  it('renews when revalidate approves', async () => {
+    const revalidate = vi.fn().mockResolvedValue(true);
+    const guard = guardWith({ secret: REVALIDATE_SECRET, session: () => null, revalidate });
+    const response = makeResponse();
+    await expect(
+      guard.canActivate(contextFor(requestWithHalfLifeCookie(), response.raw)),
+    ).resolves.toBe(true);
+    expect(revalidate).toHaveBeenCalledTimes(1);
+    expect(response.setCookies().some((c) => c.startsWith('media_console_session='))).toBe(true);
+  });
+
+  it('401s and clears the cookie when revalidate rejects', async () => {
+    const guard = guardWith({
+      secret: REVALIDATE_SECRET,
+      session: () => null,
+      revalidate: () => false,
+    });
+    const response = makeResponse();
+    await expect(
+      guard.canActivate(contextFor(requestWithHalfLifeCookie(), response.raw)),
+    ).rejects.toThrow(UnauthorizedException);
+    expect(response.setCookies()[0]).toContain('Max-Age=0');
+  });
+
+  it('fails closed when revalidate throws', async () => {
+    const guard = guardWith({
+      secret: REVALIDATE_SECRET,
+      session: () => null,
+      revalidate: () => {
+        throw new Error('db down');
+      },
+    });
+    await expect(guard.canActivate(contextFor(requestWithHalfLifeCookie()))).rejects.toThrow(
+      UnauthorizedException,
+    );
+  });
+
+  it('renews without a revalidate hook (unchanged behaviour)', async () => {
+    const guard = guardWith({ secret: REVALIDATE_SECRET, session: () => null });
+    const response = makeResponse();
+    await expect(
+      guard.canActivate(contextFor(requestWithHalfLifeCookie(), response.raw)),
+    ).resolves.toBe(true);
+    expect(response.setCookies().some((c) => c.startsWith('media_console_session='))).toBe(true);
   });
 });

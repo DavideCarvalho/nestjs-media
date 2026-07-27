@@ -69,6 +69,32 @@ The SPA renders a login screen until a valid cookie exists. A cookie past half i
 
 The password submitted is passed through to `login` verbatim — including an empty string, since the built-in login screen never requires one — the hook owns whether it matters.
 
+### Re-checking the user on renewal with `revalidate`
+
+Sliding renewal alone never consults the host again — a deactivated or demoted operator would keep console access for as long as the tab stayed open. Add `revalidate` to re-check on that same renewal path:
+
+```ts
+MediaDashboardModule.forRoot({
+  auth: {
+    secret: process.env.CONSOLE_SECRET!,
+    login: async (username, password) => {
+      const user = await accounts.verify(username, password);
+      return user ? { id: user.id, roles: user.roles } : null;
+    },
+    revalidate: async ({ id }) => {
+      const account = await accounts.findById(id);
+      return account?.active === true;
+    },
+  },
+});
+```
+
+`revalidate` receives the already-minted session user (`{ id, name?, roles }`), not the raw request — the console's own XHRs carry no host credential, so re-running `session` here would just return `null` and log everyone out. Returning `false`, or throwing, clears the cookie and denies the request with the same 401 an absent cookie gets.
+
+<Callout type="warn">
+  `revalidate` only runs when a cookie is renewed (past half its TTL), so revocation isn't immediate — a revoked operator can keep console access for up to `ttl / 2` after the change lands. It's also not an auth mode on its own: it can't mint a session, so it doesn't count toward the `login`/`session` "at least one required" boot check.
+</Callout>
+
 ## Securing the console with your own guards
 
 `auth` is the console's own turnkey login. If your app already has an auth guard — a session/cookie check, an `InertiaAuthGuard`, whatever fronts the rest of your app — you don't need a second login system. `guards` (+ `imports` for its dependencies) lets you front the console with THAT guard instead, on a single `forRoot`/`forRootAsync` call:

@@ -9,8 +9,16 @@ import {
 import type { ResolvedConsoleAuth } from './auth/config.js';
 import { parseCookieHeader } from './auth/cookie-header.js';
 import { attachSession, readCookieHeader } from './auth/request.js';
-import { SESSION_COOKIE_NAME, issueSessionCookie } from './auth/session-cookie-io.js';
-import { type ConsoleSession, verifySessionCookie } from './auth/session-cookie.js';
+import {
+  SESSION_COOKIE_NAME,
+  clearSessionCookie,
+  issueSessionCookie,
+} from './auth/session-cookie-io.js';
+import {
+  type ConsoleSession,
+  type ConsoleSessionUser,
+  verifySessionCookie,
+} from './auth/session-cookie.js';
 import { MEDIA_CONSOLE_AUTH, MEDIA_CONSOLE_COOKIE_PATH } from './tokens.js';
 
 /**
@@ -26,7 +34,7 @@ export class MediaConsoleGuard implements CanActivate {
     @Optional() @Inject(MEDIA_CONSOLE_COOKIE_PATH) private readonly cookiePath: string | null,
   ) {}
 
-  canActivate(context: ExecutionContext): boolean {
+  async canActivate(context: ExecutionContext): Promise<boolean> {
     if (!this.auth) return true;
     const http = context.switchToHttp();
     const request = http.getRequest();
@@ -34,7 +42,10 @@ export class MediaConsoleGuard implements CanActivate {
     // Absent/invalid/expired cookie => 401 (not 403): the SPA reads this as "show the login screen".
     if (!session) throw new UnauthorizedException();
     attachSession(request, session);
-    this.maybeRenew(http.getResponse(), request, session);
+    if (!(await this.maybeRenew(http.getResponse(), request, session))) {
+      // Revoked mid-session: same 401 as an absent cookie.
+      throw new UnauthorizedException();
+    }
     return true;
   }
 
@@ -46,26 +57,43 @@ export class MediaConsoleGuard implements CanActivate {
   }
 
   /**
-   * Sliding renewal: when a valid cookie is past half its TTL, re-issue a fresh one so active users
-   * never get logged out mid-session. Appends a new Set-Cookie (preserving any others already set).
+   * Sliding renewal + revalidation: when a valid cookie is past half its TTL, re-issue a fresh one
+   * so active users never get logged out mid-session — but first let the host's `revalidate` hook
+   * re-check the user, so a deactivated or demoted operator loses access instead of riding a
+   * self-renewing cookie. Returns `false` when the session was revoked (cookie already cleared).
    */
-  private maybeRenew(response: unknown, request: unknown, session: ConsoleSession): void {
-    if (!this.auth) return;
+  private async maybeRenew(
+    response: unknown,
+    request: unknown,
+    session: ConsoleSession,
+  ): Promise<boolean> {
+    if (!this.auth) return true;
     const now = Date.now();
-    if (now - session.iat <= this.auth.ttlMs / 2) return;
-    issueSessionCookie(
-      {
-        id: session.sub,
-        ...(session.name !== undefined ? { name: session.name } : {}),
-        roles: session.roles,
-      },
-      {
-        auth: this.auth,
-        cookiePath: this.cookiePath ?? '/',
-        request,
-        response,
-        now,
-      },
-    );
+    if (now - session.iat <= this.auth.ttlMs / 2) return true;
+    const user: ConsoleSessionUser = {
+      id: session.sub,
+      ...(session.name !== undefined ? { name: session.name } : {}),
+      roles: session.roles,
+    };
+    if (this.auth.revalidate) {
+      let allowed: boolean;
+      try {
+        allowed = await this.auth.revalidate(user);
+      } catch {
+        allowed = false; // Fail closed.
+      }
+      if (!allowed) {
+        clearSessionCookie({ cookiePath: this.cookiePath ?? '/', request, response });
+        return false;
+      }
+    }
+    issueSessionCookie(user, {
+      auth: this.auth,
+      cookiePath: this.cookiePath ?? '/',
+      request,
+      response,
+      now,
+    });
+    return true;
   }
 }
