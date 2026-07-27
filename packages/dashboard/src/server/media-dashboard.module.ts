@@ -40,7 +40,8 @@ export interface MediaDashboardOptions {
    * Gate the console (SPA + API) behind a built-in session-cookie login, telescope-style. Omit to
    * leave the console open (front it with your own guard). When set, the SPA renders a login screen
    * until a valid cookie exists; supply a `login(username, password)` and/or `session(request)`
-   * hook that returns a session user (or `null` to deny) — see {@link ConsoleAuthOptions}.
+   * hook that returns a session user (or `null` to deny), and optionally a `revalidate(session)`
+   * hook that re-checks the user when the cookie is slid forward — see {@link ConsoleAuthOptions}.
    */
   auth?: ConsoleAuthOptions;
   /**
