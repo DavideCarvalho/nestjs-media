@@ -6,7 +6,9 @@ import { MediaConsoleReadController } from './media-console-read.controller.js';
 import { MEDIA_CONSOLE_AUTH } from './tokens.js';
 
 const base = {
-  cookiePath: '/api/media/console',
+  // Not `apiBasePath`: the session cookie is scoped to `/` so it reaches the SPA shell and the
+  // JSON API even when a host mounts them at unrelated paths. See media-console-cookie-scope.spec.
+  cookiePath: '/',
   authProvider: { provide: MEDIA_CONSOLE_AUTH, useValue: null },
 };
 

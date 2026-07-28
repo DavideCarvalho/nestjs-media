@@ -167,7 +167,17 @@ export class MediaDashboardModule {
         ...(imports ?? []),
         MediaConsoleApiModule.register({
           actions,
-          cookiePath: apiBasePath,
+          // `Path=/`, deliberately NOT scoped to `apiBasePath` (nor to `basePath`): the two mounts
+          // are independently configurable and can live at unrelated paths (e.g. a `/media` UI
+          // with a `/api/media/console` API). Scoped to the API base, the browser withheld the
+          // cookie on the full-page navigation to `basePath`, so the freshly minted session could
+          // not open the console it was minted for — the launcher landed on the unauthenticated
+          // page. Scoping to `basePath` instead would just move the failure to the API calls.
+          // The cookie is HttpOnly + signed + short-lived, so the broader scope is a reasonable
+          // trade for being correct in any mount configuration. Matches nestjs-durable-dashboard
+          // and nestjs-agent-dashboard; telescope can scope to its mount because its UI and API
+          // always share one root.
+          cookiePath: '/',
           authProvider,
           imports,
           ...(options.guards ? { guards: options.guards } : {}),
