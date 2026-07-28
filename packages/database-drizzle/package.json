@@ -24,7 +24,7 @@
   ],
   "scripts": {
     "build": "tsup",
-    "typecheck": "tsc -p tsconfig.json --noEmit"
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.spec.json --noEmit"
   },
   "peerDependencies": {
     "@dudousxd/nestjs-media-core": "workspace:*",
@@ -33,6 +33,7 @@
   "devDependencies": {
     "@dudousxd/nestjs-media-core": "workspace:*",
     "@dudousxd/nestjs-media-testing": "workspace:*",
+    "@types/better-sqlite3": "^7.6.12",
     "better-sqlite3": "11.8.1",
     "drizzle-orm": "0.38.4",
     "tsup": "8.3.5",

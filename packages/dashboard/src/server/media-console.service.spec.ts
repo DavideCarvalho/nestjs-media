@@ -124,7 +124,11 @@ describe('MediaConsoleService', () => {
         prefix: string,
         options?: { delimiter?: string; cursor?: string; limit?: number },
       ) => {
-        listCalls.push({ prefix, delimiter: options?.delimiter, cursor: options?.cursor });
+        listCalls.push({
+          prefix,
+          ...(options?.delimiter !== undefined ? { delimiter: options.delimiter } : {}),
+          ...(options?.cursor !== undefined ? { cursor: options.cursor } : {}),
+        });
         if (options?.cursor === undefined) {
           return {
             folders: [],

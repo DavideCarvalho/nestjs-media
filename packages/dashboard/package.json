@@ -30,7 +30,7 @@
   ],
   "scripts": {
     "build": "vite build && tsup && tsc -p tsconfig.client.json",
-    "typecheck": "tsc -p tsconfig.server.json --noEmit && tsc -p tsconfig.app.json --noEmit"
+    "typecheck": "tsc -p tsconfig.server.json --noEmit && tsc -p tsconfig.app.json --noEmit && tsc -p tsconfig.spec.json --noEmit"
   },
   "peerDependencies": {
     "@dudousxd/nestjs-media-core": "workspace:*",

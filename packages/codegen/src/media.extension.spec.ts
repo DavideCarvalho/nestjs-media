@@ -10,8 +10,9 @@ describe('mediaCodegenExtension', () => {
     expect(mediaCodegenExtension().name).toBe('nestjs-media');
   });
 
-  it('emits a thin client binding over the runtime package with the configured base path', () => {
-    const files = mediaCodegenExtension({ basePath: '/api/uploads' }).emitFiles?.(ctx) ?? [];
+  it('emits a thin client binding over the runtime package with the configured base path', async () => {
+    const files =
+      (await mediaCodegenExtension({ basePath: '/api/uploads' }).emitFiles?.(ctx)) ?? [];
     expect(files).toHaveLength(1);
     expect(files[0]?.path).toBe('media-client.ts');
     // Reuses the single runtime client — no inlined wire protocol.
@@ -24,8 +25,8 @@ describe('mediaCodegenExtension', () => {
     expect(files[0]?.contents).not.toContain('application/offset+octet-stream');
   });
 
-  it('honors a custom file name', () => {
-    const files = mediaCodegenExtension({ fileName: 'media.ts' }).emitFiles?.(ctx) ?? [];
+  it('honors a custom file name', async () => {
+    const files = (await mediaCodegenExtension({ fileName: 'media.ts' }).emitFiles?.(ctx)) ?? [];
     expect(files[0]?.path).toBe('media.ts');
   });
 });

@@ -9,8 +9,9 @@ function fakeClient(): PrismaClientLike & { rows: Map<string, MediaRecord> } {
   const rows = new Map<string, MediaRecord>();
   const media: PrismaMediaDelegate = {
     async upsert({ where, create, update }) {
-      rows.set(where.id, rows.has(where.id) ? { ...update } : { ...create });
-      return rows.get(where.id);
+      const row = rows.has(where.id) ? { ...update } : { ...create };
+      rows.set(where.id, row);
+      return row;
     },
     async findUnique({ where }) {
       return rows.get(where.id) ?? null;
@@ -19,10 +20,13 @@ function fakeClient(): PrismaClientLike & { rows: Map<string, MediaRecord> } {
       // `list()` orders by [{createdAt},{id}] (array); `listByOwner()` orders by a
       // single `{order}` field — branch on shape to mirror both call sites.
       if (Array.isArray(orderBy)) {
+        type OrClause =
+          | { createdAt: { getTime(): number }; id: { gt: string } }
+          | { createdAt: { gt: { getTime(): number } } };
         const matchesCursor = (r: MediaRecord): boolean => {
           if (where.OR === undefined) return true;
-          return where.OR.some((clause) =>
-            clause.id !== undefined
+          return (where.OR as OrClause[]).some((clause) =>
+            'id' in clause
               ? r.createdAt.getTime() === clause.createdAt.getTime() && r.id > clause.id.gt
               : r.createdAt.getTime() > clause.createdAt.gt.getTime(),
           );
@@ -72,14 +76,16 @@ function fakeClient(): PrismaClientLike & { rows: Map<string, MediaRecord> } {
           (where?.disk === undefined || r.disk === where.disk),
       ).length;
     },
-    async groupBy({ by }) {
+    async groupBy({ by }: { by: (keyof MediaRecord)[] }) {
       const groups = new Map<string, MediaRecord[]>();
+      const [groupField] = by;
+      if (!groupField) return [];
       for (const r of rows.values()) {
-        const key = String(r[by[0]]);
+        const key = String(r[groupField]);
         groups.set(key, [...(groups.get(key) ?? []), r]);
       }
       return [...groups.entries()].map(([key, list]) => ({
-        [by[0]]: key,
+        [groupField]: key,
         _count: list.length,
         _sum: { size: list.reduce((sum, r) => sum + r.size, 0) },
       }));

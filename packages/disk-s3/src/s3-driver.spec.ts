@@ -282,8 +282,8 @@ describe('S3Driver.deleteMany', () => {
     await driver.deleteMany(keys);
     const calls = s3Mock.commandCalls(DeleteObjectsCommand);
     expect(calls.length).toBe(2);
-    expect(calls[0].args[0].input.Delete?.Objects?.length).toBe(1000);
-    expect(calls[1].args[0].input.Delete?.Objects?.length).toBe(1);
+    expect(calls[0]?.args[0].input.Delete?.Objects?.length).toBe(1000);
+    expect(calls[1]?.args[0].input.Delete?.Objects?.length).toBe(1);
   });
 
   it('is a no-op on an empty array', async () => {

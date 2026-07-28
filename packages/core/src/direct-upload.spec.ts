@@ -40,9 +40,10 @@ function makeFakeDriver(): FakeMultipartDriver {
     copy: vi.fn(),
     move: vi.fn(),
     size: vi.fn(),
+    stat: vi.fn(),
     url: vi.fn(),
     temporaryUrl: vi.fn(),
-    list: vi.fn<[string, ListOptions?], Promise<ListResult>>(),
+    list: vi.fn<(path: string, options?: ListOptions) => Promise<ListResult>>(),
     createMultipartUpload: vi.fn((_path: string, _options?: PutOptions) =>
       Promise.resolve({ uploadId: 'uid-1' }),
     ),
@@ -75,9 +76,10 @@ function makeBasicDriver(): StorageDriver {
     copy: vi.fn(),
     move: vi.fn(),
     size: vi.fn(),
+    stat: vi.fn(),
     url: vi.fn(),
     temporaryUrl: vi.fn(),
-    list: vi.fn<[string, ListOptions?], Promise<ListResult>>(),
+    list: vi.fn<(path: string, options?: ListOptions) => Promise<ListResult>>(),
   };
 }
 

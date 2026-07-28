@@ -3,8 +3,13 @@ import { UnsupportedOperationError } from './errors';
 import type { DriverCapabilities } from './types';
 import { resolveUploadMode } from './upload-mode';
 
-const s3Caps: DriverCapabilities = { presign: true, multipart: true, publicUrls: true };
-const localCaps: DriverCapabilities = { presign: false, multipart: false, publicUrls: false };
+const s3Caps: DriverCapabilities = { presign: true, multipart: true, publicUrls: true, list: true };
+const localCaps: DriverCapabilities = {
+  presign: false,
+  multipart: false,
+  publicUrls: false,
+  list: true,
+};
 
 describe('resolveUploadMode', () => {
   it('auto picks direct for a presign/multipart-capable driver', () => {

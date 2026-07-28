@@ -33,17 +33,28 @@ describe('MediaWatcher', () => {
     watcher = new MediaWatcher();
     watcher.register(ctx);
 
-    publishMedia('attach', { id: 'm1', collection: 'gallery', disk: 's3' });
-    publishMedia('conversion', { id: 'm1', conversion: 'thumb' });
+    const attachPayload = {
+      id: 'm1',
+      ownerType: 'Post',
+      ownerId: 'p1',
+      collection: 'gallery',
+      disk: 's3',
+      path: 'gallery/m1.jpg',
+      size: 1024,
+      mimeType: 'image/jpeg',
+    };
+    const conversionPayload = { id: 'm1', conversion: 'thumb', path: 'gallery/m1-thumb.jpg' };
+    publishMedia('attach', attachPayload);
+    publishMedia('conversion', conversionPayload);
 
     expect(ctx.record).toHaveBeenCalledTimes(2);
     expect(ctx.record).toHaveBeenNthCalledWith(1, {
       type: 'media',
-      content: { event: 'attach', id: 'm1', collection: 'gallery', disk: 's3' },
+      content: { event: 'attach', ...attachPayload },
     });
     expect(ctx.record).toHaveBeenNthCalledWith(2, {
       type: 'media',
-      content: { event: 'conversion', id: 'm1', conversion: 'thumb' },
+      content: { event: 'conversion', ...conversionPayload },
     });
   });
 
@@ -52,7 +63,7 @@ describe('MediaWatcher', () => {
     watcher = new MediaWatcher();
     watcher.register(ctx);
     watcher.dispose();
-    publishMedia('delete', { id: 'gone' });
+    publishMedia('delete', { id: 'gone', ownerType: 'Post', ownerId: 'p1' });
     expect(ctx.record).not.toHaveBeenCalled();
   });
 

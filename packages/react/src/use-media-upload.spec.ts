@@ -1,14 +1,20 @@
+import type { uploadMedia, uploadMediaParallel } from '@dudousxd/nestjs-media-client';
 // @vitest-environment jsdom
 import { act, renderHook } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { useMediaUpload } from './use-media-upload';
 
-const uploadMediaMock = vi.fn(async () => ({ location: '/media/uploads/seq' }));
-const uploadMediaParallelMock = vi.fn(async () => ({ location: '/media/uploads/par' }));
+const uploadMediaMock = vi.fn<typeof uploadMedia>(async () => ({
+  location: '/media/uploads/seq',
+}));
+const uploadMediaParallelMock = vi.fn<typeof uploadMediaParallel>(async () => ({
+  location: '/media/uploads/par',
+}));
 
 vi.mock('@dudousxd/nestjs-media-client', () => ({
-  uploadMedia: (...args: unknown[]) => uploadMediaMock(...args),
-  uploadMediaParallel: (...args: unknown[]) => uploadMediaParallelMock(...args),
+  uploadMedia: (...args: Parameters<typeof uploadMedia>) => uploadMediaMock(...args),
+  uploadMediaParallel: (...args: Parameters<typeof uploadMediaParallel>) =>
+    uploadMediaParallelMock(...args),
 }));
 
 describe('useMediaUpload parallel routing', () => {

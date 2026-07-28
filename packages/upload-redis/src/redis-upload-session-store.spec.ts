@@ -202,8 +202,9 @@ describe('RedisUploadSessionStore', () => {
     expect(fetched?.createdAt?.getTime()).toBe(created.createdAt?.getTime());
 
     const [listed] = await store.list({ keyPrefix: 'uploads/' });
-    expect(listed.createdAt).toBeInstanceOf(Date);
-    expect(listed.createdAt?.getTime()).toBe(created.createdAt?.getTime());
+    expect(listed).toBeDefined();
+    expect(listed?.createdAt).toBeInstanceOf(Date);
+    expect(listed?.createdAt?.getTime()).toBe(created.createdAt?.getTime());
   });
 
   it('leaves createdAt undefined for an older session stored without the field', async () => {

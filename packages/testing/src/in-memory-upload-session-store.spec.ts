@@ -36,8 +36,9 @@ describe('InMemoryUploadSessionStore createdAt', () => {
     expect(fetched?.createdAt?.getTime()).toBe(created.createdAt?.getTime());
 
     const [listed] = await store.list();
-    expect(listed.createdAt).toBeInstanceOf(Date);
-    expect(listed.createdAt?.getTime()).toBe(created.createdAt?.getTime());
+    expect(listed).toBeDefined();
+    expect(listed?.createdAt).toBeInstanceOf(Date);
+    expect(listed?.createdAt?.getTime()).toBe(created.createdAt?.getTime());
   });
 });
 

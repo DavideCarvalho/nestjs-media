@@ -71,7 +71,7 @@ describe('MediaUploadController', () => {
       'upload-metadata': `filename ${b64('a.txt')}`,
     });
     expect(create.statusCode).toBe(201);
-    const id = create.headers.Location.split('/').pop() as string;
+    const id = create.headers.Location?.split('/').pop() as string;
 
     const patch = mockRes();
     await controller.patch(id, { body: Buffer.from('hello') }, patch, {
