@@ -37,7 +37,12 @@ beforeAll(async () => {
     const schema = 'prisma/test.pg.prisma';
     runPrisma(['generate', '--schema', schema], url);
     runPrisma(['db', 'push', '--schema', schema, '--skip-generate', '--accept-data-loss'], url);
-    const { PrismaClient } = await import('../generated/pg-client/index.js');
+    // Generated at test time above (gitignored, provider-specific) — not on disk at
+    // typecheck time on a clean checkout. Referencing the specifier via a variable
+    // (rather than a string literal) keeps this a genuine dynamic import so tsc types
+    // it as `any` instead of statically resolving the module and failing with TS2307.
+    const generatedClientPath = '../generated/pg-client/index.js';
+    const { PrismaClient } = await import(generatedClientPath);
     prisma = new PrismaClient({ datasources: { db: { url } } });
     await prisma.$connect();
     store = new PrismaMediaStore(prisma);
