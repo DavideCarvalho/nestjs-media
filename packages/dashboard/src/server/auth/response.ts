@@ -42,3 +42,45 @@ export function appendSetCookie(response: unknown, cookie: string): void {
   if (!raw) return;
   raw.setHeader('set-cookie', [...existingSetCookies(raw), cookie]);
 }
+
+interface EndableResponse extends RawNodeResponse {
+  statusCode: number;
+  headersSent?: boolean;
+  end(chunk?: string): unknown;
+}
+
+function resolveEndableResponse(response: unknown): EndableResponse | null {
+  const isEndable = (value: unknown): value is EndableResponse =>
+    isRawNodeResponse(value) && typeof (value as EndableResponse).end === 'function';
+  if (isEndable(response)) return response;
+  if (isRecord(response) && isEndable(response.raw)) return response.raw;
+  return null;
+}
+
+/**
+ * Did something already write to this response?
+ *
+ * Used to decide whether a host's `unauthenticatedPage` hook actually produced a page. A hook that
+ * returns without writing (an early `return`, a forgotten `await`, a template that resolved to
+ * nothing) would otherwise leave the request hanging forever — the browser spins until it times
+ * out, with no error anywhere. Checking this lets the caller fall back to serving the SPA.
+ */
+export function responseAlreadyWritten(response: unknown): boolean {
+  return resolveEndableResponse(response)?.headersSent === true;
+}
+
+/**
+ * Write a full HTML page on the raw response and END it — used to serve the SPA shell from the
+ * non-passthrough index route, where the handler owns the whole response so a host's
+ * `unauthenticatedPage` can take it over instead.
+ */
+export function sendHtml(response: unknown, status: number, html: string): void {
+  const raw = resolveEndableResponse(response);
+  if (!raw) return;
+  raw.statusCode = status;
+  raw.setHeader('content-type', 'text/html; charset=utf-8');
+  // index.html references hash-named bundles, so it MUST NOT be cached (stale bundle = the classic
+  // "stuck loading after a deploy"); the unauthenticated page likewise reflects live session state.
+  raw.setHeader('cache-control', 'no-store, must-revalidate');
+  raw.end(html);
+}
