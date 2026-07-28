@@ -29,7 +29,14 @@ export const plugins: Plugin[] = [
     jsc: {
       target: 'es2022',
       parser: { syntax: 'typescript', decorators: true },
-      transform: { legacyDecorator: true, decoratorMetadata: true },
+      transform: {
+        legacyDecorator: true,
+        decoratorMetadata: true,
+        // SWC's React transform defaults to the classic runtime (`React.createElement`), which
+        // blows up in TSX specs that never import React. The packages compile with
+        // `jsx: "react-jsx"`, so match it here.
+        react: { runtime: 'automatic' },
+      },
     },
   }),
 ];
