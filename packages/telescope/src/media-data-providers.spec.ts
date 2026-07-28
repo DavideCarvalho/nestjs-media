@@ -212,8 +212,8 @@ describe('mediaDisksProvider', () => {
       ctxWith(new Map([[MEDIA_STORAGE_SHARED, manager]])),
     )) as { rows: Array<{ name: string; default: string; multipart: string }> };
     expect(result.rows.map((row) => row.name)).toEqual(['local', 's3']);
-    expect(result.rows[0].default).toBe('yes');
-    expect(result.rows[1].multipart).toBe('yes');
+    expect(result.rows[0]?.default).toBe('yes');
+    expect(result.rows[1]?.multipart).toBe('yes');
   });
 
   it('degrades to empty rows when the StorageManager is not reachable', async () => {

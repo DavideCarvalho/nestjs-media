@@ -27,22 +27,25 @@ function makeManager(driver: StorageDriver): ResumableUploadManager {
 }
 
 function fakeMultipartDisk() {
-  const parts: Record<string, Buffer[]> = {};
-  const completed: Record<string, Buffer> = {};
+  // Single-upload fake: only one multipart upload is ever in flight per
+  // `fakeMultipartDisk()` instance, so a plain array/variable (rather than a
+  // Record keyed by uploadId) sidesteps noUncheckedIndexedAccess entirely.
+  let parts: Buffer[] = [];
+  let completed: Buffer | undefined;
   let aborted = false;
   return {
     driver: {
       capabilities: { presign: false, multipart: true, publicUrls: false, list: false },
       async createMultipartUpload() {
-        parts.u = [];
+        parts = [];
         return { uploadId: 'u' };
       },
       async uploadPart(_p: string, _u: string, n: number, body: Buffer) {
-        parts.u[n - 1] = body;
+        parts[n - 1] = body;
         return { partNumber: n, etag: `etag-${n}` };
       },
       async completeMultipartUpload(_p: string, _u: string, ps: MultipartPart[]) {
-        completed.done = Buffer.concat(ps.map((x) => parts.u[x.partNumber - 1]));
+        completed = Buffer.concat(ps.map((x) => parts[x.partNumber - 1] ?? Buffer.alloc(0)));
       },
       async abortMultipartUpload() {
         aborted = true;
@@ -71,6 +74,9 @@ function fakeMultipartDisk() {
       async size() {
         throw new Error('not used by the multipart resumable-upload path');
       },
+      async stat() {
+        throw new Error('not used by the multipart resumable-upload path');
+      },
       async url() {
         throw new Error('not used by the multipart resumable-upload path');
       },
@@ -81,7 +87,7 @@ function fakeMultipartDisk() {
         throw new Error('not used by the multipart resumable-upload path');
       },
     },
-    result: () => completed.done,
+    result: () => completed,
     wasAborted: () => aborted,
   };
 }
@@ -153,7 +159,7 @@ describe('ResumableUploadManager', () => {
     await multipartManager.writeChunk(session.id, 5, Buffer.from('BBBB')); // part 2 (last, <5MiB ok)
     const result = await multipartManager.complete(session.id);
     expect(result.key).toBe('k');
-    expect(multipartDisk.result().toString()).toBe('AAAAABBBB');
+    expect(multipartDisk.result()?.toString()).toBe('AAAAABBBB');
   });
 
   it('multipart disk: abort calls abortMultipartUpload', async () => {

@@ -59,9 +59,7 @@ describe('MediaMultipartUploadController', () => {
   it('uploadPart rejects a missing body with BadRequestException', async () => {
     const manager = managerStub();
     const controller = new MediaMultipartUploadController(manager as any);
-    await expect(controller.uploadPart('id1', '1', { body: undefined })).rejects.toBeInstanceOf(
-      BadRequestException,
-    );
+    await expect(controller.uploadPart('id1', '1', {})).rejects.toBeInstanceOf(BadRequestException);
     expect(manager.writePart).not.toHaveBeenCalled();
   });
 

@@ -20,6 +20,9 @@ function makeDriver(multipart: boolean, hasMethod: boolean): StorageDriver {
     copy: async () => {},
     move: async () => {},
     size: async () => 0,
+    stat: async () => {
+      throw new Error();
+    },
     url: async () => '',
     temporaryUrl: async () => '',
     list: async () => ({ folders: [], files: [] }),
