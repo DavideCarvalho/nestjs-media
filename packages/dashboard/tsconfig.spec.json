@@ -4,8 +4,9 @@
     "module": "ESNext",
     "moduleResolution": "Bundler",
     "noEmit": true,
+    "jsx": "react-jsx",
     "types": ["node", "reflect-metadata"],
     "lib": ["ES2022", "DOM"]
   },
-  "include": ["src/server/**/*.spec.ts"]
+  "include": ["src/server/**/*.spec.ts", "src/client/**/*.spec.ts", "src/react/**/*.spec.tsx"]
 }
