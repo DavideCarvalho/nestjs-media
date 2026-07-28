@@ -35,7 +35,7 @@
   ],
   "scripts": {
     "build": "tsup",
-    "typecheck": "tsc -p tsconfig.json --noEmit"
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.spec.json --noEmit"
   },
   "peerDependencies": {
     "@dudousxd/nestjs-media-core": "workspace:*",
@@ -54,6 +54,7 @@
     "@nestjs/core": "11.0.0",
     "@nestjs/platform-express": "11.0.0",
     "@nestjs/testing": "11.0.0",
+    "@types/express": "^5.0.0",
     "express": "5.0.1",
     "reflect-metadata": "0.2.2",
     "rxjs": "7.8.1",

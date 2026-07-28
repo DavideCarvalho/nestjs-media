@@ -1,0 +1,12 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "rootDir": "..",
+    "paths": {
+      "@dudousxd/nestjs-media-testing": ["../testing/src/index.ts"]
+    }
+  },
+  "include": ["src/**/*.spec.ts"],
+  "exclude": ["dist", "node_modules"]
+}

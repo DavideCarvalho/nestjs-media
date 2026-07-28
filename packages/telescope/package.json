@@ -24,7 +24,7 @@
   ],
   "scripts": {
     "build": "tsup",
-    "typecheck": "tsc -p tsconfig.json --noEmit"
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.spec.json --noEmit"
   },
   "peerDependencies": {
     "@dudousxd/nestjs-diagnostics": "^0.7.0",
