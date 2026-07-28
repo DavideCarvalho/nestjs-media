@@ -12,7 +12,11 @@ import { MediaConsoleAuthController } from './media-console-auth.controller.js';
 import { MediaConsoleReadController } from './media-console-read.controller.js';
 import { MediaConsoleGuard } from './media-console.guard.js';
 import { MediaConsoleService } from './media-console.service.js';
-import { MEDIA_CONSOLE_COOKIE_PATH, MEDIA_DASHBOARD_ACTIONS } from './tokens.js';
+import {
+  MEDIA_CONSOLE_AUTH,
+  MEDIA_CONSOLE_COOKIE_PATH,
+  MEDIA_DASHBOARD_ACTIONS,
+} from './tokens.js';
 
 /**
  * `MediaConsoleReadController`/`MediaConsoleActionsController`'s own, pristine
@@ -74,7 +78,12 @@ export class MediaConsoleApiModule {
         // none — it's used as-is.
         ...(options.guards ?? []).filter(isGuardClass),
       ],
-      exports: [MediaConsoleService],
+      // MEDIA_CONSOLE_AUTH is exported (not just provided) because MediaDashboardUiController —
+      // hosted in MediaDashboardModule, which imports THIS module — reads it to decide whether to
+      // hand an unauthenticated navigation to the host's `unauthenticatedPage`. Exporting keeps the
+      // single `authProvider` instance shared; re-providing the same factory in both modules would
+      // run a `forRootAsync` host's `useAuth` twice.
+      exports: [MediaConsoleService, MEDIA_CONSOLE_AUTH],
     };
   }
 }
