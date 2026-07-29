@@ -9,6 +9,25 @@ function response(init: { status?: number; type?: string } = {}): Response {
   return { ok: status >= 200 && status < 300, status, type: init.type ?? 'basic' } as Response;
 }
 
+/**
+ * `pageshow` is what the browser fires when a page is shown, including a bfcache restore
+ * (`persisted: true`). jsdom does implement `PageTransitionEvent`, but it is the kind of DOM
+ * constructor that is missing or unconstructable in other environments a host may run these under,
+ * so fall back to a plain `Event` with the one field the listener reads.
+ */
+function pageShowEvent(persisted: boolean): Event {
+  const Ctor = (globalThis as { PageTransitionEvent?: typeof PageTransitionEvent })
+    .PageTransitionEvent;
+  if (typeof Ctor === 'function') {
+    try {
+      return new Ctor('pageshow', { persisted });
+    } catch {
+      // fall through
+    }
+  }
+  return Object.assign(new Event('pageshow'), { persisted });
+}
+
 describe('openMediaConsoleMutationOptions', () => {
   it('returns a useMutation-shaped object without depending on TanStack', async () => {
     const fetchMock = vi.fn().mockResolvedValue(response());
@@ -170,5 +189,96 @@ describe('<OpenMediaConsoleButton>', () => {
     await act(async () => {
       release(response());
     });
+  });
+
+  it('stays disabled after a successful mint, because the navigation is already underway', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(response());
+    const navigate = vi.fn();
+    render(<OpenMediaConsoleButton fetch={fetchMock} navigate={navigate} />);
+    const button = screen.getByRole('button') as HTMLButtonElement;
+
+    await act(async () => {
+      button.click();
+    });
+    await waitFor(() => expect(navigate).toHaveBeenCalled());
+
+    // The anti-flicker guarantee: going back to idle on a page that is leaving flashes
+    // "ready to click again". Any bfcache fix must not relax this.
+    expect(button.disabled).toBe(true);
+    expect(button.getAttribute('aria-busy')).toBe('true');
+  });
+
+  it('re-enables when the page is restored from the bfcache', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(response());
+    const navigate = vi.fn();
+    render(<OpenMediaConsoleButton fetch={fetchMock} navigate={navigate} />);
+    const button = screen.getByRole('button') as HTMLButtonElement;
+
+    await act(async () => {
+      button.click();
+    });
+    await waitFor(() => expect(navigate).toHaveBeenCalled());
+    expect(button.disabled).toBe(true);
+
+    // Back/forward cache restores this page with React state intact, so the spinner left behind by
+    // the navigation would otherwise never stop — on a button the user can no longer click.
+    await act(async () => {
+      globalThis.dispatchEvent(pageShowEvent(true));
+    });
+
+    expect(button.disabled).toBe(false);
+    expect(button.getAttribute('aria-busy')).toBeNull();
+    expect(button.textContent).toBe('Open Media console');
+  });
+
+  it('ignores a pageshow that is not a bfcache restore', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(response());
+    render(<OpenMediaConsoleButton fetch={fetchMock} navigate={vi.fn()} />);
+    const button = screen.getByRole('button') as HTMLButtonElement;
+
+    await act(async () => {
+      button.click();
+    });
+    await waitFor(() => expect(button.disabled).toBe(true));
+
+    // A fresh load fires `pageshow` too. Clearing on that one would undo the anti-flicker guarantee
+    // for every ordinary navigation.
+    await act(async () => {
+      globalThis.dispatchEvent(pageShowEvent(false));
+    });
+
+    expect(button.disabled).toBe(true);
+    expect(button.getAttribute('aria-busy')).toBe('true');
+  });
+
+  it('removes the pageshow listener on unmount', async () => {
+    const addSpy = vi.spyOn(globalThis, 'addEventListener');
+    const removeSpy = vi.spyOn(globalThis, 'removeEventListener');
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      const { unmount } = render(
+        <OpenMediaConsoleButton fetch={vi.fn().mockResolvedValue(response())} navigate={vi.fn()} />,
+      );
+
+      const added = addSpy.mock.calls.filter(([type]) => type === 'pageshow');
+      expect(added).toHaveLength(1);
+
+      unmount();
+
+      // Same function identity, or the listener leaks for the lifetime of the page and every
+      // subsequent restore calls setState on an unmounted tree.
+      const removed = removeSpy.mock.calls.filter(([type]) => type === 'pageshow');
+      expect(removed).toHaveLength(1);
+      expect(removed[0]?.[1]).toBe(added[0]?.[1]);
+
+      await act(async () => {
+        globalThis.dispatchEvent(pageShowEvent(true));
+      });
+      expect(consoleError).not.toHaveBeenCalled();
+    } finally {
+      addSpy.mockRestore();
+      removeSpy.mockRestore();
+      consoleError.mockRestore();
+    }
   });
 });

@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { type OpenConsoleOptions, openMediaConsole } from '../client/console-session.js';
 
 /**
@@ -12,7 +12,11 @@ import { type OpenConsoleOptions, openMediaConsole } from '../client/console-ses
 export interface UseOpenConsoleResult {
   /** Start the mint-then-navigate. Never rejects — read `error` instead. */
   open: () => void;
-  /** True from the click until the navigation starts, or until it fails. */
+  /**
+   * True from the click until the navigation starts, or until it fails. Stays true across a
+   * successful mint (see below) and is cleared again if the browser restores this page from the
+   * back/forward cache.
+   */
   isPending: boolean;
   /**
    * The last refusal, or `null`. Cleared when `open()` is called again.
@@ -44,11 +48,33 @@ export function useOpenMediaConsole(options: OpenConsoleOptions = {}): UseOpenCo
         // Deliberately NOT clearing `isPending` on success: the navigation is already underway and
         // this component is about to be torn down. Flipping the button back to idle first produces
         // a visible flicker of "ready to click again" on a page that is leaving.
+        //
+        // The page does not always die, though — see the `pageshow` effect below, which is the
+        // other half of this decision.
       })
       .catch((cause: unknown) => {
         setError(cause instanceof Error ? cause : new Error(String(cause)));
         setIsPending(false);
       });
+  }, []);
+
+  // The other half of "don't clear `isPending` on success". Leaving the flag set assumes the page
+  // is destroyed by the navigation — but the back/forward cache does NOT destroy it: pressing Back
+  // restores this very page from memory with React state intact, so the user returns to a spinner
+  // that never stops on a button that is disabled precisely because `isPending` is still true.
+  // A bfcache restore is only observable as `pageshow` with `persisted: true`; there is no unmount,
+  // no re-render and no fresh mount to hang the reset off, which is why this listener exists and
+  // must not be "simplified" into clearing the flag on the success path (that reintroduces the
+  // flicker) or into an unconditional `pageshow` handler (that fires on ordinary loads too).
+  useEffect(() => {
+    // SSR-safe: no window on the server, and nothing to restore there either.
+    if (typeof window === 'undefined') return;
+    const onPageShow = (event: PageTransitionEvent) => {
+      if (!event.persisted) return;
+      setIsPending(false);
+    };
+    window.addEventListener('pageshow', onPageShow);
+    return () => window.removeEventListener('pageshow', onPageShow);
   }, []);
 
   const reset = useCallback(() => setError(null), []);
