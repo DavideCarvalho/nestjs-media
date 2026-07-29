@@ -2,16 +2,33 @@
 @tailwind components;
 @tailwind utilities;
 
-/* Design system shared with the durable console: a dark "blueprint" surface, Space Grotesk display +
-   JetBrains Mono for identifiers, an emerald accent, and a faint grid-and-glow backdrop. Keeping the
-   two consoles visually identical is deliberate — same operator, same look. */
+/* Design system shared by all four Aviary consoles (agent, durable, media, telescope): a dark
+   "blueprint" surface, Space Grotesk display + JetBrains Mono for identifiers, one accent per
+   console, and a faint grid-and-glow backdrop.
+
+   SOURCE OF TRUTH: ../../../../AVIARY-UI.md (the nestjs/ workspace root). The neutrals and the
+   status hues below are copied from it verbatim and must not be tuned per console — only `--accent`
+   differs between consoles. If you change a shared value here, change it in AVIARY-UI.md and in the
+   other three consoles in the same session; that is the one rule that keeps four copies honest. */
 :root {
+  /* ── Shared. Identical in all four consoles. Do not tune per console. ── */
   --bg: #09090b;
   --panel: #0c0c0f;
+  --panel-2: #101017; /* elevated surface: dialog, drawer, popover, menu */
   --line: #1c1c22;
   --line-soft: #16161a;
   --text: #e7e7ea;
   --muted: #76767f;
+
+  /* Status. Semantic, never decorative. */
+  --good: #34d399;
+  --warn: #fbbf24;
+  --bad: #f87171;
+
+  /* ── Per console. This is the ONLY line that differs between them. ── */
+  /* NOTE: this is exactly `--good`, so green currently means both "healthy" and "interactive".
+     See the accent/status collision section in AVIARY-UI.md — the brand call is open, and every
+     interactive surface in this console now reads `var(--accent)`, so resolving it is one edit. */
   --accent: #34d399;
 }
 
@@ -41,7 +58,7 @@ body {
   pointer-events: none;
   background-image: radial-gradient(
       900px 400px at 78% -8%,
-      rgba(52, 211, 153, 0.08),
+      color-mix(in srgb, var(--accent) 8%, transparent),
       transparent 70%
     ), linear-gradient(to right, var(--line-soft) 1px, transparent 1px),
     linear-gradient(to bottom, var(--line-soft) 1px, transparent 1px);
@@ -58,21 +75,22 @@ body {
   font-variant-numeric: tabular-nums;
 }
 
-/* State hues — the media equivalents of durable's run statuses. */
+/* State hues — the media equivalents of durable's run statuses, on the shared status tokens. */
 .s-ok {
-  /* Default disk, completed, healthy — the emerald accent. */
-  color: #34d399;
+  /* Default disk, completed, healthy. */
+  color: var(--good);
 }
 .s-live {
-  /* In-flight upload / actively transferring — the active blue. */
+  /* In-flight upload / actively transferring — the active blue. Not in the canonical set: the four
+     consoles share good/warn/bad, and "live" is media's own fourth state. */
   color: #60a5fa;
 }
 .s-warn {
-  /* A capability gap (e.g. a disk that can't list) or a soft warning — amber. */
-  color: #fbbf24;
+  /* A capability gap (e.g. a disk that can't list) or a soft warning. */
+  color: var(--warn);
 }
 .s-error {
-  color: #f87171;
+  color: var(--bad);
 }
 .s-info {
   /* Collections / variants accents — a calm violet. */

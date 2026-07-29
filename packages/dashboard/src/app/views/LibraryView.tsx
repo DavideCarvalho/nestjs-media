@@ -2,7 +2,7 @@ import { useInfiniteQuery, useQuery, useQueryClient } from '@tanstack/react-quer
 import { type ReactNode, useState } from 'react';
 import { mediaConsoleClient } from '../../client/media-console-client.js';
 import type { CollectionInfo, LibraryRecord } from '../../client/types.js';
-import { GhostButton, Notice, Panel, formatBytes, formatDate } from '../ui.js';
+import { Button, Notice, Panel, formatBytes, formatDate } from '../ui.js';
 import type { Route } from '../useHashRoute.js';
 
 function libraryHash(collection: string | undefined): string {
@@ -22,29 +22,29 @@ function CollectionsBar({
   collections: ReadonlyArray<CollectionInfo>;
   selected: string | undefined;
 }): JSX.Element {
-  const chipClass = (active: boolean): string =>
-    `mono flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-xs transition-colors ${
-      active
-        ? 'border-zinc-600 bg-zinc-900 text-zinc-100'
-        : 'border-transparent text-zinc-500 hover:text-zinc-300'
-    }`;
+  const chipTone = (active: boolean) => (active ? ('selected' as const) : ('quiet' as const));
 
   return (
     <div className="mb-4 flex flex-wrap gap-1">
-      <a href={libraryHash(undefined)} className={chipClass(selected === undefined)}>
-        all
-      </a>
+      <Button
+        tone={chipTone(selected === undefined)}
+        className="px-2.5 py-1 text-xs"
+        render={<a href={libraryHash(undefined)}>all</a>}
+      />
       {collections.map((collection) => (
-        <a
+        <Button
           key={collection.key}
-          href={libraryHash(collection.key)}
-          className={chipClass(selected === collection.key)}
-        >
-          {collection.key}
-          <span className="tnum text-zinc-600">
-            {collection.count} · {formatBytes(collection.sumSize)}
-          </span>
-        </a>
+          tone={chipTone(selected === collection.key)}
+          className="px-2.5 py-1 text-xs"
+          render={
+            <a href={libraryHash(collection.key)}>
+              {collection.key}
+              <span className="tnum text-zinc-600">
+                {collection.count} · {formatBytes(collection.sumSize)}
+              </span>
+            </a>
+          }
+        />
       ))}
     </div>
   );
@@ -68,7 +68,7 @@ function RecordGrid({
           href={`#/library/${encodeURIComponent(record.id)}${
             collection ? `?collection=${encodeURIComponent(collection)}` : ''
           }`}
-          className="rounded-lg border border-[var(--line)] bg-[var(--panel)] p-3 text-sm transition-colors hover:border-zinc-600"
+          className="rounded-lg border border-border bg-panel p-3 text-sm transition-colors hover:border-zinc-600"
         >
           <div className="truncate font-medium text-zinc-200">{record.fileName}</div>
           <div className="mono mt-1 text-[10px] text-zinc-500">{record.mimeType}</div>
@@ -152,9 +152,9 @@ function RecordDetail({ route }: { route: Route }): JSX.Element {
               <DetailRow label="Created">{formatDate(detail.record.createdAt)}</DetailRow>
             </dl>
             <div className="mt-4">
-              <GhostButton tone="rose" onClick={handleDelete}>
+              <Button tone="destructive" onClick={handleDelete}>
                 Delete
-              </GhostButton>
+              </Button>
               {deleteError && <p className="mt-2 text-xs s-error">{deleteError}</p>}
             </div>
           </Panel>
@@ -169,7 +169,7 @@ function RecordDetail({ route }: { route: Route }): JSX.Element {
               {detail.variants.map((variant) => (
                 <div
                   key={variant.name}
-                  className="rounded-lg border border-[var(--line)] bg-[var(--panel)] p-2 text-xs"
+                  className="rounded-lg border border-border bg-panel p-2 text-xs"
                 >
                   <div className="mono mb-1.5 text-[10px] uppercase tracking-wider text-zinc-500">
                     {variant.name}
@@ -178,14 +178,14 @@ function RecordDetail({ route }: { route: Route }): JSX.Element {
                     <img
                       src={variant.url}
                       alt={variant.name}
-                      className="max-h-40 rounded border border-[var(--line)]"
+                      className="max-h-40 rounded border border-border"
                     />
                   ) : (
                     <a
                       href={variant.url}
                       target="_blank"
                       rel="noreferrer"
-                      className="text-emerald-300 hover:text-emerald-200"
+                      className="text-accent hover:text-accent"
                     >
                       Open ↗
                     </a>
@@ -241,12 +241,12 @@ function LibraryGrid({ route, hasStore }: { route: Route; hasStore: boolean }): 
       <RecordGrid records={records} collection={route.collection} />
       {libraryQuery.hasNextPage && (
         <div className="mt-4">
-          <GhostButton
+          <Button
             onClick={() => libraryQuery.fetchNextPage()}
             disabled={libraryQuery.isFetchingNextPage}
           >
             {libraryQuery.isFetchingNextPage ? 'Loading…' : 'Load more'}
-          </GhostButton>
+          </Button>
         </div>
       )}
     </div>

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { Button } from './ui.js';
 
 /** Fixed body-row height (px). Windowing math and the spacer rows depend on every row being exactly
  *  this tall, so cells are single-line (`whitespace-nowrap`) and carry no vertical padding. */
@@ -101,7 +102,7 @@ export function DataTable({ header, body }: { header: string[]; body: string[][]
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-2">
       <div className="flex items-center gap-2">
-        <div className="flex flex-1 items-center gap-1.5 rounded-md border border-[var(--line)] px-2">
+        <div className="flex flex-1 items-center gap-1.5 rounded-md border border-border px-2">
           <span className="text-zinc-600">⌕</span>
           <input
             value={globalFilter}
@@ -111,13 +112,9 @@ export function DataTable({ header, body }: { header: string[]; body: string[][]
           />
         </div>
         {hasControls && (
-          <button
-            type="button"
-            onClick={reset}
-            className="mono shrink-0 rounded-md border border-[var(--line)] px-2 py-1 text-[10px] text-zinc-400 transition-colors hover:bg-zinc-800 hover:text-zinc-100"
-          >
+          <Button tone="ghost" onClick={reset} className="shrink-0 text-[10px]">
             reset
-          </button>
+          </Button>
         )}
         <span className="mono tnum shrink-0 text-[10px] text-zinc-600">
           {total}
@@ -127,11 +124,11 @@ export function DataTable({ header, body }: { header: string[]; body: string[][]
       <div
         ref={scrollRef}
         onScroll={(event) => setScrollTop(event.currentTarget.scrollTop)}
-        className="min-h-0 flex-1 overflow-auto rounded-md border border-[var(--line)]"
+        className="min-h-0 flex-1 overflow-auto rounded-md border border-border"
       >
         <table className="w-full text-left text-xs">
-          <thead className="sticky top-0 z-10 bg-[var(--panel)]">
-            <tr className="border-b border-[var(--line)]">
+          <thead className="sticky top-0 z-10 bg-panel">
+            <tr className="border-b border-border">
               {header.map((cell, index) => {
                 const active = sort?.index === index;
                 return (
@@ -156,14 +153,14 @@ export function DataTable({ header, body }: { header: string[]; body: string[][]
                         }))
                       }
                       placeholder="filter"
-                      className="mono mt-1 w-full min-w-[5rem] rounded border border-[var(--line)] bg-transparent px-1 py-0.5 text-[10px] font-normal normal-case tracking-normal text-zinc-300 placeholder:text-zinc-700 focus:border-emerald-500/40 focus:outline-none"
+                      className="mono mt-1 w-full min-w-[5rem] rounded border border-border bg-transparent px-1 py-0.5 text-[10px] font-normal normal-case tracking-normal text-zinc-300 placeholder:text-zinc-700 focus:border-accent/40 focus:outline-none"
                     />
                   </th>
                 );
               })}
             </tr>
           </thead>
-          <tbody className="divide-y divide-[var(--line-soft)]">
+          <tbody className="divide-y divide-line-soft">
             {topPad > 0 && (
               <tr aria-hidden>
                 <td colSpan={header.length} style={{ height: topPad }} />

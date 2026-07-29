@@ -1,11 +1,18 @@
 import { useQuery } from '@tanstack/react-query';
-import { useEffect, useMemo, useState } from 'react';
-import { createPortal } from 'react-dom';
+import { useMemo, useRef, useState } from 'react';
 import * as XLSX from 'xlsx';
 import { mediaConsoleClient } from '../client/media-console-client.js';
 import type { ObjectDetailResponse } from '../client/types.js';
 import { DataTable } from './DataTable.js';
-import { Notice, formatBytes } from './ui.js';
+import { Alert, Button, Notice, formatBytes } from './ui.js';
+import {
+  DialogBackdrop,
+  DialogClose,
+  DialogPopup,
+  DialogPortal,
+  DialogRoot,
+  DialogTitle,
+} from './ui/dialog.js';
 
 /** An object opened in the preview lightbox: the detail (signed `url`, size, type) plus the disk and
  *  display name from the row it was opened from. `disk` lets the text/PDF previews stream inline
@@ -71,18 +78,18 @@ function FallbackCard({ item, message }: { item: PreviewItem; message: string })
   return (
     <div className="grid h-full min-h-[320px] place-items-center gap-4 px-6 text-center">
       <div className="flex flex-col items-center gap-4">
-        <div className="grid h-14 w-14 place-items-center rounded-lg border border-[var(--line)] bg-zinc-900 text-2xl text-zinc-600">
+        <div className="grid h-14 w-14 place-items-center rounded-lg border border-border bg-zinc-900 text-2xl text-zinc-600">
           ⬡
         </div>
         <div className="mono max-w-md text-sm text-zinc-400">{message}</div>
-        <a
-          href={item.url}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="mono rounded-md border border-emerald-500/30 bg-emerald-500/10 px-3 py-1.5 text-xs text-emerald-300 transition-colors hover:bg-emerald-500/20"
+        <Button
+          tone="accent"
+          size="sm"
+          // biome-ignore lint/a11y/useAnchorContent: Base UI's `render` prop clones this element with the Button's children; the link is not empty at runtime
+          render={<a href={item.url} target="_blank" rel="noopener noreferrer" />}
         >
           Open original ↗
-        </a>
+        </Button>
       </div>
     </div>
   );
@@ -188,18 +195,14 @@ function SheetPreview({ item }: { item: PreviewItem }): JSX.Element {
       {workbook.SheetNames.length > 1 && (
         <div className="flex flex-wrap gap-1">
           {workbook.SheetNames.map((name, index) => (
-            <button
+            <Button
               key={name}
-              type="button"
+              tone={index === sheetIndex ? 'selected' : 'quiet'}
               onClick={() => setSheetIndex(index)}
-              className={`mono rounded-md border px-2 py-0.5 text-[11px] transition-colors ${
-                index === sheetIndex
-                  ? 'border-zinc-600 bg-zinc-900 text-zinc-100'
-                  : 'border-transparent text-zinc-500 hover:text-zinc-300'
-              }`}
+              className="px-2 py-0.5"
             >
               {name}
-            </button>
+            </Button>
           ))}
         </div>
       )}
@@ -243,7 +246,7 @@ function TextPreview({ item }: { item: PreviewItem }): JSX.Element {
     ) : flavor === 'tsv' ? (
       <DelimitedTable text={source} delimiter={'\t'} />
     ) : (
-      <pre className="mono min-h-0 flex-1 overflow-auto whitespace-pre-wrap break-words rounded-md border border-[var(--line)] bg-black/30 p-3 text-xs text-zinc-300">
+      <pre className="mono min-h-0 flex-1 overflow-auto whitespace-pre-wrap break-words rounded-md border border-border bg-black/30 p-3 text-xs text-zinc-300">
         {flavor === 'json' ? prettyJson(source) : source}
       </pre>
     );
@@ -251,10 +254,10 @@ function TextPreview({ item }: { item: PreviewItem }): JSX.Element {
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-2">
       {truncated && (
-        <div className="mono shrink-0 rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-1.5 text-[11px] text-amber-300">
+        <Alert variant="warn" className="shrink-0">
           Sample — the first {formatBytes(bytesRead)} of {formatBytes(item.size)}. Filters and sort
           apply to this sample; open the original ↗ for the whole file.
-        </div>
+        </Alert>
       )}
       {content}
     </div>
@@ -294,7 +297,7 @@ function PreviewBody({ item, kind }: { item: PreviewItem; kind: PreviewKind }): 
         <iframe
           src={mediaConsoleClient.objectRawUrl(item.disk, item.key)}
           title={item.name}
-          className="min-h-0 w-full flex-1 rounded-md border border-[var(--line)] bg-white"
+          className="min-h-0 w-full flex-1 rounded-md border border-border bg-white"
         />
       );
     case 'text':
@@ -311,9 +314,10 @@ function PreviewBody({ item, kind }: { item: PreviewItem; kind: PreviewKind }): 
   }
 }
 
-/** A modal preview overlay for a disk object: dark backdrop, a bordered panel with the object's name +
- *  metadata, and an inline renderer chosen by content type. Closes on Escape, a direct backdrop click,
- *  or the × button. Matches the durable console's popover surfaces. */
+/** A modal preview of a disk object: the object's name + metadata over an inline renderer chosen by
+ *  content type. Same Dialog primitive as every other modal in the console (see `./ui/dialog.tsx`),
+ *  so Escape, outside-press, the focus trap and focus restore all behave identically — a preview
+ *  opened from a row hands focus back to that row on close. */
 export function Lightbox({
   item,
   onClose,
@@ -321,66 +325,62 @@ export function Lightbox({
   item: PreviewItem | null;
   onClose: () => void;
 }): JSX.Element | null {
-  useEffect(() => {
-    if (!item) return;
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') onClose();
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [item, onClose]);
-
+  const popupRef = useRef<HTMLDivElement>(null);
   if (!item) return null;
   const kind = previewKind(item);
 
-  // Rendered into <body> via a portal so the fixed backdrop is positioned against the viewport, not a
-  // transformed/blurred ancestor (which would offset it and force the page to scroll to see it all).
-  return createPortal(
-    // biome-ignore lint/a11y/useKeyWithClickEvents: closes only on a direct backdrop click; Escape is handled globally above
-    <div
-      className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-black/80 p-6 backdrop-blur-sm"
-      onClick={(event) => {
-        if (event.target === event.currentTarget) onClose();
+  return (
+    <DialogRoot
+      open
+      onOpenChange={(open) => {
+        if (!open) onClose();
       }}
     >
-      <div
-        className="flex h-[86vh] max-h-full w-full max-w-5xl flex-col overflow-hidden rounded-lg border border-[var(--line)] bg-[var(--panel)] shadow-2xl"
-        aria-label={`Preview of ${item.name}`}
-      >
-        <div className="flex items-center gap-3 border-b border-[var(--line)] px-4 py-2.5">
-          <div className="min-w-0 flex-1">
-            <div className="mono truncate text-sm text-zinc-200">{item.name}</div>
-            <div className="mono tnum mt-0.5 flex items-center gap-2 text-[10px] text-zinc-600">
-              <span>{formatBytes(item.size)}</span>
-              {item.contentType && (
-                <span className="rounded border border-[var(--line)] px-1 text-zinc-500">
-                  {item.contentType}
-                </span>
-              )}
+      <DialogPortal>
+        <DialogBackdrop />
+        <DialogPopup
+          ref={popupRef}
+          // Focus the panel itself, not the first tabbable thing in it — that is the "Open ↗" link,
+          // and opening a preview should not leave Enter armed to launch a new tab.
+          initialFocus={popupRef}
+          className="h-[86vh] max-h-[calc(100vh-3rem)] max-w-5xl"
+        >
+          <div className="flex items-center gap-3 border-b border-border px-4 py-2.5">
+            <div className="min-w-0 flex-1">
+              <DialogTitle className="truncate normal-case tracking-normal text-sm text-zinc-200">
+                {item.name}
+              </DialogTitle>
+              <div className="mono tnum mt-0.5 flex items-center gap-2 text-[10px] text-zinc-600">
+                <span>{formatBytes(item.size)}</span>
+                {item.contentType && (
+                  <span className="rounded border border-border px-1 text-zinc-500">
+                    {item.contentType}
+                  </span>
+                )}
+              </div>
             </div>
+            <Button
+              tone="ghost"
+              className="shrink-0"
+              // biome-ignore lint/a11y/useAnchorContent: Base UI's `render` prop clones this element with the Button's children; the link is not empty at runtime
+              render={<a href={item.url} target="_blank" rel="noopener noreferrer" />}
+            >
+              Open ↗
+            </Button>
+            <Button
+              render={<DialogClose />}
+              tone="ghost"
+              aria-label="Close preview"
+              className="shrink-0"
+            >
+              ✕
+            </Button>
           </div>
-          <a
-            href={item.url}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="mono shrink-0 rounded-md border border-[var(--line)] px-2 py-1 text-[11px] text-zinc-400 transition-colors hover:bg-zinc-800 hover:text-zinc-100"
-          >
-            Open ↗
-          </a>
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label="Close preview"
-            className="mono shrink-0 rounded-md border border-[var(--line)] px-2 py-1 text-[11px] text-zinc-400 transition-colors hover:bg-zinc-800 hover:text-zinc-100"
-          >
-            ✕
-          </button>
-        </div>
-        <div className="flex min-h-0 flex-1 flex-col overflow-hidden p-4">
-          <PreviewBody item={item} kind={kind} />
-        </div>
-      </div>
-    </div>,
-    document.body,
+          <div className="flex min-h-0 flex-1 flex-col overflow-hidden p-4">
+            <PreviewBody item={item} kind={kind} />
+          </div>
+        </DialogPopup>
+      </DialogPortal>
+    </DialogRoot>
   );
 }
