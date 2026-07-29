@@ -29,7 +29,11 @@
   /* NOTE: this is exactly `--good`, so green currently means both "healthy" and "interactive".
      See the accent/status collision section in AVIARY-UI.md — the brand call is open, and every
      interactive surface in this console now reads `var(--accent)`, so resolving it is one edit. */
-  --accent: #34d399;
+  /* Cyan, not the emerald this used to be: emerald IS `--good`, so the same hue meant both
+     "healthy" and "interactive" — worst on the uploads list, where a green status pip, a green
+     progress bar and a green hover link sit in one row. Cyan clears every status hue and every
+     other console's accent. See AVIARY-UI.md for the wheel. */
+  --accent: #22d3ee;
 }
 
 * {
