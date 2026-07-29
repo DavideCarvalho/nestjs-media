@@ -27,7 +27,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.spec.json --noEmit"
   },
   "peerDependencies": {
-    "@dudousxd/nestjs-media-core": "workspace:*"
+    "@dudousxd/nestjs-media-core": ">=0.8.0 <1.0.0"
   },
   "devDependencies": {
     "@dudousxd/nestjs-media-core": "workspace:*",
