@@ -98,9 +98,9 @@ function TreeRow({
       onDrop={dropProps?.onDrop}
       className={`mono group flex items-center gap-1 rounded-md border pr-1.5 text-xs transition-colors ${
         dropProps?.isTarget
-          ? 'border-emerald-500/60 bg-emerald-500/10 text-emerald-200'
+          ? 'border-accent/60 bg-accent/10 text-accent'
           : active
-            ? 'border-[var(--line)] bg-zinc-900 text-zinc-100'
+            ? 'border-border bg-zinc-900 text-zinc-100'
             : 'border-transparent text-zinc-400 hover:bg-zinc-900/50 hover:text-zinc-200'
       }`}
       style={{ paddingLeft: depth * INDENT_PER_DEPTH }}

@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { ReactNode } from 'react';
 import { mediaConsoleClient } from '../../client/media-console-client.js';
-import { Dot, GhostButton, Notice, Panel, relativeAge } from '../ui.js';
+import { Button, Dot, Notice, Panel, relativeAge } from '../ui.js';
 import type { Route } from '../useHashRoute.js';
 
 const UPLOADS_QUERY_KEY = ['uploads'];
@@ -15,7 +15,7 @@ function ProgressBar({ percent }: { percent: number | null }): JSX.Element {
     <div className="flex items-center gap-2">
       <div className="h-1.5 w-28 overflow-hidden rounded-full bg-zinc-800">
         <div
-          className="h-full rounded-full bg-emerald-500/80 transition-[width]"
+          className="h-full rounded-full bg-accent/80 transition-[width]"
           style={{ width: `${clamped}%` }}
         />
       </div>
@@ -55,7 +55,7 @@ function UploadsListView({ actions }: { actions: boolean }): JSX.Element {
         <Panel className="overflow-hidden">
           <table className="w-full text-left text-sm">
             <thead>
-              <tr className="mono border-b border-[var(--line)] text-[10px] uppercase tracking-wider text-zinc-600">
+              <tr className="mono border-b border-border text-[10px] uppercase tracking-wider text-zinc-600">
                 <th className="px-4 py-2 font-normal">Key</th>
                 <th className="px-4 py-2 font-normal">Disk</th>
                 <th className="px-4 py-2 font-normal">Progress</th>
@@ -63,13 +63,13 @@ function UploadsListView({ actions }: { actions: boolean }): JSX.Element {
                 <th className="px-4 py-2 font-normal">Age</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-[var(--line-soft)]">
+            <tbody className="divide-y divide-line-soft">
               {uploads.map((upload) => (
                 <tr key={upload.id} className="hover:bg-zinc-900/40">
                   <td className="max-w-xs truncate px-4 py-2">
                     <a
                       href={`#/uploads/${encodeURIComponent(upload.id)}`}
-                      className="mono text-xs text-zinc-200 hover:text-emerald-300"
+                      className="mono text-xs text-zinc-200 hover:text-accent"
                     >
                       {upload.key}
                     </a>
@@ -159,14 +159,14 @@ function UploadDetailView({
 
             {actions && (
               <div className="mt-4">
-                <GhostButton
-                  tone="rose"
+                <Button
+                  tone="destructive"
                   onClick={() => abortMutation.mutate()}
                   disabled={abortMutation.isPending}
                   title="Removes the resumable session so it stops here. An incomplete underlying multipart upload is reaped by the bucket lifecycle policy, not by this action."
                 >
                   {abortMutation.isPending ? 'Canceling…' : 'Cancel session'}
-                </GhostButton>
+                </Button>
                 {abortMutation.isError && (
                   <p className="mt-2 text-xs s-error">Failed to cancel session.</p>
                 )}
@@ -183,12 +183,12 @@ function UploadDetailView({
             <Panel className="overflow-hidden">
               <table className="w-full text-left text-sm">
                 <thead>
-                  <tr className="mono border-b border-[var(--line)] text-[10px] uppercase tracking-wider text-zinc-600">
+                  <tr className="mono border-b border-border text-[10px] uppercase tracking-wider text-zinc-600">
                     <th className="px-4 py-2 font-normal">Part</th>
                     <th className="px-4 py-2 font-normal">ETag</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-[var(--line-soft)]">
+                <tbody className="divide-y divide-line-soft">
                   {uploadQuery.data.parts.map((part) => (
                     <tr key={part.partNumber} className="hover:bg-zinc-900/40">
                       <td className="mono tnum px-4 py-2 text-xs text-zinc-300">

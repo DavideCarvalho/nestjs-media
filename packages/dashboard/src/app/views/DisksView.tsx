@@ -10,8 +10,8 @@ import type {
 import { DRAG_MIME, type DragItem, FolderTree } from '../FolderTree.js';
 import { Lightbox, type PreviewItem } from '../Lightbox.js';
 import {
+  Alert,
   Button,
-  GhostButton,
   Modal,
   Notice,
   Panel,
@@ -170,10 +170,10 @@ function UploadDialog({
       onClose={onClose}
       footer={
         <>
-          <Button onClick={onClose} disabled={busy}>
+          <Button size="sm" onClick={onClose} disabled={busy}>
             Cancel
           </Button>
-          <Button tone="emerald" onClick={upload} disabled={busy || files.length === 0}>
+          <Button size="sm" tone="accent" onClick={upload} disabled={busy || files.length === 0}>
             {busy ? `Uploading ${progress.done}/${progress.total}…` : 'Upload'}
           </Button>
         </>
@@ -194,8 +194,8 @@ function UploadDialog({
         }}
         className={`mono cursor-pointer rounded-md border border-dashed px-3 py-6 text-center text-xs transition-colors ${
           dragOver
-            ? 'border-emerald-500/50 bg-emerald-500/5 text-emerald-300'
-            : 'border-[var(--line)] text-zinc-500 hover:text-zinc-300'
+            ? 'border-accent/50 bg-accent/5 text-accent'
+            : 'border-border text-zinc-500 hover:text-zinc-300'
         }`}
       >
         Drop files here, or click to choose
@@ -215,7 +215,7 @@ function UploadDialog({
           {files.map((file, index) => (
             <li
               key={`${file.name}-${index}`}
-              className="mono flex items-center justify-between gap-2 rounded border border-[var(--line)] px-2 py-1 text-[11px]"
+              className="mono flex items-center justify-between gap-2 rounded border border-border px-2 py-1 text-[11px]"
             >
               <span className="truncate text-zinc-300">{file.name}</span>
               <span className="flex shrink-0 items-center gap-2">
@@ -225,7 +225,7 @@ function UploadDialog({
                     type="button"
                     aria-label={`Remove ${file.name}`}
                     onClick={() => setFiles((current) => current.filter((_, i) => i !== index))}
-                    className="text-zinc-600 hover:text-rose-400"
+                    className="text-zinc-600 hover:text-bad"
                   >
                     ✕
                   </button>
@@ -235,7 +235,11 @@ function UploadDialog({
           ))}
         </ul>
       )}
-      {error && <p className="mono mt-3 text-[11px] s-error">{error}</p>}
+      {error && (
+        <Alert variant="error" className="mt-3">
+          {error}
+        </Alert>
+      )}
     </Modal>
   );
 }
@@ -257,10 +261,6 @@ function FolderDialog({
   const [error, setError] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  useEffect(() => {
-    inputRef.current?.focus();
-  }, []);
-
   async function create(): Promise<void> {
     const trimmed = name.trim();
     if (trimmed === '') return;
@@ -280,12 +280,13 @@ function FolderDialog({
     <Modal
       title="New folder"
       onClose={onClose}
+      initialFocus={inputRef}
       footer={
         <>
-          <Button onClick={onClose} disabled={busy}>
+          <Button size="sm" onClick={onClose} disabled={busy}>
             Cancel
           </Button>
-          <Button tone="emerald" onClick={create} disabled={busy || name.trim() === ''}>
+          <Button size="sm" tone="accent" onClick={create} disabled={busy || name.trim() === ''}>
             {busy ? 'Creating…' : 'Create'}
           </Button>
         </>
@@ -301,14 +302,18 @@ function FolderDialog({
             if (event.key === 'Enter') create();
           }}
           placeholder="reports"
-          className="mono rounded-md border border-[var(--line)] bg-black/30 px-3 py-2 text-sm normal-case tracking-normal text-zinc-100 focus:border-emerald-500/40 focus:outline-none"
+          className="mono rounded-md border border-border bg-black/30 px-3 py-2 text-sm normal-case tracking-normal text-zinc-100 focus:border-accent/40 focus:outline-none"
         />
       </label>
       <p className="mono mt-2 text-[10px] text-zinc-600">
         Creates {prefix ? `/${prefix}/` : ''}
         <span className="text-zinc-400">{name.trim() || 'name'}</span>/
       </p>
-      {error && <p className="mono mt-3 text-[11px] s-error">{error}</p>}
+      {error && (
+        <Alert variant="error" className="mt-3">
+          {error}
+        </Alert>
+      )}
     </Modal>
   );
 }
@@ -342,10 +347,6 @@ function CopyMoveDialog({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
-
-  useEffect(() => {
-    inputRef.current?.select();
-  }, []);
 
   const noun = target.type === 'folder' ? 'folder' : 'object';
   const verb = kind === 'copy' ? 'Copy' : 'Move';
@@ -395,13 +396,15 @@ function CopyMoveDialog({
     <Modal
       title={`${verb} ${noun}`}
       onClose={onClose}
+      initialFocus={inputRef}
       footer={
         <>
-          <Button onClick={onClose} disabled={busy}>
+          <Button size="sm" onClick={onClose} disabled={busy}>
             Cancel
           </Button>
           <Button
-            tone={kind === 'move' ? 'rose' : 'emerald'}
+            size="sm"
+            tone={kind === 'move' ? 'destructive' : 'accent'}
             onClick={submit}
             disabled={busy || blocked}
           >
@@ -420,7 +423,7 @@ function CopyMoveDialog({
       <div className="mono mb-1 text-[10px] uppercase tracking-wider text-zinc-600">
         Destination folder
       </div>
-      <div className="max-h-56 overflow-auto rounded-md border border-[var(--line)] bg-black/20 p-1">
+      <div className="max-h-56 overflow-auto rounded-md border border-border bg-black/20 p-1">
         <FolderTree
           disks={disks}
           selectedDisk={destDisk}
@@ -440,7 +443,7 @@ function CopyMoveDialog({
           onKeyDown={(event) => {
             if (event.key === 'Enter') submit();
           }}
-          className="mono rounded-md border border-[var(--line)] bg-black/30 px-3 py-2 text-sm normal-case tracking-normal text-zinc-100 focus:border-emerald-500/40 focus:outline-none"
+          className="mono rounded-md border border-border bg-black/30 px-3 py-2 text-sm normal-case tracking-normal text-zinc-100 focus:border-accent/40 focus:outline-none"
         />
       </label>
       <p className="mono mt-2 text-[10px] text-zinc-600">
@@ -451,7 +454,11 @@ function CopyMoveDialog({
         {unchanged && ' (same as source — pick a different folder or name)'}
         {intoItself && ' (a folder cannot go into itself)'}
       </p>
-      {error && <p className="mono mt-3 text-[11px] s-error">{error}</p>}
+      {error && (
+        <Alert variant="error" className="mt-3">
+          {error}
+        </Alert>
+      )}
     </Modal>
   );
 }
@@ -477,10 +484,6 @@ function RenameDialog({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
-
-  useEffect(() => {
-    inputRef.current?.select();
-  }, []);
 
   const noun = target.type === 'folder' ? 'folder' : 'object';
   const trimmedName = name.trim();
@@ -510,12 +513,13 @@ function RenameDialog({
     <Modal
       title={`Rename ${noun}`}
       onClose={onClose}
+      initialFocus={inputRef}
       footer={
         <>
-          <Button onClick={onClose} disabled={busy}>
+          <Button size="sm" onClick={onClose} disabled={busy}>
             Cancel
           </Button>
-          <Button tone="emerald" onClick={submit} disabled={busy || blocked}>
+          <Button size="sm" tone="accent" onClick={submit} disabled={busy || blocked}>
             {busy ? 'Renaming…' : 'Rename'}
           </Button>
         </>
@@ -530,14 +534,18 @@ function RenameDialog({
           onKeyDown={(event) => {
             if (event.key === 'Enter') submit();
           }}
-          className="mono rounded-md border border-[var(--line)] bg-black/30 px-3 py-2 text-sm normal-case tracking-normal text-zinc-100 focus:border-emerald-500/40 focus:outline-none"
+          className="mono rounded-md border border-border bg-black/30 px-3 py-2 text-sm normal-case tracking-normal text-zinc-100 focus:border-accent/40 focus:outline-none"
         />
       </label>
       <p className="mono mt-2 text-[10px] text-zinc-600">
         To <span className="text-zinc-400">{destination || '—'}</span>
         {target.type === 'folder' ? '/' : ''}
       </p>
-      {error && <p className="mono mt-3 text-[11px] s-error">{error}</p>}
+      {error && (
+        <Alert variant="error" className="mt-3">
+          {error}
+        </Alert>
+      )}
     </Modal>
   );
 }
@@ -768,7 +776,7 @@ export function DisksView({ route, actions }: { route: Route; actions: boolean }
                     }
                   : undefined
               }
-              className={`rounded-md ${dragOver ? 'ring-2 ring-inset ring-emerald-500/50' : ''}`}
+              className={`rounded-md ${dragOver ? 'ring-2 ring-inset ring-accent/50' : ''}`}
             >
               <div className="mb-3 flex items-center justify-between gap-2">
                 <nav className="mono flex flex-wrap items-center gap-1 text-xs text-zinc-500">
@@ -798,12 +806,10 @@ export function DisksView({ route, actions }: { route: Route; actions: boolean }
                 </nav>
                 {actions && (
                   <div className="flex shrink-0 items-center gap-1.5">
-                    <GhostButton tone="emerald" onClick={() => setDialog({ kind: 'upload' })}>
+                    <Button tone="accent" onClick={() => setDialog({ kind: 'upload' })}>
                       ↑ Upload
-                    </GhostButton>
-                    <GhostButton onClick={() => setDialog({ kind: 'folder' })}>
-                      + New folder
-                    </GhostButton>
+                    </Button>
+                    <Button onClick={() => setDialog({ kind: 'folder' })}>+ New folder</Button>
                   </div>
                 )}
               </div>
@@ -817,14 +823,14 @@ export function DisksView({ route, actions }: { route: Route; actions: boolean }
               {(page.folders.length > 0 || page.files.length > 0) && (
                 <table className="w-full text-left text-sm">
                   <thead>
-                    <tr className="mono border-b border-[var(--line)] text-[10px] uppercase tracking-wider text-zinc-600">
+                    <tr className="mono border-b border-border text-[10px] uppercase tracking-wider text-zinc-600">
                       <th className="py-2 pr-2 font-normal">Name</th>
                       <th className="py-2 pr-2 font-normal">Size</th>
                       <th className="py-2 pr-2 font-normal">Last modified</th>
                       <th className="py-2 pr-2 font-normal">Actions</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-[var(--line-soft)]">
+                  <tbody className="divide-y divide-line-soft">
                     {page.folders.map((folder) => (
                       <tr
                         key={folder.prefix}
@@ -846,7 +852,7 @@ export function DisksView({ route, actions }: { route: Route; actions: boolean }
                           <button
                             type="button"
                             onClick={() => navigateToPrefix(selectedDisk, folder.prefix)}
-                            className="flex items-center gap-2 text-zinc-200 hover:text-emerald-300"
+                            className="flex items-center gap-2 text-zinc-200 hover:text-accent"
                           >
                             <span className="text-zinc-600">▸</span>
                             {folder.name}
@@ -857,7 +863,7 @@ export function DisksView({ route, actions }: { route: Route; actions: boolean }
                         <td className="py-2 pr-2">
                           {actions && (
                             <div className="flex flex-wrap gap-1.5">
-                              <GhostButton
+                              <Button
                                 onClick={() =>
                                   setDialog({
                                     kind: 'copy',
@@ -870,8 +876,8 @@ export function DisksView({ route, actions }: { route: Route; actions: boolean }
                                 }
                               >
                                 Copy to…
-                              </GhostButton>
-                              <GhostButton
+                              </Button>
+                              <Button
                                 onClick={() =>
                                   setDialog({
                                     kind: 'move',
@@ -884,8 +890,8 @@ export function DisksView({ route, actions }: { route: Route; actions: boolean }
                                 }
                               >
                                 Move to…
-                              </GhostButton>
-                              <GhostButton
+                              </Button>
+                              <Button
                                 onClick={() =>
                                   setDialog({
                                     kind: 'rename',
@@ -898,9 +904,9 @@ export function DisksView({ route, actions }: { route: Route; actions: boolean }
                                 }
                               >
                                 Rename
-                              </GhostButton>
-                              <GhostButton
-                                tone="rose"
+                              </Button>
+                              <Button
+                                tone="destructive"
                                 onClick={() =>
                                   setDialog({
                                     kind: 'delete-folder',
@@ -910,7 +916,7 @@ export function DisksView({ route, actions }: { route: Route; actions: boolean }
                                 }
                               >
                                 Delete
-                              </GhostButton>
+                              </Button>
                             </div>
                           )}
                         </td>
@@ -942,18 +948,16 @@ export function DisksView({ route, actions }: { route: Route; actions: boolean }
                         </td>
                         <td className="py-2 pr-2">
                           <div className="flex flex-wrap gap-1.5">
-                            <GhostButton
+                            <Button
                               disabled={busyKey === file.key}
                               onClick={() => handlePreview(selectedDisk, file.key, file.name)}
                             >
                               Preview
-                            </GhostButton>
-                            <GhostButton onClick={() => handleCopyKey(file.key)}>
-                              Copy key
-                            </GhostButton>
+                            </Button>
+                            <Button onClick={() => handleCopyKey(file.key)}>Copy key</Button>
                             {actions && (
                               <>
-                                <GhostButton
+                                <Button
                                   onClick={() =>
                                     setDialog({
                                       kind: 'copy',
@@ -962,8 +966,8 @@ export function DisksView({ route, actions }: { route: Route; actions: boolean }
                                   }
                                 >
                                   Copy to…
-                                </GhostButton>
-                                <GhostButton
+                                </Button>
+                                <Button
                                   onClick={() =>
                                     setDialog({
                                       kind: 'move',
@@ -972,8 +976,8 @@ export function DisksView({ route, actions }: { route: Route; actions: boolean }
                                   }
                                 >
                                   Move to…
-                                </GhostButton>
-                                <GhostButton
+                                </Button>
+                                <Button
                                   onClick={() =>
                                     setDialog({
                                       kind: 'rename',
@@ -982,9 +986,9 @@ export function DisksView({ route, actions }: { route: Route; actions: boolean }
                                   }
                                 >
                                   Rename
-                                </GhostButton>
-                                <GhostButton
-                                  tone="rose"
+                                </Button>
+                                <Button
+                                  tone="destructive"
                                   onClick={() =>
                                     setDialog({
                                       kind: 'delete-file',
@@ -994,7 +998,7 @@ export function DisksView({ route, actions }: { route: Route; actions: boolean }
                                   }
                                 >
                                   Delete
-                                </GhostButton>
+                                </Button>
                               </>
                             )}
                           </div>
@@ -1007,16 +1011,13 @@ export function DisksView({ route, actions }: { route: Route; actions: boolean }
 
               {page.cursor !== undefined && (
                 <div className="mt-3">
-                  <GhostButton
-                    disabled={objectsQuery.isFetching}
-                    onClick={() => setCursor(page.cursor)}
-                  >
+                  <Button disabled={objectsQuery.isFetching} onClick={() => setCursor(page.cursor)}>
                     {objectsQuery.isFetching ? 'Loading…' : 'Load more'}
-                  </GhostButton>
+                  </Button>
                 </div>
               )}
               {actions && dragOver && (
-                <p className="mono mt-3 rounded-md border border-dashed border-emerald-500/40 bg-emerald-500/5 px-3 py-4 text-center text-xs text-emerald-300/80">
+                <p className="mono mt-3 rounded-md border border-dashed border-accent/40 bg-accent/5 px-3 py-4 text-center text-xs text-accent/80">
                   Drop files to upload to {prefix ? `/${prefix}` : selectedDisk}
                 </p>
               )}
@@ -1067,11 +1068,12 @@ export function DisksView({ route, actions }: { route: Route; actions: boolean }
           onClose={() => setDialog(null)}
           footer={
             <>
-              <Button onClick={() => setDialog(null)} disabled={busyKey === '__delete__'}>
+              <Button size="sm" onClick={() => setDialog(null)} disabled={busyKey === '__delete__'}>
                 Cancel
               </Button>
               <Button
-                tone="rose"
+                size="sm"
+                tone="destructive"
                 onClick={() => confirmDelete(selectedDisk)}
                 disabled={busyKey === '__delete__'}
               >

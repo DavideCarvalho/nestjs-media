@@ -1,10 +1,25 @@
-import { type ReactNode, useCallback, useEffect, useRef, useState } from 'react';
+import { type ReactNode, type RefObject, useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { Alert } from './ui/alert.js';
+import { Button } from './ui/button.js';
+import {
+  DialogBackdrop,
+  DialogClose,
+  DialogPopup,
+  DialogPortal,
+  DialogRoot,
+  DialogTitle,
+} from './ui/dialog.js';
 
-/** Shared surface primitives for the media console, mirroring the durable console's design system:
- *  a dark panel, an emerald-accented status dot, ghost action buttons, and the byte/date/age
- *  formatters every view reuses. Keeping these in one place is what keeps the three views identical
- *  in feel. */
+/** Console-specific surface primitives for the media console, built on the vendored shadcn
+ *  primitives in `./ui/` so they inherit the Aviary tokens: a dark panel, a status dot, a modal,
+ *  a toast stack, and the byte/date/age formatters every view reuses. Keeping these in one place is
+ *  what keeps the three views identical in feel.
+ *
+ *  `Button` and `Alert` are re-exported here so a view has one import path for the whole kit. */
+
+export { Button, Alert };
+export type { ButtonProps } from './ui/button.js';
 
 export type Tone = 'ok' | 'live' | 'warn' | 'error' | 'info' | 'idle';
 
@@ -21,131 +36,67 @@ export function Panel({
   children: ReactNode;
   className?: string;
 }): JSX.Element {
-  return (
-    <div className={`rounded-lg border border-[var(--line)] bg-[var(--panel)] ${className}`}>
-      {children}
-    </div>
-  );
-}
-
-const BUTTON_TONES: Record<'emerald' | 'zinc' | 'rose', string> = {
-  emerald:
-    'border-emerald-500/30 bg-emerald-500/10 text-emerald-300 enabled:hover:bg-emerald-500/20',
-  zinc: 'border-[var(--line)] bg-zinc-800/40 text-zinc-300 enabled:hover:bg-zinc-800',
-  rose: 'border-rose-500/30 bg-rose-500/10 text-rose-300 enabled:hover:bg-rose-500/20',
-};
-
-/** A durable-style ghost button: tinted border + faint fill that brightens on hover. */
-export function GhostButton({
-  children,
-  onClick,
-  disabled,
-  tone = 'zinc',
-  title,
-  className = '',
-}: {
-  children: ReactNode;
-  onClick: () => void;
-  disabled?: boolean;
-  tone?: 'emerald' | 'zinc' | 'rose';
-  title?: string;
-  className?: string;
-}): JSX.Element {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      disabled={disabled}
-      title={title}
-      className={`mono rounded-md border px-2 py-1 text-[11px] transition-colors disabled:opacity-40 ${BUTTON_TONES[tone]} ${className}`}
-    >
-      {children}
-    </button>
-  );
+  return <div className={`rounded-lg border border-border bg-panel ${className}`}>{children}</div>;
 }
 
 /** Centered muted message for empty / loading / error panes. */
 export function Notice({ children }: { children: ReactNode }): JSX.Element {
-  return <p className="px-1 py-6 text-sm text-zinc-600">{children}</p>;
+  return <Alert variant="muted">{children}</Alert>;
 }
 
 /**
- * A themed modal dialog: dark backdrop + bordered panel, rendered into `document.body` so it centers
- * against the viewport regardless of any transformed ancestor. Closes on Escape, a direct backdrop
- * click, or the × button. Optional `footer` pins actions to the bottom.
+ * A themed modal dialog on the vendored shadcn/Base UI Dialog (see `./ui/dialog.tsx`). The focus
+ * trap, focus restore, scroll lock, `aria-modal` wiring and Esc / outside-press dismissal come from
+ * the primitive. Optional `footer` pins actions to the bottom; `initialFocus` picks the field that
+ * should be focused (and, for a text input, selected) once it opens.
+ *
+ * Mounted-means-open: every caller renders this conditionally, so `open` is constant and closing is
+ * reported through `onClose`, which unmounts it.
  */
 export function Modal({
   title,
   onClose,
   children,
   footer,
+  initialFocus,
 }: {
   title: string;
   onClose: () => void;
   children: ReactNode;
   footer?: ReactNode;
-}): JSX.Element {
-  useEffect(() => {
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') onClose();
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [onClose]);
-
-  return createPortal(
-    // biome-ignore lint/a11y/useKeyWithClickEvents: closes only on a direct backdrop click; Escape is handled globally above
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-6 backdrop-blur-sm"
-      onClick={(event) => {
-        if (event.target === event.currentTarget) onClose();
-      }}
-    >
-      <div className="flex w-full max-w-md flex-col overflow-hidden rounded-lg border border-[var(--line)] bg-[var(--panel)] shadow-2xl">
-        <div className="flex items-center justify-between border-b border-[var(--line)] px-4 py-2.5">
-          <div className="mono text-xs uppercase tracking-wider text-zinc-300">{title}</div>
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label="Close"
-            className="mono shrink-0 rounded-md border border-[var(--line)] px-2 py-1 text-[11px] text-zinc-400 transition-colors hover:bg-zinc-800 hover:text-zinc-100"
-          >
-            ✕
-          </button>
-        </div>
-        <div className="p-4">{children}</div>
-        {footer && (
-          <div className="flex justify-end gap-2 border-t border-[var(--line)] px-4 py-3">
-            {footer}
-          </div>
-        )}
-      </div>
-    </div>,
-    document.body,
-  );
-}
-
-/** A solid (non-ghost) action button for modal footers. */
-export function Button({
-  children,
-  onClick,
-  disabled,
-  tone = 'zinc',
-}: {
-  children: ReactNode;
-  onClick: () => void;
-  disabled?: boolean;
-  tone?: 'emerald' | 'zinc' | 'rose';
+  initialFocus?: RefObject<HTMLElement | null>;
 }): JSX.Element {
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      disabled={disabled}
-      className={`mono rounded-md border px-3 py-1.5 text-xs transition-colors disabled:opacity-40 ${BUTTON_TONES[tone]}`}
+    <DialogRoot
+      open
+      onOpenChange={(open) => {
+        if (!open) onClose();
+      }}
     >
-      {children}
-    </button>
+      <DialogPortal>
+        <DialogBackdrop />
+        <DialogPopup
+          // Select-on-open rather than just focus-on-open: a rename/copy dialog opens with the
+          // current name in the field, and the point is to be able to type straight over it.
+          initialFocus={() => {
+            const element = initialFocus?.current;
+            if (element instanceof HTMLInputElement) element.select();
+            return element ?? true;
+          }}
+        >
+          <div className="flex items-center justify-between border-b border-border px-4 py-2.5">
+            <DialogTitle>{title}</DialogTitle>
+            <Button render={<DialogClose />} tone="ghost" aria-label="Close" className="shrink-0">
+              ✕
+            </Button>
+          </div>
+          <div className="min-h-0 flex-1 overflow-auto p-4">{children}</div>
+          {footer && (
+            <div className="flex justify-end gap-2 border-t border-border px-4 py-3">{footer}</div>
+          )}
+        </DialogPopup>
+      </DialogPortal>
+    </DialogRoot>
   );
 }
 
@@ -197,8 +148,8 @@ function ToastRow({
     <div
       className={`rise mono flex items-start gap-2 rounded-md border px-3 py-2 text-[11px] shadow-2xl backdrop-blur-sm ${
         toast.tone === 'error'
-          ? 'border-rose-500/40 bg-rose-500/15 text-rose-200'
-          : 'border-emerald-500/40 bg-emerald-500/15 text-emerald-200'
+          ? 'border-bad/40 bg-bad/15 text-bad'
+          : 'border-accent/40 bg-accent/15 text-accent'
       }`}
     >
       <span className="mt-px shrink-0" aria-hidden>

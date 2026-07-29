@@ -1,8 +1,9 @@
 import { useQueryClient } from '@tanstack/react-query';
 import { type FormEvent, useState } from 'react';
 import { mediaConsoleClient } from '../client/media-console-client.js';
+import { Button } from './ui.js';
 
-/** The emerald media mark, standalone (App's copy isn't exported to avoid a cycle). */
+/** The media mark in the console accent, standalone (App's copy isn't exported to avoid a cycle). */
 function Mark(): JSX.Element {
   return (
     <svg
@@ -12,7 +13,7 @@ function Mark(): JSX.Element {
       strokeWidth={1.8}
       strokeLinecap="round"
       strokeLinejoin="round"
-      className="h-5 w-5 text-emerald-400"
+      className="h-5 w-5 text-accent"
       role="img"
       aria-label="media"
     >
@@ -54,9 +55,9 @@ export function AuthScreen({ modes }: { modes: string[] }): JSX.Element {
     <>
       <div className="app-bg" />
       <div className="relative z-10 grid h-full place-items-center p-6">
-        <div className="w-full max-w-sm rounded-lg border border-[var(--line)] bg-[var(--panel)] p-6 shadow-2xl">
+        <div className="w-full max-w-sm rounded-lg border border-border bg-panel p-6 shadow-2xl">
           <div className="mb-5 flex items-center gap-2.5">
-            <div className="grid h-8 w-8 place-items-center rounded-md border border-emerald-500/30 bg-emerald-500/10">
+            <div className="grid h-8 w-8 place-items-center rounded-md border border-accent/30 bg-accent/10">
               <Mark />
             </div>
             <div className="leading-none">
@@ -78,7 +79,7 @@ export function AuthScreen({ modes }: { modes: string[] }): JSX.Element {
                   autoComplete="username"
                   value={username}
                   onChange={(event) => setUsername(event.target.value)}
-                  className="mono rounded-md border border-[var(--line)] bg-black/30 px-3 py-2 text-sm text-zinc-100 focus:border-emerald-500/40 focus:outline-none"
+                  className="mono rounded-md border border-border bg-black/30 px-3 py-2 text-sm text-zinc-100 focus:border-accent/40 focus:outline-none"
                 />
               </label>
               <label className="flex flex-col gap-1">
@@ -90,17 +91,17 @@ export function AuthScreen({ modes }: { modes: string[] }): JSX.Element {
                   autoComplete="current-password"
                   value={password}
                   onChange={(event) => setPassword(event.target.value)}
-                  className="mono rounded-md border border-[var(--line)] bg-black/30 px-3 py-2 text-sm text-zinc-100 focus:border-emerald-500/40 focus:outline-none"
+                  className="mono rounded-md border border-border bg-black/30 px-3 py-2 text-sm text-zinc-100 focus:border-accent/40 focus:outline-none"
                 />
               </label>
-              {error && <div className="mono text-[11px] text-rose-400">{error}</div>}
-              <button
-                type="submit"
-                disabled={pending}
-                className="mono mt-1 rounded-md border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-xs uppercase tracking-wider text-emerald-300 transition-colors hover:bg-emerald-500/20 disabled:opacity-50"
-              >
+              {error && (
+                <div role="alert" className="mono text-[11px] text-bad">
+                  {error}
+                </div>
+              )}
+              <Button type="submit" tone="accent" size="md" disabled={pending} className="mt-1">
                 {pending ? 'Signing in…' : 'Sign in'}
-              </button>
+              </Button>
             </form>
           ) : (
             <div className="mono text-xs text-zinc-500">

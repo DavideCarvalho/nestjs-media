@@ -1,7 +1,7 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { mediaConsoleClient } from '../client/media-console-client.js';
 import { AuthScreen } from './AuthScreen.js';
-import { Dot } from './ui.js';
+import { Button, Dot } from './ui.js';
 import { useHashRoute } from './useHashRoute.js';
 import { DisksView } from './views/DisksView.js';
 import { LibraryView } from './views/LibraryView.js';
@@ -14,7 +14,7 @@ const TABS: ReadonlyArray<{ id: 'disks' | 'uploads' | 'library'; label: string }
 ];
 
 /** The media brand mark — three stacked media layers (an object store / gallery), in currentColor so
- *  it inherits the emerald accent. The media-console sibling of durable's workflow diamond. */
+ *  it inherits the console accent. The media-console sibling of durable's workflow diamond. */
 function LogoMark({ className }: { className?: string }): JSX.Element {
   return (
     <svg
@@ -68,10 +68,10 @@ export function App(): JSX.Element {
     <>
       <div className="app-bg" />
       <div className="relative z-10 flex h-full flex-col">
-        <header className="z-10 flex items-center gap-4 border-b border-[var(--line)] px-5 py-3">
+        <header className="z-10 flex items-center gap-4 border-b border-border px-5 py-3">
           <div className="flex items-center gap-2.5">
-            <div className="grid h-7 w-7 place-items-center rounded-md border border-emerald-500/30 bg-emerald-500/10">
-              <LogoMark className="h-4 w-4 text-emerald-400" />
+            <div className="grid h-7 w-7 place-items-center rounded-md border border-accent/30 bg-accent/10">
+              <LogoMark className="h-4 w-4 text-accent" />
             </div>
             <div className="leading-none">
               <div className="text-sm font-semibold tracking-tight">media</div>
@@ -83,17 +83,12 @@ export function App(): JSX.Element {
 
           <nav className="ml-2 flex flex-wrap items-center gap-1">
             {TABS.map((tab) => (
-              <a
+              <Button
                 key={tab.id}
-                href={`#/${tab.id}`}
-                className={`mono flex items-center gap-2 rounded-md border px-2.5 py-1 text-xs uppercase tracking-wide transition-colors ${
-                  route.tab === tab.id
-                    ? 'border-zinc-600 bg-zinc-900 text-zinc-100'
-                    : 'border-transparent text-zinc-500 hover:text-zinc-300'
-                }`}
-              >
-                {tab.label}
-              </a>
+                tone={route.tab === tab.id ? 'selected' : 'quiet'}
+                className="px-2.5 py-1 text-xs uppercase tracking-wide"
+                render={<a href={`#/${tab.id}`}>{tab.label}</a>}
+              />
             ))}
           </nav>
 
@@ -110,15 +105,15 @@ export function App(): JSX.Element {
                 live
               </span>
               {authed && (
-                <button
-                  type="button"
+                <Button
+                  tone="ghost"
                   onClick={logout}
-                  className="mono ml-1 rounded-md border border-[var(--line)] px-2 py-1 text-[10px] uppercase tracking-wider text-zinc-500 transition-colors hover:bg-zinc-800 hover:text-zinc-200"
+                  className="ml-1 text-[10px] uppercase tracking-wider"
                 >
                   {auth.data?.state === 'authenticated' && auth.data.user.name
                     ? `sign out · ${auth.data.user.name}`
                     : 'sign out'}
-                </button>
+                </Button>
               )}
             </div>
           )}
