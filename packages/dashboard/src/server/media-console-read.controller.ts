@@ -12,6 +12,7 @@ import type {
 } from '../client/types.js';
 import { MediaConsoleGuard } from './media-console.guard.js';
 import { MediaConsoleService } from './media-console.service.js';
+import type { ObjectInsightsResponse } from './object-insights.js';
 
 /** Parse an optional numeric query param; undefined when absent or not a finite number. */
 function toLimit(value: string | undefined): number | undefined {
@@ -53,6 +54,16 @@ export class MediaConsoleReadController {
   @Get('disks/:disk/object')
   object(@Param('disk') disk: string, @Query('key') key: string): Promise<ObjectDetailResponse> {
     return this.service.objectDetail(disk, key);
+  }
+
+  /** What the host knows about this object, from its registered `objectInsights` providers. Empty
+   *  when none are registered — the console renders nothing for an empty list. */
+  @Get('disks/:disk/object/insights')
+  objectInsights(
+    @Param('disk') disk: string,
+    @Query('key') key: string,
+  ): Promise<ObjectInsightsResponse> {
+    return this.service.objectInsights(disk, key);
   }
 
   /** Streams the object's bytes inline (Content-Disposition: inline) from the same origin, so the SPA

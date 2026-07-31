@@ -22,3 +22,6 @@ export const MEDIA_DASHBOARD_ACTIONS: symbol = Symbol('MEDIA_DASHBOARD_ACTIONS')
 export const MEDIA_CONSOLE_AUTH: symbol = Symbol('MEDIA_CONSOLE_AUTH');
 /** Carries the cookie `Path` (the JSON API base) so the session cookie rides every API request. */
 export const MEDIA_CONSOLE_COOKIE_PATH: symbol = Symbol('MEDIA_CONSOLE_COOKIE_PATH');
+
+/** Carries the host's `ObjectInsightProvider[]` (`options.objectInsights`) to the console service. */
+export const MEDIA_CONSOLE_OBJECT_INSIGHTS: symbol = Symbol('MEDIA_CONSOLE_OBJECT_INSIGHTS');

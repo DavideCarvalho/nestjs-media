@@ -35,6 +35,7 @@ interface MediaDashboardOptions {
   auth?: ConsoleAuthOptions;                 // built-in session-cookie login
   guards?: Array<Type<CanActivate> | CanActivate>; // bring-your-own guard(s)
   imports?: DynamicModule['imports'];        // DI resolution path for `guards`
+  objectInsights?: ObjectInsightProvider[];  // host context shown in the preview
 }
 ```
 
@@ -45,6 +46,7 @@ interface MediaDashboardOptions {
 | `actions` | Enables the destructive endpoints (delete object/record, copy/move, abort upload). The read API is always available. |
 | `auth` | Telescope-style built-in session-cookie login — see below. |
 | `guards` / `imports` | Front the console with your own `CanActivate`(s) instead of, or alongside, `auth` — see [Securing the console](#securing-the-console-with-your-own-guards). |
+| `objectInsights` | Annotate an object in the preview with what *your app* knows about it — see [Object insights](#object-insights). |
 
 `MediaDashboardModule.forRootAsync(options)` mirrors this, resolving `auth` through an injected `useAuth(...deps)` factory (for hooks that need your DB/services). `guards` and the mount paths stay static fields on the async options object — guard stamping happens at module-build time, before any factory runs.
 
@@ -122,6 +124,59 @@ It cannot open the console — it only runs when the request has no valid sessio
 <Callout type="info">
   Mode-A-only. With `login` configured the hook is ignored, because under Mode B the login form the visitor needs is **inside** the bundle this page would replace — gating the shell would lock you out of your own console. To ship your own *login* UI, use Mode A plus this hook and `POST <apiBasePath>/session` from your page.
 </Callout>
+
+## Object insights
+
+The console can describe a file only as storage sees it: key, size, content type, last modified.
+Everything that makes the file *mean* something lives in your app — which knowledge base indexed
+this PDF, which work order this scan belongs to, whether processing has run. `objectInsights` is the
+seam for handing that back:
+
+```ts
+MediaDashboardModule.forRoot({
+  objectInsights: [
+    {
+      id: 'knowledge-base',
+      async resolve({ disk, key }) {
+        if (!key.startsWith('rag/')) return null; // not ours — render nothing
+        const doc = await ingestionLog.get(key);
+        if (!doc) return null;
+        return {
+          title: 'Knowledge base',
+          facts: [
+            { label: 'Status', value: doc.status },
+            { label: 'Chunks', value: String(doc.chunks ?? 0) },
+          ],
+          links: [{ label: 'Open in the control panel', href: `/ctrl/rag/${doc.collection}` }],
+        };
+      },
+    },
+  ],
+});
+```
+
+Use `forRootAsync({ useObjectInsights, injectObjectInsights })` when a provider needs injected
+services — which is the usual case, since a provider that says anything interesting needs a
+repository. `injectObjectInsights` defaults to `inject` (the list `useAuth` uses) but is its own
+option, because insight providers rarely want the same dependencies the auth hooks do.
+
+**Data, not components.** A provider returns an `ObjectInsight` — `title`, plus optional `facts`
+(label/value rows), `links` and a one-line `note` — and the console renders it. It is not a slot you
+draw into: the console ships as a prebuilt SPA bundle, so there is nowhere for a host to inject
+React. The cost is a fixed vocabulary; the benefit is that the console stays ignorant of every
+domain plugged into it.
+
+Three behaviours worth knowing:
+
+- **`null` means "nothing to say"** and renders nothing. Most providers care about one key prefix,
+  so this is the common return.
+- **A provider that throws is skipped**, logged server-side, and the others still render. Annotation
+  must never be able to stop an admin opening a file.
+- **`resolve` runs on every preview**, so keep it to one indexed lookup. Providers run concurrently.
+
+Link `href`s must be relative (`/ctrl/...`) or `http(s)`. Protocol-relative (`//host`) and other
+schemes (`javascript:`, `data:`) are dropped rather than rendered — the guard for a provider that
+interpolated user-supplied text into a URL.
 
 ## Securing the console with your own guards
 
@@ -213,6 +268,7 @@ The response shapes are exported as types — see [the client subpath](#the-type
 | `GET disks/:disk/objects` | `prefix?`, `cursor?`, `limit?` | `ObjectListResponse` |
 | `GET disks/:disk/object` | `key` | `ObjectDetailResponse` |
 | `GET disks/:disk/object/raw` | `key` | raw bytes, `Content-Disposition: inline` |
+| `GET disks/:disk/object/insights` | `key` | `ObjectInsightsResponse` |
 | `GET uploads` | `disk?`, `prefix?` | `UploadListResponse` |
 | `GET uploads/:id` | — | `UploadDetailResponse` |
 | `GET library/collections` | — | `CollectionsResponse` |

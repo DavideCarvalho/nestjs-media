@@ -13,8 +13,10 @@ import { type ConsoleAuthOptions, resolveConsoleAuth } from './auth/config.js';
 import { isGuardClass, stampGuards } from './guards.js';
 import { MediaConsoleApiModule } from './media-console-api.module.js';
 import { MediaDashboardUiController } from './media-dashboard-ui.controller.js';
+import type { ObjectInsightProvider } from './object-insights.js';
 import {
   MEDIA_CONSOLE_AUTH,
+  MEDIA_CONSOLE_OBJECT_INSIGHTS,
   MEDIA_DASHBOARD_API_PATH,
   MEDIA_DASHBOARD_BASE_PATH,
 } from './tokens.js';
@@ -73,6 +75,14 @@ export interface MediaDashboardOptions {
    * host's own auth module, e.g. `imports: [AuthModule]` alongside `guards: [SessionGuard]`.
    */
   imports?: DynamicModule['imports'];
+  /**
+   * Host-supplied context about a disk object, rendered in the console's preview — see
+   * {@link ObjectInsightProvider}. The console can only describe a file as storage sees it; this is
+   * how it learns what the file *means* to your app. Omit for no annotation (the default).
+   *
+   * Use `forRootAsync`'s `useObjectInsights` when a provider needs injected services.
+   */
+  objectInsights?: ObjectInsightProvider[];
 }
 
 /**
@@ -101,6 +111,19 @@ export interface MediaDashboardAsyncOptions {
    * class guard's own dependencies resolve from `imports` above (shared with `useAuth`'s `inject`).
    */
   guards?: Array<Type<CanActivate> | CanActivate>;
+  /**
+   * Build the {@link MediaDashboardOptions.objectInsights} providers from injected deps — the usual
+   * case, since a provider that says anything interesting needs a repository or a service.
+   */
+  useObjectInsights?: (
+    ...deps: any[]
+  ) => ObjectInsightProvider[] | Promise<ObjectInsightProvider[]>;
+  /**
+   * Providers injected into `useObjectInsights`, in order. Defaults to {@link inject} — its own
+   * list because the insight providers rarely want the same dependencies the auth hooks do, and
+   * sharing one list would force every host to inject the union of both.
+   */
+  injectObjectInsights?: Array<InjectionToken | OptionalFactoryDependency>;
 }
 
 /** Leading slash, no trailing slash. */
@@ -127,6 +150,7 @@ export class MediaDashboardModule {
       options,
       apiBasePath,
       { provide: MEDIA_CONSOLE_AUTH, useValue: resolveConsoleAuth(options.auth) },
+      { provide: MEDIA_CONSOLE_OBJECT_INSIGHTS, useValue: options.objectInsights ?? [] },
       options.imports,
     );
   }
@@ -140,7 +164,19 @@ export class MediaDashboardModule {
       inject: options.inject ?? [],
       useFactory: async (...deps: any[]) => resolveConsoleAuth(await options.useAuth(...deps)),
     };
-    return MediaDashboardModule.build(options, apiBasePath, authProvider, options.imports);
+    const insightsProvider: Provider = {
+      provide: MEDIA_CONSOLE_OBJECT_INSIGHTS,
+      inject: options.injectObjectInsights ?? options.inject ?? [],
+      useFactory: async (...deps: any[]) =>
+        options.useObjectInsights === undefined ? [] : await options.useObjectInsights(...deps),
+    };
+    return MediaDashboardModule.build(
+      options,
+      apiBasePath,
+      authProvider,
+      insightsProvider,
+      options.imports,
+    );
   }
 
   /** Shared wiring: static routing + the API module, with `auth` supplied by the given provider. */
@@ -153,6 +189,7 @@ export class MediaDashboardModule {
     },
     apiBasePath: string,
     authProvider: Provider,
+    insightsProvider: Provider,
     imports?: DynamicModule['imports'],
   ): DynamicModule {
     const basePath = normalize(options.basePath ?? '/media');
@@ -179,6 +216,7 @@ export class MediaDashboardModule {
           // always share one root.
           cookiePath: '/',
           authProvider,
+          insightsProvider,
           imports,
           ...(options.guards ? { guards: options.guards } : {}),
         }),
