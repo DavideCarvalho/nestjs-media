@@ -4,6 +4,7 @@ import type {
   LibraryDetailResponse,
   LibraryListResponse,
   ObjectDetailResponse,
+  ObjectInsightsResponse,
   ObjectListResponse,
   Topology,
   UploadDetailResponse,
@@ -118,6 +119,10 @@ export const mediaConsoleClient = {
     getJson(withQuery(`/disks/${encodeURIComponent(disk)}/objects`, params)),
   object: (disk: string, key: string): Promise<ObjectDetailResponse> =>
     getJson(withQuery(`/disks/${encodeURIComponent(disk)}/object`, { key })),
+  /** What the host knows about this object, from its registered `objectInsights` providers.
+   *  `{ insights: [] }` when the host registered none. */
+  objectInsights: (disk: string, key: string): Promise<ObjectInsightsResponse> =>
+    getJson(withQuery(`/disks/${encodeURIComponent(disk)}/object/insights`, { key })),
   /** Same-origin URL that streams the object bytes inline (Content-Disposition: inline) — used to
    *  embed previews that a cross-origin signed URL would download (PDFs) or that CORS would block. */
   objectRawUrl: (disk: string, key: string): string =>

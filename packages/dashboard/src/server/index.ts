@@ -18,3 +18,11 @@ export {
 } from './tokens.js';
 // The API response types (also published at the `./client` entry) for host reuse.
 export type * from '../client/types.js';
+export type {
+  ObjectInsight,
+  ObjectInsightContext,
+  ObjectInsightFact,
+  ObjectInsightLink,
+  ObjectInsightProvider,
+  ObjectInsightsResponse,
+} from './object-insights.js';

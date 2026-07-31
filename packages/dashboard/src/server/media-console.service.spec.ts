@@ -278,3 +278,79 @@ describe('MediaConsoleService', () => {
     ).rejects.toThrow(/too large|limit/i);
   });
 });
+
+describe('MediaConsoleService.objectInsights', () => {
+  const ctx = { disk: 'primary', key: 'rag/kb-1/handbook.pdf' };
+
+  it('returns nothing when the host registered no providers', async () => {
+    const none = new MediaConsoleService(fakeStorage(), null, null, null, null);
+    expect(await none.objectInsights(ctx.disk, ctx.key)).toEqual({ insights: [] });
+
+    const empty = new MediaConsoleService(fakeStorage(), null, null, null, []);
+    expect(await empty.objectInsights(ctx.disk, ctx.key)).toEqual({ insights: [] });
+  });
+
+  it('collects what every provider says, dropping the ones with nothing to say', async () => {
+    const service = new MediaConsoleService(fakeStorage(), null, null, null, [
+      {
+        id: 'rag',
+        resolve: async ({ key }) => ({
+          title: 'Knowledge base',
+          facts: [{ label: 'Collection', value: key.split('/')[1] ?? '' }],
+        }),
+      },
+      // The common case: a provider that cares about a different prefix.
+      { id: 'work-orders', resolve: () => null },
+    ]);
+
+    expect(await service.objectInsights(ctx.disk, ctx.key)).toEqual({
+      insights: [{ title: 'Knowledge base', facts: [{ label: 'Collection', value: 'kb-1' }] }],
+    });
+  });
+
+  it('a provider that throws is skipped, and the others still render', async () => {
+    // The property that matters: annotation must never be able to stop an admin opening a file.
+    const service = new MediaConsoleService(fakeStorage(), null, null, null, [
+      {
+        id: 'broken',
+        resolve: () => {
+          throw new Error('database is down');
+        },
+      },
+      { id: 'fine', resolve: () => ({ title: 'Still here' }) },
+    ]);
+
+    expect(await service.objectInsights(ctx.disk, ctx.key)).toEqual({
+      insights: [{ title: 'Still here' }],
+    });
+  });
+
+  it('404s an unknown disk rather than handing providers a key from nowhere', async () => {
+    const service = new MediaConsoleService(fakeStorage(), null, null, null, [
+      { id: 'x', resolve: () => ({ title: 'never reached' }) },
+    ]);
+    await expect(service.objectInsights('no-such-disk', ctx.key)).rejects.toThrow(/Unknown disk/);
+  });
+
+  it('drops a link the console must not render, and keeps the ones it may', async () => {
+    const service = new MediaConsoleService(fakeStorage(), null, null, null, [
+      {
+        id: 'links',
+        resolve: () => ({
+          title: 'Links',
+          links: [
+            { label: 'host page', href: '/ctrl/rag/kb-1' },
+            { label: 'external', href: 'https://example.test/doc' },
+            // A provider that interpolated user text into a URL — this is what the filter is for.
+            { label: 'xss', href: 'javascript:alert(1)' },
+            // Protocol-relative: an absolute URL wearing a relative one's clothes.
+            { label: 'offsite', href: '//evil.test/steal' },
+          ],
+        }),
+      },
+    ]);
+
+    const { insights } = await service.objectInsights(ctx.disk, ctx.key);
+    expect(insights[0]?.links?.map((link) => link.label)).toEqual(['host page', 'external']);
+  });
+});

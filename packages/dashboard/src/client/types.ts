@@ -118,3 +118,36 @@ export interface Topology {
   disks: number;
   actions: boolean;
 }
+
+/** One label/value row of an {@link ObjectInsight}. Rendered verbatim as text — no markup. */
+export interface ObjectInsightFact {
+  label: string;
+  value: string;
+}
+
+/** A link out to the host's own screens, rendered as an anchor. */
+export interface ObjectInsightLink {
+  label: string;
+  href: string;
+}
+
+/**
+ * Host-supplied context about one disk object, rendered in the console preview.
+ *
+ * The console can describe a file only as storage sees it (key, size, type). This is what the HOST
+ * knows about it — which knowledge base indexed it, which work order it belongs to — handed over as
+ * data, because the console ships as a prebuilt bundle a host cannot inject components into.
+ */
+export interface ObjectInsight {
+  /** Section heading, e.g. `Knowledge base`. */
+  title: string;
+  facts?: ObjectInsightFact[];
+  links?: ObjectInsightLink[];
+  /** One line of prose under the facts — a caveat, a status explanation. */
+  note?: string;
+}
+
+/** What `GET disks/:disk/object/insights` returns. Empty when the host registered no providers. */
+export interface ObjectInsightsResponse {
+  insights: ObjectInsight[];
+}

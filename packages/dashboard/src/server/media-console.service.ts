@@ -11,6 +11,7 @@ import {
   BadRequestException,
   Inject,
   Injectable,
+  Logger,
   NotFoundException,
   Optional,
   PayloadTooLargeException,
@@ -28,7 +29,14 @@ import type {
   UploadInfo,
   UploadListResponse,
 } from '../client/types.js';
+import type {
+  ObjectInsight,
+  ObjectInsightProvider,
+  ObjectInsightsResponse,
+} from './object-insights.js';
+import { sanitizeInsight } from './object-insights.js';
 import {
+  MEDIA_CONSOLE_OBJECT_INSIGHTS,
   MEDIA_DASHBOARD_ACTIONS,
   MEDIA_STORAGE_SHARED,
   MEDIA_STORE,
@@ -100,7 +108,15 @@ export class MediaConsoleService {
     @Optional() @Inject(MEDIA_STORE) private readonly store: MediaStore | null,
     @Optional() @Inject(MEDIA_UPLOAD_SESSIONS) private readonly uploads: UploadSessionStore | null,
     @Optional() @Inject(MEDIA_DASHBOARD_ACTIONS) private readonly actionsEnabled: boolean | null,
+    // Defaulted, not merely `@Optional()`: the console service is constructed directly in unit
+    // tests (and by any host wiring it by hand), so a required 5th argument would break every one
+    // of those call sites for a feature they do not use.
+    @Optional()
+    @Inject(MEDIA_CONSOLE_OBJECT_INSIGHTS)
+    private readonly insightProviders: ObjectInsightProvider[] | null = null,
   ) {}
+
+  private readonly logger = new Logger(MediaConsoleService.name);
 
   private diskOrThrow(disk: string): StorageDriver {
     if (!this.storage || !this.storage.diskNames().includes(disk)) {
@@ -167,6 +183,52 @@ export class MediaConsoleService {
       ...(stat.contentType ? { contentType: stat.contentType } : {}),
       ...(stat.lastModified ? { lastModified: stat.lastModified.toISOString() } : {}),
       url,
+    };
+  }
+
+  /**
+   * What the HOST knows about this object, from every registered provider.
+   *
+   * Its own call rather than a field on `objectDetail`, for the same reason the RAG index-status
+   * endpoint is separate from its document listing: `objectDetail` is on the path of every preview
+   * and every navigation, and providers reach into host databases. Folding them in would put a host
+   * query on reads that only wanted a presigned URL.
+   *
+   * Failures are contained per provider. A provider that throws is logged and dropped, and the
+   * others still render — annotation must never be able to stop an admin opening a file, and one
+   * host lookup being down says nothing about the rest.
+   *
+   * Providers run concurrently: they are independent host lookups, and running them in series would
+   * make the panel as slow as their sum for no gain.
+   */
+  async objectInsights(disk: string, key: string): Promise<ObjectInsightsResponse> {
+    const providers = this.insightProviders ?? [];
+    if (providers.length === 0) {
+      return { insights: [] };
+    }
+    // Validates the disk the same way every other object read does, so an unknown disk 404s here
+    // too rather than silently handing host providers a key from nowhere.
+    this.diskOrThrow(disk);
+
+    const settled = await Promise.all(
+      providers.map(async (provider): Promise<ObjectInsight | null> => {
+        try {
+          return await provider.resolve({ disk, key });
+        } catch (error) {
+          this.logger.warn(
+            `Object-insight provider "${provider.id}" failed for ${disk}:${key} — ${
+              error instanceof Error ? error.message : String(error)
+            }`,
+          );
+          return null;
+        }
+      }),
+    );
+
+    return {
+      insights: settled
+        .filter((insight): insight is ObjectInsight => insight !== null)
+        .map(sanitizeInsight),
     };
   }
 

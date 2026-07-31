@@ -15,6 +15,7 @@ import { MediaConsoleService } from './media-console.service.js';
 import {
   MEDIA_CONSOLE_AUTH,
   MEDIA_CONSOLE_COOKIE_PATH,
+  MEDIA_CONSOLE_OBJECT_INSIGHTS,
   MEDIA_DASHBOARD_ACTIONS,
 } from './tokens.js';
 
@@ -32,6 +33,9 @@ interface ApiModuleOptions {
   cookiePath: string;
   /** Provider for `MEDIA_CONSOLE_AUTH` — a `useValue` (forRoot) or a `useFactory` (forRootAsync). */
   authProvider: Provider;
+  /** Provider for `MEDIA_CONSOLE_OBJECT_INSIGHTS` — the host's object-annotation providers.
+   *  Omitted binds the empty list, which is the no-op the console renders nothing for. */
+  insightsProvider?: Provider;
   /** Extra imports the auth factory's `inject` deps (or a guard class's own deps) live in. */
   imports?: ModuleMetadata['imports'];
   /**
@@ -73,6 +77,10 @@ export class MediaConsoleApiModule {
         { provide: MEDIA_DASHBOARD_ACTIONS, useValue: options.actions },
         { provide: MEDIA_CONSOLE_COOKIE_PATH, useValue: options.cookiePath },
         options.authProvider,
+        options.insightsProvider ?? {
+          provide: MEDIA_CONSOLE_OBJECT_INSIGHTS,
+          useValue: [],
+        },
         // Class guards need a DI provider so Nest can instantiate them in THIS module's context
         // (where `imports` above resolves their dependencies). An already-instantiated guard needs
         // none — it's used as-is.
