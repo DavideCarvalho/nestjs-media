@@ -163,6 +163,37 @@ export const mediaConsoleClient = {
     }
     return { text: new TextDecoder().decode(merged), bytesRead };
   },
+  /**
+   * Fetch a byte range of an object through the same-origin inline proxy. `end` is INCLUSIVE (HTTP
+   * `Range` semantics). This is what makes a random-access reader — a SQLite page reader, a ZIP
+   * directory reader — possible against an object far too big to download.
+   *
+   * THROWS when the server answers `200` instead of `206`, and that check is the entire point of
+   * this function rather than a nicety. A server build, a proxy, or a CDN that dropped the `Range`
+   * header answers 200 with the WHOLE body: a caller that just took `arrayBuffer()` would stream
+   * several hundred MB down the wire and then read its 64 KB page out of the front of it, looking
+   * for all the world like it worked. Failing loudly is the only way anyone finds out.
+   */
+  objectRange: async (
+    disk: string,
+    key: string,
+    start: number,
+    end: number,
+  ): Promise<Uint8Array> => {
+    const response = await fetch(mediaConsoleClient.objectRawUrl(disk, key), {
+      credentials: 'same-origin',
+      headers: { Range: `bytes=${start}-${end}` },
+    });
+    if (response.status === 200) {
+      // Drop the body rather than buffering the object we deliberately did not ask for.
+      await response.body?.cancel().catch(() => undefined);
+      throw new Error(
+        `Ranged read of "${key}" was answered 200 (full body) instead of 206 — the Range header was dropped between this page and the disk.`,
+      );
+    }
+    if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
+    return new Uint8Array(await response.arrayBuffer());
+  },
   /** Fetch an object's raw bytes (for binary previews like XLSX) through the inline proxy. */
   objectBytes: async (disk: string, key: string): Promise<ArrayBuffer> => {
     const response = await fetch(mediaConsoleClient.objectRawUrl(disk, key), {

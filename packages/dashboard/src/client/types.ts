@@ -7,6 +7,15 @@ export interface DiskCapabilities {
   multipart: boolean;
   publicUrls: boolean;
   list: boolean;
+  /**
+   * Can the disk serve a byte range without transferring the whole object (a ranged `object/raw`)?
+   *
+   * Optional HERE, unlike the required `ranged` on the driver's own `DriverCapabilities`, because
+   * this is a WIRE shape: the console bundle can be served by a host still running an older server
+   * build that never emits the field. `undefined` means "this server didn't say", which a caller
+   * should treat as "don't count on it" — not as `false`.
+   */
+  ranged?: boolean;
 }
 
 export interface DiskInfo {

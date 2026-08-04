@@ -1,5 +1,13 @@
+import type { Readable } from 'node:stream';
 import { FileNotFoundError, type StorageDriver } from '@dudousxd/nestjs-media-core';
 import { describe, expect, it } from 'vitest';
+
+/** Drain a driver stream to a string, so a range assertion reads as the substring it is. */
+async function readAll(stream: Readable): Promise<string> {
+  const chunks: Buffer[] = [];
+  for await (const chunk of stream) chunks.push(Buffer.from(chunk));
+  return Buffer.concat(chunks).toString();
+}
 
 /** Shared behavioral contract every StorageDriver must satisfy. Call inside a spec file. */
 export function runStorageDriverConformance(
@@ -69,6 +77,51 @@ export function runStorageDriverConformance(
       expect(await driver.exists('m/a')).toBe(false);
       expect(await driver.exists('m/b')).toBe(false);
       await expect(driver.deleteMany([])).resolves.toBeUndefined();
+    });
+
+    /**
+     * `stream(path, range)` — the primitive behind reading a few KB out of a huge object.
+     *
+     * Capability-gated: a driver that advertises `ranged: false` is allowed to ignore the argument,
+     * so each case bails early rather than failing a driver for a capability it never claimed. For
+     * every driver bundled here that flag is `true`, so these do run.
+     */
+    describe('ranged reads', () => {
+      const alphabet = 'abcdefghijklmnopqrstuvwxyz';
+
+      it('serves a mid-file range, with end INCLUSIVE', async () => {
+        const driver = await makeDriver();
+        if (!driver.capabilities.ranged) return;
+        await driver.put('r/alphabet.txt', Buffer.from(alphabet));
+        // 3..7 inclusive is five bytes, not four — the off-by-one this whole contract turns on.
+        expect(await readAll(await driver.stream('r/alphabet.txt', { start: 3, end: 7 }))).toBe(
+          'defgh',
+        );
+        // Degenerate but legal: a one-byte range where start === end.
+        expect(await readAll(await driver.stream('r/alphabet.txt', { start: 0, end: 0 }))).toBe(
+          'a',
+        );
+      });
+
+      it('clamps a range that runs past EOF rather than throwing', async () => {
+        const driver = await makeDriver();
+        if (!driver.capabilities.ranged) return;
+        await driver.put('r/alphabet.txt', Buffer.from(alphabet));
+        // A reader that asks for "the next 64 KB from offset N" near the end of an object must get
+        // the tail back, not an error — callers size their reads from a page size, not the file.
+        expect(await readAll(await driver.stream('r/alphabet.txt', { start: 20, end: 9999 }))).toBe(
+          'uvwxyz',
+        );
+      });
+
+      it('reads to EOF when end is omitted', async () => {
+        const driver = await makeDriver();
+        if (!driver.capabilities.ranged) return;
+        await driver.put('r/alphabet.txt', Buffer.from(alphabet));
+        expect(await readAll(await driver.stream('r/alphabet.txt', { start: 23 }))).toBe('xyz');
+        // start: 0 with no end is the whole object — the range path must not corrupt a full read.
+        expect(await readAll(await driver.stream('r/alphabet.txt', { start: 0 }))).toBe(alphabet);
+      });
     });
 
     describe('list', () => {

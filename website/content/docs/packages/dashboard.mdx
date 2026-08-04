@@ -125,6 +125,38 @@ It cannot open the console — it only runs when the request has no valid sessio
   Mode-A-only. With `login` configured the hook is ignored, because under Mode B the login form the visitor needs is **inside** the bundle this page would replace — gating the shell would lock you out of your own console. To ship your own *login* UI, use Mode A plus this hook and `POST <apiBasePath>/session` from your page.
 </Callout>
 
+## Previews
+
+Clicking **Preview** on an object opens it inline, with a renderer chosen from its content type first,
+its filename second, and the broad `image/*`-style families last. The name usually beats the label:
+an object uploaded to S3 without an explicit type arrives as `application/octet-stream`, which
+describes nothing.
+
+| Renderer | Opened for | How it reads |
+|---|---|---|
+| Image / video / audio | `image/*`, `video/*`, `audio/*` and the usual extensions | The object's own URL |
+| PDF | `application/pdf`, `.pdf` | Streamed inline through the same-origin proxy, so a signed URL carrying `Content-Disposition: attachment` still renders instead of downloading |
+| Text | `text/*`, `.txt` `.json` `.csv` `.tsv` `.log` `.xml` `.yaml` `.sql` | Head sample (8 MB), rendered raw, as pretty JSON, or as a CSV/TSV grid |
+| Markdown | `text/markdown`, `.md` | Head sample, rendered and sanitized, with a source toggle |
+| NDJSON | `.ndjson` `.jsonl` | Head sample, one object per line, columns unioned across rows |
+| Spreadsheet | `.xlsx` `.xls` `.xlsm` `.ods` | Whole file (a workbook is a zip and can't be sampled), capped at 15 MB |
+| SQLite | `.sqlite` `.sqlite3` `.db` | **Byte ranges** — the database is queried in place, never downloaded |
+| Parquet | `.parquet` | **Byte ranges** — footer, then only the column chunks the visible rows need |
+| Archive | `.zip` `.jar` `.whl` `.tar` `.tgz` | **Byte ranges** — the ZIP central directory lives at the end of the file, so listing a 2 GB archive costs tens of KB. Clicking a text entry reads and inflates just that entry. `tar`/`tar.gz` have no index and are listed from a labelled head sample |
+| Certificate | `.pem` `.crt` `.cer` `.der` | Parsed to subject/issuer/validity/SANs. Private key blocks are named and **never rendered** |
+| Hex | anything else | **Byte ranges** — a windowed hex + ASCII dump you can seek through |
+
+The last row is the important one: there is no "no preview available" state any more. Whatever the
+console cannot identify is still bytes, and bytes render as hex.
+
+The range-backed renderers need a disk whose driver reports [`capabilities.ranged`](/docs/recipes/custom-driver#capabilities-are-a-promise).
+Both bundled drivers do. On a disk that doesn't, they say so rather than pulling the whole object
+down.
+
+Everything past the plain media types is code-split: opening the console does not load the SQLite
+engine, the Parquet reader, SheetJS, the inflater, the X.509 parser or the Markdown renderer. Each
+arrives on the first preview that needs it.
+
 ## Object insights
 
 The console can describe a file only as storage sees it: key, size, content type, last modified.
@@ -238,7 +270,7 @@ It resolves the storage manager, the `MediaStore`, and the upload-session store 
 | `listDisks()` | `DiskListResponse` | Registered disks + each one's capabilities. |
 | `listObjects(disk, { prefix, cursor, limit })` | `ObjectListResponse` | One level of a disk — `{ folders, files, cursor }`. See [Folders](/docs/concepts/folders). |
 | `objectDetail(disk, key)` | `ObjectDetailResponse` | Size, content type, and a preview/download URL (signed on presign-capable disks). |
-| `objectStream(disk, key)` | `{ stream, contentType, size }` | Raw byte stream for the inline preview proxy. |
+| `objectStream(disk, key, range?)` | `{ stream, contentType, size, range? }` | Raw byte stream for the inline preview proxy. With a `range` it streams just that slice (both bounds inclusive); `size` stays the whole object, so the controller can build `Content-Range`. Unsatisfiable → `RangeNotSatisfiableException` (416). |
 | `putObject(disk, key, body, contentType?)` | `void` | Writes an object from a stream. Buffered + size-capped. **Action.** |
 | `createFolder` / `deleteFolder` | `void` | Folder marker create / recursive delete. **Action.** |
 | `copyObject` / `moveObject` | `void` | Single-object copy/move, same disk or cross-disk. **Action.** |
@@ -319,7 +351,7 @@ await mediaConsoleClient.moveObject('s3', 'a/x.jpg', 's3', 'b/x.jpg');
 await mediaConsoleClient.uploadObject('s3', 'imports/data.csv', file); // raw bytes, MIME preserved
 ```
 
-It also carries a few browser-only conveniences the raw API doesn't: `objectRawUrl(disk, key)` (a same-origin inline URL to embed a preview a signed cross-origin URL would force-download), `objectTextHead(disk, key, maxBytes)` (sample the head of a large text file without pulling it all down), and `objectBytes(disk, key)` (fetch raw bytes for binary previews). `MediaConsoleClient` is the type of the whole client object, handy for wrapping or mocking it.
+It also carries a few browser-only conveniences the raw API doesn't: `objectRawUrl(disk, key)` (a same-origin inline URL to embed a preview a signed cross-origin URL would force-download), `objectTextHead(disk, key, maxBytes)` (sample the head of a large text file without pulling it all down), `objectBytes(disk, key)` (fetch raw bytes for binary previews), and `objectRange(disk, key, start, end)` (fetch one byte range — `end` inclusive). `objectRange` throws if the server answers `200` instead of `206`: a proxy that strips the `Range` header would otherwise stream the entire object into what the caller believes is a 64 KB page. `MediaConsoleClient` is the type of the whole client object, handy for wrapping or mocking it.
 
 By default it fetches from `/media/api`; the UI controller injects the real base at runtime via `window.__MEDIA_API__` / `window.__MEDIA_BASE__`, so a non-default `apiBasePath` is picked up automatically.
 

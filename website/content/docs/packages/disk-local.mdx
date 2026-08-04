@@ -20,7 +20,7 @@ new LocalDriver({
 ## Capabilities
 
 ```ts
-{ presign: false, multipart: false, publicUrls: !!baseUrl }
+{ presign: false, multipart: false, publicUrls: !!baseUrl, ranged: true }
 ```
 
 - `url(path)` returns `${baseUrl}/${path}` when `baseUrl` is set, else throws `UnsupportedOperationError`. Serve `root` from that base (a static handler or reverse proxy).

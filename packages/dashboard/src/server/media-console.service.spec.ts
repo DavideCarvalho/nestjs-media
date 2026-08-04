@@ -1,12 +1,18 @@
+import { Readable } from 'node:stream';
 import type {
   MediaListResult,
   MediaStore,
+  ReadRangeOptions,
   StorageManager,
   UploadSession,
   UploadSessionStore,
 } from '@dudousxd/nestjs-media-core';
 import { describe, expect, it } from 'vitest';
-import { MediaConsoleService } from './media-console.service.js';
+import {
+  MediaConsoleService,
+  RangeNotSatisfiableException,
+  type RequestedReadRange,
+} from './media-console.service.js';
 
 function fakeStorage(): StorageManager {
   const driver = {
@@ -352,5 +358,138 @@ describe('MediaConsoleService.objectInsights', () => {
 
     const { insights } = await service.objectInsights(ctx.disk, ctx.key);
     expect(insights[0]?.links?.map((link) => link.label)).toEqual(['host page', 'external']);
+  });
+});
+
+describe('MediaConsoleService.objectStream ranges', () => {
+  const CONTENT = 'abcdefghij';
+
+  /** A disk holding one 10-byte object, recording the range each `stream()` was asked for. */
+  function rangedStorage(options?: { ranged?: boolean; size?: number }) {
+    const asked: Array<ReadRangeOptions | undefined> = [];
+    const size = options?.size ?? CONTENT.length;
+    const driver = {
+      capabilities: {
+        presign: true,
+        multipart: true,
+        publicUrls: false,
+        list: true,
+        ranged: options?.ranged ?? true,
+      },
+      stat: async () => ({ size, contentType: 'text/plain' }),
+      stream: async (_key: string, range?: ReadRangeOptions) => {
+        asked.push(range);
+        const slice = range
+          ? CONTENT.slice(range.start, range.end === undefined ? undefined : range.end + 1)
+          : CONTENT;
+        return Readable.from(Buffer.from(slice));
+      },
+    };
+    const storage = {
+      defaultDisk: 'primary',
+      diskNames: () => ['primary'],
+      disk: () => driver,
+    } as unknown as StorageManager;
+    return { storage, asked };
+  }
+
+  const drain = async (stream: Readable): Promise<string> => {
+    const chunks: Buffer[] = [];
+    for await (const chunk of stream) chunks.push(Buffer.from(chunk));
+    return Buffer.concat(chunks).toString();
+  };
+
+  it('leaves a range-less read exactly as it was: whole body, no resolved range', async () => {
+    const { storage, asked } = rangedStorage();
+    const service = new MediaConsoleService(storage, null, null, false);
+    const result = await service.objectStream('primary', 'a.txt');
+    expect(result.size).toBe(10);
+    expect(result.contentType).toBe('text/plain');
+    expect(result.range).toBeUndefined();
+    expect(asked).toEqual([undefined]);
+    expect(await drain(result.stream)).toBe(CONTENT);
+  });
+
+  it('passes a satisfiable range through and reports it absolutely, with the OBJECT size', async () => {
+    const { storage, asked } = rangedStorage();
+    const service = new MediaConsoleService(storage, null, null, false);
+    const result = await service.objectStream('primary', 'a.txt', { start: 2, end: 4 });
+    expect(asked).toEqual([{ start: 2, end: 4 }]);
+    expect(result.range).toEqual({ start: 2, end: 4 });
+    // `size` is the whole object, not the slice — it is the denominator of `Content-Range`.
+    expect(result.size).toBe(10);
+    expect(await drain(result.stream)).toBe('cde');
+  });
+
+  it('clamps an end past EOF instead of failing — the tail of a file is an ordinary read', async () => {
+    const { storage, asked } = rangedStorage();
+    const service = new MediaConsoleService(storage, null, null, false);
+    const result = await service.objectStream('primary', 'a.txt', { start: 6, end: 99999 });
+    expect(asked).toEqual([{ start: 6, end: 9 }]);
+    expect(result.range).toEqual({ start: 6, end: 9 });
+    expect(await drain(result.stream)).toBe('ghij');
+  });
+
+  it('resolves an omitted end to the last byte', async () => {
+    const { storage } = rangedStorage();
+    const service = new MediaConsoleService(storage, null, null, false);
+    const result = await service.objectStream('primary', 'a.txt', { start: 8 });
+    expect(result.range).toEqual({ start: 8, end: 9 });
+  });
+
+  it('resolves the suffix form (`bytes=-N`) against the size, and clamps an oversized suffix', async () => {
+    const { storage } = rangedStorage();
+    const service = new MediaConsoleService(storage, null, null, false);
+    expect((await service.objectStream('primary', 'a.txt', { suffixLength: 3 })).range).toEqual({
+      start: 7,
+      end: 9,
+    });
+    // A suffix longer than the object is the whole object, not a negative start.
+    expect((await service.objectStream('primary', 'a.txt', { suffixLength: 500 })).range).toEqual({
+      start: 0,
+      end: 9,
+    });
+  });
+
+  it('416s an unsatisfiable range, carrying the size the client needs to re-ask', async () => {
+    const { storage, asked } = rangedStorage();
+    const service = new MediaConsoleService(storage, null, null, false);
+    const cases: RequestedReadRange[] = [
+      { start: 10 }, // exactly at EOF — there is no byte 10 in a 10-byte object
+      { start: 40, end: 60 }, // wholly past EOF
+      { start: 5, end: 2 }, // inverted
+      { suffixLength: 0 }, // `bytes=-0` asks for nothing
+    ];
+    for (const range of cases) {
+      const failure = await service
+        .objectStream('primary', 'a.txt', range)
+        .catch((e: unknown) => e);
+      expect(failure).toBeInstanceOf(RangeNotSatisfiableException);
+      expect((failure as RangeNotSatisfiableException).size).toBe(10);
+      expect((failure as RangeNotSatisfiableException).getStatus()).toBe(416);
+    }
+    // Nothing reached the driver — an unsatisfiable range never opens a body.
+    expect(asked).toEqual([]);
+  });
+
+  it('416s every range against a zero-byte object', async () => {
+    const { storage } = rangedStorage({ size: 0 });
+    const service = new MediaConsoleService(storage, null, null, false);
+    await expect(service.objectStream('primary', 'empty', { start: 0 })).rejects.toBeInstanceOf(
+      RangeNotSatisfiableException,
+    );
+  });
+
+  it('refuses a range on a driver that cannot serve one, rather than returning the whole object', async () => {
+    const { storage, asked } = rangedStorage({ ranged: false });
+    const service = new MediaConsoleService(storage, null, null, false);
+    // The silent alternative — 400 MB where 64 KB was asked for — is the whole reason `ranged` is a
+    // required capability, so this must be an error and not a full body.
+    await expect(service.objectStream('primary', 'a.txt', { start: 0, end: 9 })).rejects.toThrow(
+      /cannot serve byte ranges/,
+    );
+    expect(asked).toEqual([]);
+    // The un-ranged read still works on such a disk.
+    expect((await service.objectStream('primary', 'a.txt')).range).toBeUndefined();
   });
 });

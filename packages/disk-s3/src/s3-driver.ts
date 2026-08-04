@@ -23,6 +23,7 @@ import {
   type MultipartPart,
   type MultipartUploadDriver,
   type PutOptions,
+  type ReadRangeOptions,
   type StatResult,
   type StorageDriver,
   type TemporaryUrlOptions,
@@ -66,6 +67,7 @@ export class S3Driver implements StorageDriver, MultipartUploadDriver {
       multipart: true,
       publicUrls: !!options.publicBaseUrl,
       list: true,
+      ranged: true,
     };
   }
 
@@ -102,10 +104,18 @@ export class S3Driver implements StorageDriver, MultipartUploadDriver {
     }
   }
 
-  async stream(path: string): Promise<Readable> {
+  async stream(path: string, range?: ReadRangeOptions): Promise<Readable> {
     try {
       const res = await this.client.send(
-        new GetObjectCommand({ Bucket: this.bucket, Key: this.key(path) }),
+        new GetObjectCommand({
+          Bucket: this.bucket,
+          Key: this.key(path),
+          // `ReadRangeOptions` is already HTTP `Range` semantics (inclusive `end`), so it goes over
+          // the wire verbatim. An omitted `end` becomes the open-ended `bytes=N-` form ("to EOF"),
+          // and S3 clamps a range that overruns the object rather than erroring — only a start at
+          // or past EOF gets a 416, which the caller is expected to have ruled out already.
+          ...(range ? { Range: `bytes=${range.start}-${range.end ?? ''}` } : {}),
+        }),
       );
       if (!res.Body) throw new FileNotFoundError(path);
       return hardenBodyStream(res.Body as Readable);

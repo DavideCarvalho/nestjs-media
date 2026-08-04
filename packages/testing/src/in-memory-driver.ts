@@ -6,6 +6,7 @@ import {
   type ListOptions,
   type ListResult,
   type PutOptions,
+  type ReadRangeOptions,
   type StatResult,
   type StorageDriver,
   UnsupportedOperationError,
@@ -18,6 +19,7 @@ export class InMemoryDriver implements StorageDriver {
     multipart: false,
     publicUrls: false,
     list: true,
+    ranged: true,
   };
   private readonly files = new Map<string, Buffer>();
   private readonly metadata = new Map<string, { contentType?: string; lastModified: Date }>();
@@ -36,8 +38,15 @@ export class InMemoryDriver implements StorageDriver {
     return f;
   }
 
-  async stream(path: string): Promise<Readable> {
-    return Readable.from(await this.get(path));
+  async stream(path: string, range?: ReadRangeOptions): Promise<Readable> {
+    const buffer = await this.get(path);
+    if (!range) return Readable.from(buffer);
+    // `end` is inclusive (HTTP `Range`), `subarray` is exclusive — hence the +1. `subarray` also
+    // clamps to the buffer's length on its own, which is the "range overruns EOF" case the real
+    // drivers get for free from S3/the filesystem, so this fake behaves the same way.
+    return Readable.from(
+      buffer.subarray(range.start, range.end === undefined ? undefined : range.end + 1),
+    );
   }
 
   async exists(path: string): Promise<boolean> {

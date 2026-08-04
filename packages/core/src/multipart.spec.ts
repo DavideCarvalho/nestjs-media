@@ -9,6 +9,7 @@ function makeDriver(multipart: boolean, hasMethod: boolean): StorageDriver {
       multipart,
       publicUrls: false,
       list: true,
+      ranged: false,
     },
     put: async () => {},
     get: async () => Buffer.alloc(0),

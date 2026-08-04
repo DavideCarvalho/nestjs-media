@@ -58,6 +58,7 @@ describe('LocalDriver', () => {
       multipart: false,
       publicUrls: false,
       list: true,
+      ranged: true,
     });
     await expect(new LocalDriver({ root }).url('a.txt')).rejects.toBeInstanceOf(
       UnsupportedOperationError,
@@ -67,6 +68,25 @@ describe('LocalDriver', () => {
     expect(await withUrl.url('a/b.txt')).toBe('https://cdn.test/files/a/b.txt');
     await expect(withUrl.temporaryUrl('a.txt', 60)).rejects.toBeInstanceOf(
       UnsupportedOperationError,
+    );
+  });
+
+  it('streams a byte range with an INCLUSIVE end, and still 404s a missing file', async () => {
+    const d = new LocalDriver({ root });
+    await d.put('alphabet.txt', Buffer.from('abcdefghij'));
+    const read = async (range?: { start: number; end?: number }) => {
+      const chunks: Buffer[] = [];
+      for await (const chunk of await d.stream('alphabet.txt', range))
+        chunks.push(Buffer.from(chunk));
+      return Buffer.concat(chunks).toString();
+    };
+    // Node's createReadStream `end` is inclusive, so 2..4 is three bytes — the same off-by-one the
+    // HTTP `Range` header uses, which is exactly why no conversion happens in the driver.
+    expect(await read({ start: 2, end: 4 })).toBe('cde');
+    expect(await read({ start: 7 })).toBe('hij');
+    expect(await read()).toBe('abcdefghij');
+    await expect(d.stream('missing.txt', { start: 0, end: 3 })).rejects.toBeInstanceOf(
+      FileNotFoundError,
     );
   });
 
