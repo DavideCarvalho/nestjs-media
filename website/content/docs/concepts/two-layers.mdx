@@ -39,10 +39,10 @@ await disk.move(from, to);
 Drivers are honest about what they can do, and the rest of the library reads this rather than special-casing vendors:
 
 ```ts
-disk.capabilities; // { presign: boolean; multipart: boolean; publicUrls: boolean }
+disk.capabilities; // { presign: boolean; multipart: boolean; publicUrls: boolean; list: boolean; ranged: boolean }
 ```
 
-`publicUrls` gates `url()`, `presign` gates `temporaryUrl()` and is consulted by [`uploadMode`](/docs/concepts/uploads) to decide direct vs proxied uploads. A driver that can't do something throws `UnsupportedOperationError` instead of silently faking it.
+`publicUrls` gates `url()`, `presign` gates `temporaryUrl()` and is consulted by [`uploadMode`](/docs/concepts/uploads) to decide direct vs proxied uploads, `list` gates prefix enumeration, and `ranged` gates `stream(path, { start, end })` — the seek that lets the console read a page out of a multi-gigabyte object instead of transferring it. A driver that can't do something throws `UnsupportedOperationError` instead of silently faking it.
 
 ### Errors
 

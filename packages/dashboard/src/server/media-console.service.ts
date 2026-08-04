@@ -2,6 +2,7 @@ import type { Readable } from 'node:stream';
 import type {
   MediaRecord,
   MediaStore,
+  ReadRangeOptions,
   StorageDriver,
   StorageManager,
   UploadSession,
@@ -9,10 +10,13 @@ import type {
 } from '@dudousxd/nestjs-media-core';
 import {
   BadRequestException,
+  HttpException,
+  HttpStatus,
   Inject,
   Injectable,
   Logger,
   NotFoundException,
+  NotImplementedException,
   Optional,
   PayloadTooLargeException,
 } from '@nestjs/common';
@@ -60,6 +64,74 @@ function lastSegment(prefix: string): string {
   const trimmed = prefix.replace(/\/+$/, '');
   const slash = trimmed.lastIndexOf('/');
   return slash === -1 ? trimmed : trimmed.slice(slash + 1);
+}
+
+/**
+ * A range as the CLIENT asked for it, before the object's size is known.
+ *
+ * Either an absolute {@link ReadRangeOptions}, or HTTP's suffix form (`Range: bytes=-500`, "the last
+ * 500 bytes") — which cannot be made absolute without the size, and the size is `stat`'s to give.
+ * Resolving it here rather than in the controller saves a second `stat` on the request path.
+ */
+export type RequestedReadRange = ReadRangeOptions | { suffixLength: number };
+
+/**
+ * The requested range cannot be satisfied against this object (start at/past EOF, or start > end).
+ *
+ * A dedicated class rather than a bare `HttpException` because RFC 9110 requires a 416 to carry an
+ * unsatisfied-range `Content-Range` naming the object's real size, so the client learns the size and
+ * can retry — and only the controller can set a header. This carries the size across that boundary.
+ */
+export class RangeNotSatisfiableException extends HttpException {
+  constructor(readonly size: number) {
+    super(
+      {
+        statusCode: HttpStatus.REQUESTED_RANGE_NOT_SATISFIABLE,
+        message: `Requested range is not satisfiable for an object of ${size} bytes`,
+        error: 'Range Not Satisfiable',
+      },
+      HttpStatus.REQUESTED_RANGE_NOT_SATISFIABLE,
+    );
+  }
+}
+
+/** What {@link MediaConsoleService.objectStream} hands the controller. `range` is present only when
+ *  a range was requested AND satisfied, already absolute and clamped to the object — so the
+ *  controller can write `Content-Range`/`Content-Length` without re-deriving anything. */
+export interface ObjectStreamResult {
+  stream: Readable;
+  contentType: string;
+  /** Total size of the OBJECT, not of the slice — the `/<size>` in `Content-Range`. */
+  size: number;
+  /** Absolute inclusive bounds actually being streamed. Absent on a full-body read. */
+  range?: { start: number; end: number };
+}
+
+/**
+ * Resolve a requested range into absolute, inclusive, in-bounds bounds — or `null` when it is
+ * unsatisfiable and the answer has to be a 416.
+ *
+ * Unsatisfiable means a start at or past EOF (there is no such byte) or a start past the end; a
+ * zero-byte object consequently rejects every range, which is what RFC 9110 prescribes. An `end`
+ * beyond EOF is NOT unsatisfiable — it is clamped, because "the next 64 KB from offset N" is how
+ * every paging reader asks for the tail of a file, and erroring there would make the last page of
+ * every object unreadable.
+ */
+function resolveRange(
+  range: RequestedReadRange,
+  size: number,
+): { start: number; end: number } | null {
+  if ('suffixLength' in range) {
+    // `bytes=-N`: the last N bytes. A suffix longer than the object is the whole object; `bytes=-0`
+    // asks for nothing, which RFC 9110 defines as unsatisfiable rather than as an empty 206.
+    if (!Number.isInteger(range.suffixLength) || range.suffixLength <= 0 || size === 0) return null;
+    return { start: Math.max(0, size - range.suffixLength), end: size - 1 };
+  }
+  const { start } = range;
+  if (!Number.isInteger(start) || start < 0 || start >= size) return null;
+  const end = range.end === undefined ? size - 1 : Math.min(range.end, size - 1);
+  if (!Number.isInteger(end) || end < start) return null;
+  return { start, end };
 }
 
 function mapUpload(session: UploadSession): UploadInfo {
@@ -232,17 +304,45 @@ export class MediaConsoleService {
     };
   }
 
-  /** The object's raw byte stream plus the metadata the controller needs to serve it inline. Used by
-   *  the console's same-origin preview proxy so text/PDF render in the browser instead of downloading
-   *  (and so a CORS-locked bucket is still previewable). */
+  /**
+   * The object's raw byte stream plus the metadata the controller needs to serve it inline. Used by
+   * the console's same-origin preview proxy so text/PDF render in the browser instead of downloading
+   * (and so a CORS-locked bucket is still previewable).
+   *
+   * With `range`, only that slice — which is what makes previewing a multi-hundred-MB object (a
+   * SQLite database read a page at a time) possible at all. The range is resolved HERE, not in the
+   * driver, because it has to be checked against the object's size and the `stat` for that is
+   * already on this path: the suffix form is made absolute, an overrunning `end` is clamped to the
+   * last byte, and anything genuinely unsatisfiable becomes a {@link RangeNotSatisfiableException}
+   * (HTTP 416) instead of a surprise empty body.
+   *
+   * A driver that reports `ranged: false` REFUSES a range request rather than quietly returning the
+   * whole object: the caller asked for 64 KB out of 400 MB, and silently answering with all 400 MB
+   * — which the caller would then read as if it were the slice — is the exact failure the `ranged`
+   * capability exists to make impossible.
+   */
   async objectStream(
     disk: string,
     key: string,
-  ): Promise<{ stream: Readable; contentType: string; size: number }> {
+    range?: RequestedReadRange,
+  ): Promise<ObjectStreamResult> {
     const driver = this.diskOrThrow(disk);
     const stat = await driver.stat(key);
-    const stream = await driver.stream(key);
-    return { stream, contentType: stat.contentType ?? 'application/octet-stream', size: stat.size };
+    const contentType = stat.contentType ?? 'application/octet-stream';
+    if (!range) {
+      return { stream: await driver.stream(key), contentType, size: stat.size };
+    }
+    if (!driver.capabilities.ranged) {
+      throw new NotImplementedException(`Disk "${disk}" cannot serve byte ranges`);
+    }
+    const resolved = resolveRange(range, stat.size);
+    if (!resolved) throw new RangeNotSatisfiableException(stat.size);
+    return {
+      stream: await driver.stream(key, resolved),
+      contentType,
+      size: stat.size,
+      range: resolved,
+    };
   }
 
   /** Writes an object from a byte stream (a browser upload). The caller supplies the full key

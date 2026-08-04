@@ -11,19 +11,19 @@ Need Google Cloud Storage, Cloudflare R2, Azure Blob, or an in-house store? A di
 ## The contract
 
 ```ts
-import type { DriverCapabilities, PutOptions, StorageDriver } from '@dudousxd/nestjs-media/storage';
+import type { DriverCapabilities, PutOptions, ReadRangeOptions, StorageDriver } from '@dudousxd/nestjs-media/storage';
 import type { Readable } from 'node:stream';
 
 export class GcsDriver implements StorageDriver {
   readonly capabilities: DriverCapabilities;
 
   constructor(private readonly bucket: /* your GCS bucket handle */ any, publicBaseUrl?: string) {
-    this.capabilities = { presign: true, multipart: false, publicUrls: !!publicBaseUrl };
+    this.capabilities = { presign: true, multipart: false, publicUrls: !!publicBaseUrl, ranged: true };
   }
 
   async put(path: string, contents: Buffer | Readable, options?: PutOptions): Promise<void> { /* … */ }
   async get(path: string): Promise<Buffer> { /* … throw FileNotFoundError when absent */ }
-  async stream(path: string): Promise<Readable> { /* … */ }
+  async stream(path: string, range?: ReadRangeOptions): Promise<Readable> { /* … both bounds inclusive */ }
   async exists(path: string): Promise<boolean> { /* … */ }
   async size(path: string): Promise<number> { /* … */ }
   async delete(path: string): Promise<void> { /* … idempotent */ }
@@ -37,6 +37,8 @@ export class GcsDriver implements StorageDriver {
 ## Capabilities are a promise
 
 Set `capabilities` honestly — the library trusts them. `presign: true` means `temporaryUrl` works and [`uploadMode: 'auto'`](/docs/concepts/uploads) may pick the direct path; `publicUrls: true` means `url()` returns a stable address. If you can't do an operation, throw `UnsupportedOperationError(driver, op)` rather than returning something fake.
+
+`ranged: true` is the one to be most careful with, because getting it wrong fails *quietly*. It promises that `stream(path, { start, end })` returns exactly those bytes — both bounds inclusive, and `end` omitted meaning "to EOF". A driver that accepts the argument and ignores it hands back the whole object, and a caller that asked for a 64 KB page will happily read a 2 GB body as if it were one. That is why the field is required rather than optional: adding it forces every driver to answer the question. If your backing store can't seek, say `ranged: false` — the console will fall back to whole-object reads instead of quietly reading garbage.
 
 <Callout type="warn" title="Error semantics matter">
 `get`, `stream`, and `size` must throw `FileNotFoundError` for a missing key (not return null), and `delete` must be idempotent. The conformance suite checks exactly these — they're what the media-library layer relies on.

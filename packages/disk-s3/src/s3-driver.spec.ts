@@ -39,12 +39,13 @@ afterEach(() => {
 });
 
 describe('S3Driver', () => {
-  it('advertises presign + multipart + list capabilities; publicUrls follows publicBaseUrl', () => {
+  it('advertises presign + multipart + list + ranged; publicUrls follows publicBaseUrl', () => {
     expect(new S3Driver({ client, bucket: 'b' }).capabilities).toEqual({
       presign: true,
       multipart: true,
       publicUrls: false,
       list: true,
+      ranged: true,
     });
     expect(
       new S3Driver({ client, bucket: 'b', publicBaseUrl: 'https://cdn.test' }).capabilities
@@ -77,6 +78,40 @@ describe('S3Driver', () => {
       .resolves({ Body: sdkStreamMixin(Readable.from(Buffer.from('hello'))) });
     const d = new S3Driver({ client, bucket: 'b' });
     expect((await d.get('a.txt')).toString()).toBe('hello');
+  });
+
+  describe('stream ranges', () => {
+    const body = () => sdkStreamMixin(Readable.from(Buffer.from('lo w')));
+    const lastGetInput = () => mock.commandCalls(GetObjectCommand)[0]?.args[0].input;
+
+    it('sends no Range at all without one — the full-body read is unchanged', async () => {
+      mock.on(GetObjectCommand).resolves({ Body: body() });
+      await new S3Driver({ client, bucket: 'b' }).stream('a.txt');
+      expect(lastGetInput()?.Range).toBeUndefined();
+    });
+
+    it('translates a bounded range verbatim (end inclusive)', async () => {
+      mock.on(GetObjectCommand).resolves({ Body: body() });
+      await new S3Driver({ client, bucket: 'b', keyPrefix: 'up' }).stream('a.txt', {
+        start: 3,
+        end: 6,
+      });
+      expect(lastGetInput()).toMatchObject({ Bucket: 'b', Key: 'up/a.txt', Range: 'bytes=3-6' });
+    });
+
+    it('omits the end bound as the open-ended `bytes=N-` (read to EOF)', async () => {
+      mock.on(GetObjectCommand).resolves({ Body: body() });
+      await new S3Driver({ client, bucket: 'b' }).stream('a.txt', { start: 3 });
+      expect(lastGetInput()?.Range).toBe('bytes=3-');
+    });
+
+    it('still maps a missing key to FileNotFoundError on the ranged path', async () => {
+      mock.on(GetObjectCommand).rejects(notFound('NoSuchKey'));
+      const driver = new S3Driver({ client, bucket: 'b' });
+      await expect(driver.stream('missing', { start: 0, end: 9 })).rejects.toBeInstanceOf(
+        FileNotFoundError,
+      );
+    });
   });
 
   it('get maps NoSuchKey to FileNotFoundError', async () => {

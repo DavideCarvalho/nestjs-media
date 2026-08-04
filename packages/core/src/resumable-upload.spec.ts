@@ -35,7 +35,13 @@ function fakeMultipartDisk() {
   let aborted = false;
   return {
     driver: {
-      capabilities: { presign: false, multipart: true, publicUrls: false, list: false },
+      capabilities: {
+        presign: false,
+        multipart: true,
+        publicUrls: false,
+        list: false,
+        ranged: false,
+      },
       async createMultipartUpload() {
         parts = [];
         return { uploadId: 'u' };

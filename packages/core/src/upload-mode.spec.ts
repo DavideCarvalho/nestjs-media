@@ -3,12 +3,19 @@ import { UnsupportedOperationError } from './errors';
 import type { DriverCapabilities } from './types';
 import { resolveUploadMode } from './upload-mode';
 
-const s3Caps: DriverCapabilities = { presign: true, multipart: true, publicUrls: true, list: true };
+const s3Caps: DriverCapabilities = {
+  presign: true,
+  multipart: true,
+  publicUrls: true,
+  list: true,
+  ranged: true,
+};
 const localCaps: DriverCapabilities = {
   presign: false,
   multipart: false,
   publicUrls: false,
   list: true,
+  ranged: true,
 };
 
 describe('resolveUploadMode', () => {

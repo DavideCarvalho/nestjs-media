@@ -18,6 +18,7 @@ import {
   type ListOptions,
   type ListResult,
   type PutOptions,
+  type ReadRangeOptions,
   type StatResult,
   type StorageDriver,
   UnsupportedOperationError,
@@ -64,6 +65,7 @@ export class LocalDriver implements StorageDriver {
       multipart: false,
       publicUrls: !!options.baseUrl,
       list: true,
+      ranged: true,
     };
   }
 
@@ -87,9 +89,17 @@ export class LocalDriver implements StorageDriver {
     }
   }
 
-  async stream(path: string): Promise<Readable> {
+  async stream(path: string, range?: ReadRangeOptions): Promise<Readable> {
     if (!(await this.exists(path))) throw new FileNotFoundError(path);
-    return createReadStream(this.abs(path));
+    // Node's `end` is INCLUSIVE, exactly like HTTP `Range` (and unlike every slice API next to it),
+    // so `ReadRangeOptions` passes straight through with no ±1. `end` is omitted rather than passed
+    // as `undefined` because `exactOptionalPropertyTypes` distinguishes the two; either way the
+    // stream runs to EOF. A range overrunning the file simply stops at EOF — no throw.
+    if (!range) return createReadStream(this.abs(path));
+    return createReadStream(this.abs(path), {
+      start: range.start,
+      ...(range.end !== undefined ? { end: range.end } : {}),
+    });
   }
 
   async exists(path: string): Promise<boolean> {

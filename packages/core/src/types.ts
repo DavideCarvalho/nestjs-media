@@ -46,6 +46,28 @@ export interface DriverCapabilities {
   publicUrls: boolean;
   /** Can enumerate keys under a prefix (list). */
   list: boolean;
+  /**
+   * Can serve a byte range of an object without transferring the whole thing
+   * (`stream(path, range)`).
+   *
+   * Required rather than optional ON PURPOSE. A third-party driver that silently ignored the
+   * `range` argument would hand back the entire object where the caller asked for a slice — a
+   * reader paging 4 KB out of a 400 MB database would pull all 400 MB and never notice it was
+   * "working". Making the field required turns that into a compile error the driver author has to
+   * answer, which is the only point at which anyone can answer it.
+   */
+  ranged: boolean;
+}
+
+/**
+ * A byte range to read out of an object, in HTTP `Range` semantics (both bounds inclusive) so it
+ * maps 1:1 onto the header it usually comes from and onto S3's `Range` / Node's `createReadStream`.
+ */
+export interface ReadRangeOptions {
+  /** First byte to read, inclusive. */
+  start: number;
+  /** Last byte to read, INCLUSIVE (HTTP `Range` semantics). Omit to read to EOF. */
+  end?: number;
 }
 
 export interface MultipartPart {
@@ -91,7 +113,9 @@ export interface StorageDriver {
   readonly capabilities: DriverCapabilities;
   put(path: string, contents: Buffer | Readable, options?: PutOptions): Promise<void>;
   get(path: string): Promise<Buffer>;
-  stream(path: string): Promise<Readable>;
+  /** The object's bytes as a stream. With `range`, only that slice — gated by
+   *  {@link DriverCapabilities.ranged}; a driver that advertises `ranged: false` may ignore it. */
+  stream(path: string, range?: ReadRangeOptions): Promise<Readable>;
   exists(path: string): Promise<boolean>;
   delete(path: string): Promise<void>;
   copy(from: string, to: string): Promise<void>;

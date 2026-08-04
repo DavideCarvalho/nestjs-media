@@ -23,7 +23,7 @@ new S3Driver({
 ## Capabilities
 
 ```ts
-{ presign: true, multipart: true, publicUrls: !!publicBaseUrl, list: true }
+{ presign: true, multipart: true, publicUrls: !!publicBaseUrl, list: true, ranged: true }
 ```
 
 - `temporaryUrl(path, ttl)` returns a signed GET URL (via `@aws-sdk/s3-request-presigner`).
