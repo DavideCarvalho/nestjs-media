@@ -1,0 +1,33 @@
+---
+title: Overview
+icon: ChefHat
+description: Task-shaped walkthroughs — the common media jobs (avatars, galleries, browser uploads, serving, multi-disk) and the extension points (custom driver, custom store, testing).
+---
+
+The [concepts](/docs/concepts/two-layers) pages explain the model; these are the jobs people
+actually sit down to do. Each one is self-contained — start from the closest match and adapt.
+
+## Common jobs
+
+| Recipe | What it covers |
+|---|---|
+| [Single-file avatar](/docs/recipes/avatar) | one file per owner, replacing the previous one, with a cropped variant |
+| [Gallery with thumbnails](/docs/recipes/gallery) | an ordered collection, reordering, and lazy thumbnails |
+| [Resumable uploads from the browser](/docs/recipes/direct-s3-upload) | tus and presigned direct-to-S3, and when each is the right one |
+| [Serving files](/docs/recipes/serving-files) | public URLs, signed URLs, and streaming through your own controller |
+| [Multiple disks](/docs/recipes/multi-disk) | routing collections at different backends, and moving files between them |
+
+## Without the media library
+
+| Recipe | What it covers |
+|---|---|
+| [Raw storage (no entities)](/docs/recipes/raw-storage) | a disk and nothing else — generated reports, caches, scratch files |
+| [Consuming storage from another library](/docs/recipes/mail-attachments) | the `/storage` subpath, for a library that just needs a filesystem |
+
+## Extending it
+
+| Recipe | What it covers |
+|---|---|
+| [Writing a custom disk driver](/docs/recipes/custom-driver) | the `StorageDriver` SPI, capabilities, and the conformance suite |
+| [Writing a custom store](/docs/recipes/custom-store) | the `MediaStore` SPI, plus the optional query methods the dashboard needs |
+| [Testing your media code](/docs/recipes/testing) | the in-memory driver/store and the conformance suites |

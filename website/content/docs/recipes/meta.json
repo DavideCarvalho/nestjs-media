@@ -2,6 +2,7 @@
   "title": "Recipes",
   "icon": "ChefHat",
   "pages": [
+    "index",
     "avatar",
     "gallery",
     "direct-s3-upload",
