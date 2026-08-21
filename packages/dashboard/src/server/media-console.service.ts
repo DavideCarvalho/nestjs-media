@@ -39,15 +39,18 @@ import type {
   ObjectInsightsResponse,
 } from './object-insights.js';
 import { sanitizeInsight } from './object-insights.js';
+import type { ObjectUrlConfig } from './object-urls.js';
+import { objectProxyUrl } from './object-urls.js';
 import {
   MEDIA_CONSOLE_OBJECT_INSIGHTS,
+  MEDIA_CONSOLE_OBJECT_URLS,
   MEDIA_DASHBOARD_ACTIONS,
   MEDIA_STORAGE_SHARED,
   MEDIA_STORE,
   MEDIA_UPLOAD_SESSIONS,
 } from './tokens.js';
 
-/** Seconds a generated preview/download URL stays valid. */
+/** Seconds a presigned object URL stays valid. */
 const URL_TTL_SECONDS = 300;
 const DEFAULT_PAGE_LIMIT = 50;
 /** Ceiling for a console (direct) upload — buffered in memory, so bounded to protect the heap. */
@@ -186,7 +189,26 @@ export class MediaConsoleService {
     @Optional()
     @Inject(MEDIA_CONSOLE_OBJECT_INSIGHTS)
     private readonly insightProviders: ObjectInsightProvider[] | null = null,
+    // Strategy and mount path travel as ONE value: a strategy without the path it needs would be a
+    // half-configured state that builds `/disks/...` URLs rooted at nothing. `null` means `auto`.
+    @Optional()
+    @Inject(MEDIA_CONSOLE_OBJECT_URLS)
+    private readonly objectUrls: ObjectUrlConfig | null = null,
   ) {}
+
+  /**
+   * The URL to report for an object's bytes, under the host's {@link ObjectUrlStrategy}. `auto`
+   * prefers a presigned URL straight to the store; `proxy` routes through this server, for a host
+   * whose browser cannot reach the store at all.
+   */
+  private objectUrl(driver: StorageDriver, disk: string, key: string): Promise<string> {
+    if (this.objectUrls?.strategy === 'proxy') {
+      return Promise.resolve(objectProxyUrl(this.objectUrls.apiBasePath, 'raw', disk, key));
+    }
+    return driver.capabilities.presign
+      ? driver.temporaryUrl(key, URL_TTL_SECONDS)
+      : driver.url(key);
+  }
 
   private readonly logger = new Logger(MediaConsoleService.name);
 
@@ -246,9 +268,7 @@ export class MediaConsoleService {
   async objectDetail(disk: string, key: string): Promise<ObjectDetailResponse> {
     const driver = this.diskOrThrow(disk);
     const stat = await driver.stat(key);
-    const url = driver.capabilities.presign
-      ? await driver.temporaryUrl(key, URL_TTL_SECONDS)
-      : await driver.url(key);
+    const url = await this.objectUrl(driver, disk, key);
     return {
       key,
       size: stat.size,
@@ -567,10 +587,10 @@ export class MediaConsoleService {
         const driver = this.storage?.diskNames().includes(conversion.disk)
           ? this.storage.disk(conversion.disk)
           : null;
-        const url = driver?.capabilities.presign
-          ? await driver.temporaryUrl(conversion.path, URL_TTL_SECONDS)
-          : ((await driver?.url(conversion.path)) ?? '');
-        return { name, url };
+        const url = driver ? await this.objectUrl(driver, conversion.disk, conversion.path) : '';
+        // `disk`/`path` ride along so the UI can reach the object routes (download, and a proxied
+        // read) for a variant — `url` alone is opaque, and under `auto` points off this origin.
+        return { name, url, disk: conversion.disk, path: conversion.path };
       }),
     );
     return { record: mapRecord(record), variants };

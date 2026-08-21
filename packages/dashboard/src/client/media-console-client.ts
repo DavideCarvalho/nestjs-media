@@ -127,6 +127,12 @@ export const mediaConsoleClient = {
    *  embed previews that a cross-origin signed URL would download (PDFs) or that CORS would block. */
   objectRawUrl: (disk: string, key: string): string =>
     `${apiBase()}${withQuery(`/disks/${encodeURIComponent(disk)}/object/raw`, { key })}`,
+  /** Same-origin URL that streams the object as a SAVE (Content-Disposition: attachment, named
+   *  after the key). A URL rather than a fetch on purpose: the download has to be a real navigation
+   *  so the browser owns the save dialog and the progress — pulling the bytes through `fetch` would
+   *  buffer the whole object in the tab first, which is exactly wrong for the large ones. */
+  objectDownloadUrl: (disk: string, key: string): string =>
+    `${apiBase()}${withQuery(`/disks/${encodeURIComponent(disk)}/object/download`, { key })}`,
   /** Read up to `maxBytes` of an object as text through the inline proxy, aborting the stream once the
    *  budget is reached — so a many-MB CSV/text file is *sampled* (its head) without downloading the
    *  whole thing. Returns the decoded text and the bytes actually read (compare to the object's size

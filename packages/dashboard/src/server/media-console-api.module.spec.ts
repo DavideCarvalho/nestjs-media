@@ -10,6 +10,7 @@ const base = {
   // JSON API even when a host mounts them at unrelated paths. See media-console-cookie-scope.spec.
   cookiePath: '/',
   authProvider: { provide: MEDIA_CONSOLE_AUTH, useValue: null },
+  objectUrls: { strategy: 'auto' as const, apiBasePath: '/api/media' },
 };
 
 describe('MediaConsoleApiModule.register', () => {

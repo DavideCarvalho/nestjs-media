@@ -108,8 +108,8 @@ export function Lightbox({
         <DialogBackdrop />
         <DialogPopup
           ref={popupRef}
-          // Focus the panel itself, not the first tabbable thing in it — that is the "Open ↗" link,
-          // and opening a preview should not leave Enter armed to launch a new tab.
+          // Focus the panel itself, not the first tabbable thing in it — that is the "Download"
+          // link, and opening a preview should not leave Enter armed to save a file.
           initialFocus={popupRef}
           className="h-[86vh] max-h-[calc(100vh-3rem)] max-w-5xl"
         >
@@ -127,6 +127,19 @@ export function Lightbox({
                 )}
               </div>
             </div>
+            <Button
+              tone="ghost"
+              className="shrink-0"
+              render={
+                // biome-ignore lint/a11y/useAnchorContent: Base UI's `render` prop clones this element with the Button's children; the link is not empty at runtime
+                <a
+                  href={mediaConsoleClient.objectDownloadUrl(item.disk, item.key)}
+                  download={item.name}
+                />
+              }
+            >
+              Download
+            </Button>
             <Button
               tone="ghost"
               className="shrink-0"

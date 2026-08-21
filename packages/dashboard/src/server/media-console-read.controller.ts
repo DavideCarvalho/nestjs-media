@@ -20,6 +20,7 @@ import type {
   UploadDetailResponse,
   UploadListResponse,
 } from '../client/types.js';
+import { attachmentDisposition, downloadFilename } from './content-disposition.js';
 import { MediaConsoleGuard } from './media-console.guard.js';
 import {
   MediaConsoleService,
@@ -141,18 +142,59 @@ export class MediaConsoleReadController {
   /**
    * Streams the object's bytes inline (Content-Disposition: inline) from the same origin, so the SPA
    * can render text/PDF previews the browser would otherwise download, and read text past CORS.
-   *
-   * Honours a single-range `Range` header, which is what lets a reader pull a few KB out of a
-   * multi-hundred-MB object (a SQLite page, a ZIP's central directory) instead of the whole file.
-   * With no `Range` the response is byte-for-byte what it always was — a plain 200 full body, which
-   * the PDF/text/spreadsheet previews depend on.
    */
   @Get('disks/:disk/object/raw')
-  async objectRaw(
+  objectRaw(
     @Param('disk') disk: string,
     @Query('key') key: string,
     @Headers('range') rangeHeader: string | undefined,
     @Res({ passthrough: true }) response: ConsoleHttpResponse,
+  ): Promise<StreamableFile> {
+    return this.streamObject(disk, key, rangeHeader, response, 'inline');
+  }
+
+  /**
+   * The same bytes as `/raw`, but as a SAVE rather than a render: `Content-Disposition: attachment`
+   * with the object's own name on it.
+   *
+   * Its own route rather than a flag on `/raw` because `/raw` is load-bearing for every preview —
+   * they depend on `inline`, and a disposition that varied by query param would be one wrong link
+   * away from a PDF preview turning into a download.
+   *
+   * Same-origin and unconditional, deliberately: this is the console's own action, so it must work
+   * on a host whose browser cannot reach the object store at all (no route to S3, no CORS grant).
+   * That is exactly where `objectDetail`'s presigned `url` — a link to share, not a way to fetch —
+   * is useless. See the `objectUrls` option.
+   */
+  @Get('disks/:disk/object/download')
+  objectDownload(
+    @Param('disk') disk: string,
+    @Query('key') key: string,
+    @Headers('range') rangeHeader: string | undefined,
+    @Res({ passthrough: true }) response: ConsoleHttpResponse,
+  ): Promise<StreamableFile> {
+    return this.streamObject(
+      disk,
+      key,
+      rangeHeader,
+      response,
+      attachmentDisposition(downloadFilename(key ?? '')),
+    );
+  }
+
+  /**
+   * Stream an object under the given `Content-Disposition`, honouring a single-range `Range` header
+   * — which is what lets a reader pull a few KB out of a multi-hundred-MB object (a SQLite page, a
+   * ZIP's central directory) instead of the whole file, and what lets a browser resume an
+   * interrupted download of one. With no `Range` the response is a plain 200 full body, which the
+   * PDF/text/spreadsheet previews depend on.
+   */
+  private async streamObject(
+    disk: string,
+    key: string,
+    rangeHeader: string | undefined,
+    response: ConsoleHttpResponse,
+    disposition: string,
   ): Promise<StreamableFile> {
     const requested = parseRangeHeader(rangeHeader);
     // On EVERY response, 200 included: `Accept-Ranges` is how a client discovers that ranged reads
@@ -176,7 +218,7 @@ export class MediaConsoleReadController {
     if (!range) {
       return new StreamableFile(stream, {
         type: contentType,
-        disposition: 'inline',
+        disposition,
         ...(Number.isFinite(size) ? { length: size } : {}),
       });
     }
@@ -185,7 +227,7 @@ export class MediaConsoleReadController {
     // Content-Length is the SLICE's length, not the object's — inclusive bounds, hence the +1.
     return new StreamableFile(stream, {
       type: contentType,
-      disposition: 'inline',
+      disposition,
       length: range.end - range.start + 1,
     });
   }

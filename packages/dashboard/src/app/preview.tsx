@@ -209,8 +209,8 @@ const LIBRARY: LibraryListResponse = {
 const LIBRARY_DETAIL: LibraryDetailResponse = {
   record: LIBRARY.records[0] as LibraryListResponse['records'][number],
   variants: [
-    { name: 'original', url: SAMPLE_IMAGE },
-    { name: 'thumb', url: SAMPLE_IMAGE },
+    { name: 'original', url: SAMPLE_IMAGE, disk: 'public', path: 'posters/77/hero.webp' },
+    { name: 'thumb', url: SAMPLE_IMAGE, disk: 'public', path: 'thumbnails/77/hero.webp' },
   ],
 };
 

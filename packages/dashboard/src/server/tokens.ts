@@ -25,3 +25,7 @@ export const MEDIA_CONSOLE_COOKIE_PATH: symbol = Symbol('MEDIA_CONSOLE_COOKIE_PA
 
 /** Carries the host's `ObjectInsightProvider[]` (`options.objectInsights`) to the console service. */
 export const MEDIA_CONSOLE_OBJECT_INSIGHTS: symbol = Symbol('MEDIA_CONSOLE_OBJECT_INSIGHTS');
+
+/** Carries the resolved `ObjectUrlConfig` (`options.objectUrls` + the API mount) to the console
+ *  service, which decides from it whether an object's `url` is presigned or same-origin. */
+export const MEDIA_CONSOLE_OBJECT_URLS: symbol = Symbol('MEDIA_CONSOLE_OBJECT_URLS');

@@ -146,3 +146,85 @@ describe('GET disks/:disk/object/raw — Range handling (mounted)', () => {
     }
   });
 });
+
+describe('GET disks/:disk/object/download — saving a file (mounted)', () => {
+  let base: string;
+  let app: Awaited<ReturnType<typeof NestFactory.create>>;
+
+  beforeAll(async () => {
+    app = await NestFactory.create(AppModule, { logger: false });
+    await app.listen(0);
+    base = `${await app.getUrl()}/api/media/disks/primary/object/download`;
+  });
+
+  afterAll(async () => {
+    await app.close();
+  });
+
+  const download = (key: string, range?: string) =>
+    fetch(
+      `${base}?key=${encodeURIComponent(key)}`,
+      range === undefined ? {} : { headers: { Range: range } },
+    );
+
+  it('serves the same bytes as /raw, but as an attachment named after the key', async () => {
+    const response = await download('reports/2026/q1.csv');
+    expect(response.status).toBe(200);
+    expect(await response.text()).toBe(CONTENT);
+    expect(response.headers.get('content-length')).toBe(String(CONTENT.length));
+    // The name is the key's LAST segment — a browser must not be asked to save `reports/2026/q1.csv`.
+    expect(response.headers.get('content-disposition')).toBe(
+      `attachment; filename="q1.csv"; filename*=UTF-8''q1.csv`,
+    );
+  });
+
+  it('carries a non-ASCII name in filename* with an ASCII fallback beside it', async () => {
+    const response = await download('relatório.csv');
+    expect(response.headers.get('content-disposition')).toBe(
+      `attachment; filename="relatrio.csv"; filename*=UTF-8''relat%C3%B3rio.csv`,
+    );
+  });
+
+  it('names the fallback when the key names no file', async () => {
+    const response = await download('reports/2026/');
+    expect(response.headers.get('content-disposition')).toBe(
+      `attachment; filename="download"; filename*=UTF-8''download`,
+    );
+  });
+
+  it('resumes: a Range on a download is answered 206 with the slice', async () => {
+    const response = await download('q1.csv', 'bytes=4-6');
+    expect(response.status).toBe(206);
+    expect(await response.text()).toBe('efg');
+    expect(response.headers.get('content-range')).toBe('bytes 4-6/10');
+    expect(response.headers.get('accept-ranges')).toBe('bytes');
+    // The disposition survives the partial response — otherwise a resumed download renders inline.
+    expect(response.headers.get('content-disposition')).toBe(
+      `attachment; filename="q1.csv"; filename*=UTF-8''q1.csv`,
+    );
+  });
+
+  it('reads back the form encoding the client actually sends', async () => {
+    // The client builds its query with `URLSearchParams`, which writes a space as `+`, not `%20`.
+    // If the server read that literally the saved file would be named `q1+final.csv`.
+    const response = await fetch(`${base}?key=reports%2Fq1+final.csv`);
+    expect(response.status).toBe(200);
+    expect(response.headers.get('content-disposition')).toBe(
+      `attachment; filename="q1 final.csv"; filename*=UTF-8''q1%20final.csv`,
+    );
+  });
+
+  it('404s an unknown disk instead of streaming from nowhere', async () => {
+    const response = await fetch(
+      `${await app.getUrl()}/api/media/disks/nope/object/download?key=a.txt`,
+    );
+    expect(response.status).toBe(404);
+  });
+
+  it('leaves /raw inline — the previews depend on it', async () => {
+    const response = await fetch(
+      `${await app.getUrl()}/api/media/disks/primary/object/raw?key=q1.csv`,
+    );
+    expect(response.headers.get('content-disposition')).toBe('inline');
+  });
+});

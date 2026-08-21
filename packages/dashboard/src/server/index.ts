@@ -4,6 +4,7 @@ export {
   type MediaDashboardAsyncOptions,
 } from './media-dashboard.module.js';
 export { MediaConsoleApiModule } from './media-console-api.module.js';
+export type { ObjectUrlConfig, ObjectUrlStrategy } from './object-urls.js';
 export { MediaConsoleService } from './media-console.service.js';
 export type {
   ConsoleAuthOptions,
