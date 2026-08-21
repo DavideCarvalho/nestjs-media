@@ -36,6 +36,7 @@ interface MediaDashboardOptions {
   guards?: Array<Type<CanActivate> | CanActivate>; // bring-your-own guard(s)
   imports?: DynamicModule['imports'];        // DI resolution path for `guards`
   objectInsights?: ObjectInsightProvider[];  // host context shown in the preview
+  objectUrls?: 'auto' | 'proxy';             // presigned store URLs, or same-origin — default 'auto'
 }
 ```
 
@@ -47,6 +48,7 @@ interface MediaDashboardOptions {
 | `auth` | Telescope-style built-in session-cookie login — see below. |
 | `guards` / `imports` | Front the console with your own `CanActivate`(s) instead of, or alongside, `auth` — see [Securing the console](#securing-the-console-with-your-own-guards). |
 | `objectInsights` | Annotate an object in the preview with what *your app* knows about it — see [Object insights](#object-insights). |
+| `objectUrls` | Whether an object's reported `url` is presigned straight to the store or routed through this server — see [Reaching an object's bytes](#reaching-an-objects-bytes). |
 
 `MediaDashboardModule.forRootAsync(options)` mirrors this, resolving `auth` through an injected `useAuth(...deps)` factory (for hooks that need your DB/services). `guards` and the mount paths stay static fields on the async options object — guard stamping happens at module-build time, before any factory runs.
 
@@ -300,6 +302,7 @@ The response shapes are exported as types — see [the client subpath](#the-type
 | `GET disks/:disk/objects` | `prefix?`, `cursor?`, `limit?` | `ObjectListResponse` |
 | `GET disks/:disk/object` | `key` | `ObjectDetailResponse` |
 | `GET disks/:disk/object/raw` | `key` | raw bytes, `Content-Disposition: inline` |
+| `GET disks/:disk/object/download` | `key` | raw bytes, `Content-Disposition: attachment` |
 | `GET disks/:disk/object/insights` | `key` | `ObjectInsightsResponse` |
 | `GET uploads` | `disk?`, `prefix?` | `UploadListResponse` |
 | `GET uploads/:id` | — | `UploadDetailResponse` |
@@ -326,6 +329,36 @@ Present only with `actions: true`. All return `204 No Content`. On copy/move rou
 | `DELETE library/:id` | — |
 
 The folder routes are covered in depth on the [Folders](/docs/concepts/folders#dashboard-rest-folder-routes) page.
+
+## Reaching an object's bytes
+
+There are two ways the console gets at a file, and they answer different questions.
+
+**Downloading** — the `Download` button on a file row, in the preview header, and on a library record
+— always goes through `GET disks/:disk/object/download`, this server's own same-origin route. It
+answers with `Content-Disposition: attachment` named after the key's last segment (in both RFC 6266
+forms, so a non-ASCII name survives), and it honours `Range`, so an interrupted download of a large
+object resumes rather than restarting. It is a read: it needs no `actions: true`.
+
+Being same-origin is the point. Saving a file is the console's own action, so it has to work on a
+host whose browser cannot reach the object store at all — no network route to the bucket, no CORS
+grant, or a policy against client-to-store traffic.
+
+**Opening** — the `Open ↗` link, and an image variant's `src` — uses the `url` reported by
+`GET disks/:disk/object` and `GET library/:id`. That one is configurable:
+
+```ts
+MediaDashboardModule.forRoot({
+  objectUrls: 'proxy', // default: 'auto'
+})
+```
+
+| Value | `url` is | Use it when |
+|---|---|---|
+| `auto` (default) | a presigned, expiring URL straight to the store (5 min), or the driver's plain URL when it cannot presign | the browser can reach the store. The URL survives a copy-paste out of the console and needs nothing from this server. |
+| `proxy` | the console's own `object/raw` route, same-origin | the browser cannot reach the store. The trade: the URL only means anything to a session that can reach this server, and every byte travels through it. |
+
+`objectUrls` does not affect downloading — that route is same-origin either way.
 
 ## The typed browser client (`/client` subpath)
 

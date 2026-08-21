@@ -49,3 +49,19 @@ describe('mediaConsoleClient.objectRange', () => {
     );
   });
 });
+
+describe('mediaConsoleClient.objectDownloadUrl', () => {
+  it('points at the download route, with the disk and key encoded', () => {
+    const url = mediaConsoleClient.objectDownloadUrl('primary', 'reports/2026/q1 final.csv');
+    // `+` for the space is `URLSearchParams`' form encoding, which the server's query parser reads
+    // back as a space — the same encoding every other client method already relies on.
+    expect(url).toContain('/disks/primary/object/download?key=reports%2F2026%2Fq1+final.csv');
+  });
+
+  it('is the download twin of objectRawUrl — same object, different disposition', () => {
+    const key = 'db/app.sqlite';
+    expect(mediaConsoleClient.objectDownloadUrl('primary', key)).toBe(
+      mediaConsoleClient.objectRawUrl('primary', key).replace('/object/raw?', '/object/download?'),
+    );
+  });
+});

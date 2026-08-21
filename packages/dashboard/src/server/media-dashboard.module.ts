@@ -14,6 +14,7 @@ import { isGuardClass, stampGuards } from './guards.js';
 import { MediaConsoleApiModule } from './media-console-api.module.js';
 import { MediaDashboardUiController } from './media-dashboard-ui.controller.js';
 import type { ObjectInsightProvider } from './object-insights.js';
+import type { ObjectUrlStrategy } from './object-urls.js';
 import {
   MEDIA_CONSOLE_AUTH,
   MEDIA_CONSOLE_OBJECT_INSIGHTS,
@@ -38,6 +39,16 @@ export interface MediaDashboardOptions {
    * `false` — the read API is always available. Front the mount with your own guard either way.
    */
   actions?: boolean;
+  /**
+   * How the console reports the `url` for an object's bytes — the "Open ↗" link, and an image
+   * variant's `src`. Default `'auto'`: presigned straight to the object store when the driver can
+   * mint one. Set `'proxy'` when the browser has no path to the store (no network route, no CORS
+   * grant, a policy against client-to-bucket traffic), and those URLs are routed same-origin
+   * through this server instead. See {@link ObjectUrlStrategy}.
+   *
+   * Downloading is unaffected: `disks/:disk/object/download` is always same-origin.
+   */
+  objectUrls?: ObjectUrlStrategy;
   /**
    * Gate the console (SPA + API) behind a built-in session-cookie login, telescope-style. Omit to
    * leave the console open (front it with your own guard). When set, the SPA renders a login screen
@@ -95,6 +106,9 @@ export interface MediaDashboardAsyncOptions {
   basePath?: string;
   apiBasePath?: string;
   actions?: boolean;
+  /** See {@link MediaDashboardOptions.objectUrls}. Static like the mount paths and `actions` —
+   *  it is read at module-definition time, not per request. */
+  objectUrls?: ObjectUrlStrategy;
   /** Modules exporting the providers `inject` needs, or a guard class's own dependencies (omit
    *  when they're global). Shared with {@link guards}. */
   imports?: DynamicModule['imports'];
@@ -185,6 +199,7 @@ export class MediaDashboardModule {
       basePath?: string;
       apiBasePath?: string;
       actions?: boolean;
+      objectUrls?: ObjectUrlStrategy;
       guards?: Array<Type<CanActivate> | CanActivate>;
     },
     apiBasePath: string,
@@ -204,6 +219,7 @@ export class MediaDashboardModule {
         ...(imports ?? []),
         MediaConsoleApiModule.register({
           actions,
+          objectUrls: { strategy: options.objectUrls ?? 'auto', apiBasePath },
           // `Path=/`, deliberately NOT scoped to `apiBasePath` (nor to `basePath`): the two mounts
           // are independently configurable and can live at unrelated paths (e.g. a `/media` UI
           // with a `/api/media/console` API). Scoped to the API base, the browser withheld the

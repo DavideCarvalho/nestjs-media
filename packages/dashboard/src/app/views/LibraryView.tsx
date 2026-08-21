@@ -15,6 +15,11 @@ function isImage(mimeType: string): boolean {
   return mimeType.startsWith('image/');
 }
 
+/** The file name inside a storage path — what a variant is called once saved. */
+function lastSegment(path: string): string {
+  return path.split('/').pop() || path;
+}
+
 function CollectionsBar({
   collections,
   selected,
@@ -151,12 +156,28 @@ function RecordDetail({ route }: { route: Route }): JSX.Element {
               </DetailRow>
               <DetailRow label="Created">{formatDate(detail.record.createdAt)}</DetailRow>
             </dl>
-            <div className="mt-4">
+            <div className="mt-4 flex flex-wrap gap-1.5">
+              <Button
+                // The record's original IS a disk object, so it saves through the same object route
+                // every file in the Disks view uses — the library needs no download path of its own.
+                render={
+                  // biome-ignore lint/a11y/useAnchorContent: Base UI's `render` prop clones this element with the Button's children; the link is not empty at runtime
+                  <a
+                    href={mediaConsoleClient.objectDownloadUrl(
+                      detail.record.disk,
+                      detail.record.path,
+                    )}
+                    download={detail.record.fileName}
+                  />
+                }
+              >
+                Download
+              </Button>
               <Button tone="destructive" onClick={handleDelete}>
                 Delete
               </Button>
-              {deleteError && <p className="mt-2 text-xs s-error">{deleteError}</p>}
             </div>
+            {deleteError && <p className="mt-2 text-xs s-error">{deleteError}</p>}
           </Panel>
 
           <h4 className="mono mb-2 mt-4 text-[10px] uppercase tracking-wider text-zinc-600">
@@ -174,13 +195,23 @@ function RecordDetail({ route }: { route: Route }): JSX.Element {
                   <div className="mono mb-1.5 text-[10px] uppercase tracking-wider text-zinc-500">
                     {variant.name}
                   </div>
-                  {isImage(detail.record.mimeType) ? (
+                  {isImage(detail.record.mimeType) && (
                     <img
                       src={variant.url}
                       alt={variant.name}
-                      className="max-h-40 rounded border border-border"
+                      className="mb-1.5 max-h-40 rounded border border-border"
                     />
-                  ) : (
+                  )}
+                  <div className="flex items-center gap-2">
+                    {variant.disk !== '' && (
+                      <a
+                        href={mediaConsoleClient.objectDownloadUrl(variant.disk, variant.path)}
+                        download={lastSegment(variant.path)}
+                        className="text-accent hover:text-accent"
+                      >
+                        Download
+                      </a>
+                    )}
                     <a
                       href={variant.url}
                       target="_blank"
@@ -189,7 +220,7 @@ function RecordDetail({ route }: { route: Route }): JSX.Element {
                     >
                       Open ↗
                     </a>
-                  )}
+                  </div>
                 </div>
               ))}
             </div>

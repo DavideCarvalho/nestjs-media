@@ -12,10 +12,12 @@ import { MediaConsoleAuthController } from './media-console-auth.controller.js';
 import { MediaConsoleReadController } from './media-console-read.controller.js';
 import { MediaConsoleGuard } from './media-console.guard.js';
 import { MediaConsoleService } from './media-console.service.js';
+import type { ObjectUrlConfig } from './object-urls.js';
 import {
   MEDIA_CONSOLE_AUTH,
   MEDIA_CONSOLE_COOKIE_PATH,
   MEDIA_CONSOLE_OBJECT_INSIGHTS,
+  MEDIA_CONSOLE_OBJECT_URLS,
   MEDIA_DASHBOARD_ACTIONS,
 } from './tokens.js';
 
@@ -36,6 +38,8 @@ interface ApiModuleOptions {
   /** Provider for `MEDIA_CONSOLE_OBJECT_INSIGHTS` — the host's object-annotation providers.
    *  Omitted binds the empty list, which is the no-op the console renders nothing for. */
   insightsProvider?: Provider;
+  /** Resolved object-URL strategy + the API mount it builds proxy URLs against. */
+  objectUrls: ObjectUrlConfig;
   /** Extra imports the auth factory's `inject` deps (or a guard class's own deps) live in. */
   imports?: ModuleMetadata['imports'];
   /**
@@ -76,6 +80,7 @@ export class MediaConsoleApiModule {
         MediaConsoleGuard,
         { provide: MEDIA_DASHBOARD_ACTIONS, useValue: options.actions },
         { provide: MEDIA_CONSOLE_COOKIE_PATH, useValue: options.cookiePath },
+        { provide: MEDIA_CONSOLE_OBJECT_URLS, useValue: options.objectUrls },
         options.authProvider,
         options.insightsProvider ?? {
           provide: MEDIA_CONSOLE_OBJECT_INSIGHTS,

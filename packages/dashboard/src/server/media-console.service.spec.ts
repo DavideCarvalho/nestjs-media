@@ -493,3 +493,59 @@ describe('MediaConsoleService.objectStream ranges', () => {
     expect((await service.objectStream('primary', 'a.txt')).range).toBeUndefined();
   });
 });
+
+/** A storage manager whose driver records how it was asked for a URL, so a test can tell a
+ *  presigned URL apart from one the console built itself. */
+function urlStorage(options: { presign: boolean }): StorageManager {
+  const driver = {
+    capabilities: { presign: options.presign, multipart: true, publicUrls: false, list: true },
+    stat: async () => ({ size: 3, contentType: 'text/plain' }),
+    temporaryUrl: async (key: string, ttl: number) => `https://store.example/${key}?expires=${ttl}`,
+    url: async (key: string) => `https://store.example/${key}`,
+  };
+  return {
+    defaultDisk: 'primary',
+    diskNames: () => ['primary'],
+    disk: () => driver,
+  } as unknown as StorageManager;
+}
+
+describe('MediaConsoleService — objectUrls', () => {
+  it('presigns by default, and when the host asks for auto', async () => {
+    for (const config of [null, { strategy: 'auto' as const, apiBasePath: '/api/media' }]) {
+      const service = new MediaConsoleService(
+        urlStorage({ presign: true }),
+        null,
+        null,
+        false,
+        null,
+        config,
+      );
+      const detail = await service.objectDetail('primary', 'reports/q1.csv');
+      expect(detail.url).toBe('https://store.example/reports/q1.csv?expires=300');
+    }
+  });
+
+  it('falls back to the driver plain URL under auto when it cannot presign', async () => {
+    const service = new MediaConsoleService(urlStorage({ presign: false }), null, null, false);
+    const detail = await service.objectDetail('primary', 'reports/q1.csv');
+    expect(detail.url).toBe('https://store.example/reports/q1.csv');
+  });
+
+  it('routes through this server under proxy, never touching the store', async () => {
+    const service = new MediaConsoleService(
+      urlStorage({ presign: true }),
+      null,
+      null,
+      false,
+      null,
+      { strategy: 'proxy', apiBasePath: '/api/media/console' },
+    );
+    const detail = await service.objectDetail('primary', 'reports/q1 final.csv');
+    // Same-origin, rooted at the API mount, and the key survives a space intact.
+    expect(detail.url).toBe(
+      '/api/media/console/disks/primary/object/raw?key=reports%2Fq1%20final.csv',
+    );
+    expect(detail.url).not.toContain('store.example');
+  });
+});

@@ -114,6 +114,12 @@ export interface LibraryListResponse {
 export interface LibraryVariant {
   name: string;
   url: string;
+  /** Where the variant actually lives, so the UI can reach the console's own object routes for it
+   *  (download, proxied read) — `url` alone is opaque, and under `objectUrls: 'auto'` points at the
+   *  object store rather than at this server. Empty when the record names a disk that is no longer
+   *  registered, which is the same case `url` reports as `''`. */
+  disk: string;
+  path: string;
 }
 
 export interface LibraryDetailResponse {

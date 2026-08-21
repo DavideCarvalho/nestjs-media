@@ -954,6 +954,24 @@ export function DisksView({ route, actions }: { route: Route; actions: boolean }
                             >
                               Preview
                             </Button>
+                            <Button
+                              // Not behind `actions`: saving a copy reads the object, and the read
+                              // API is always mounted. Rendered as a link, not an onClick — the
+                              // browser has to own the navigation for the save dialog and the
+                              // progress bar to be its own.
+                              render={
+                                // biome-ignore lint/a11y/useAnchorContent: Base UI's `render` prop clones this element with the Button's children; the link is not empty at runtime
+                                <a
+                                  href={mediaConsoleClient.objectDownloadUrl(
+                                    selectedDisk,
+                                    file.key,
+                                  )}
+                                  download={file.name}
+                                />
+                              }
+                            >
+                              Download
+                            </Button>
                             <Button onClick={() => handleCopyKey(file.key)}>Copy key</Button>
                             {actions && (
                               <>
