@@ -1,10 +1,12 @@
 import type { MediaRecord } from '@dudousxd/nestjs-media-core';
 import { EntitySchema } from '@mikro-orm/core';
+import { MediaRepository } from './media.repository';
 
 /** MikroORM schema for media records. `order` maps to the `position` column. */
 export const MediaEntity = new EntitySchema<MediaRecord>({
   class: class Media {} as { new (): MediaRecord },
   tableName: 'media',
+  repository: () => MediaRepository,
   properties: {
     id: { type: 'string', primary: true },
     ownerType: { type: 'string' },
