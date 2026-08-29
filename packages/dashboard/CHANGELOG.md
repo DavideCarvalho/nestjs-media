@@ -1,5 +1,11 @@
 # @dudousxd/nestjs-media-dashboard
 
+## 0.16.1
+
+### Patch Changes
+
+- 3f6dd66: add NestJS 12 to the supported peer range
+
 ## 0.16.0
 
 ### Minor Changes
