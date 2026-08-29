@@ -1,5 +1,11 @@
 # @dudousxd/nestjs-media
 
+## 0.9.2
+
+### Patch Changes
+
+- 3f6dd66: add NestJS 12 to the supported peer range
+
 ## 0.9.1
 
 ### Patch Changes
