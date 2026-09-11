@@ -320,8 +320,8 @@ importers:
         specifier: workspace:*
         version: link:../testing
       '@smithy/util-stream':
-        specifier: 3.3.1
-        version: 3.3.1
+        specifier: 3.3.4
+        version: 3.3.4
       aws-sdk-client-mock:
         specifier: 4.1.0
         version: 4.1.0
@@ -1964,8 +1964,8 @@ packages:
     resolution: {integrity: sha512-SQJhb5j3Btnqvh4lYdWbVH5uuoJN1kdn+UI/ehsEwhV7kHMOp4DwTBxFpUiMIgviiZsIrOk0YyI9R42yBZw90A==}
     engines: {node: '>=18.0.0'}
 
-  '@smithy/util-stream@3.3.1':
-    resolution: {integrity: sha512-Ff68R5lJh2zj+AUTvbAU/4yx+6QPRzg7+pI7M1FbtQHcRIp7xvguxVsQBKyB3fwiOwhAKu0lnNyYBaQfSW6TNw==}
+  '@smithy/util-stream@3.3.4':
+    resolution: {integrity: sha512-SGhGBG/KupieJvJSZp/rfHHka8BFgj56eek9px4pp7lZbOF+fRiVr4U7A3y3zJD8uGhxq32C5D96HxsTC9BckQ==}
     engines: {node: '>=16.0.0'}
 
   '@smithy/util-stream@4.7.1':
@@ -4909,9 +4909,9 @@ snapshots:
       '@smithy/middleware-stack': 4.4.1
       '@smithy/node-config-provider': 4.5.1
       '@smithy/node-http-handler': 4.8.1
-      '@smithy/protocol-http': 5.5.1
+      '@smithy/protocol-http': 5.3.14
       '@smithy/smithy-client': 4.14.1
-      '@smithy/types': 4.15.0
+      '@smithy/types': 4.15.1
       '@smithy/url-parser': 4.4.1
       '@smithy/util-base64': 4.5.1
       '@smithy/util-body-length-browser': 4.4.1
@@ -4990,7 +4990,7 @@ snapshots:
       '@aws-sdk/core': 3.723.0
       '@aws-sdk/types': 3.723.0
       '@smithy/property-provider': 4.4.1
-      '@smithy/types': 4.15.0
+      '@smithy/types': 4.15.1
       tslib: 2.8.1
 
   '@aws-sdk/credential-provider-http@3.723.0':
@@ -5002,7 +5002,7 @@ snapshots:
       '@smithy/property-provider': 4.4.1
       '@smithy/protocol-http': 5.5.1
       '@smithy/smithy-client': 4.14.1
-      '@smithy/types': 4.15.0
+      '@smithy/types': 4.15.1
       '@smithy/util-stream': 4.7.1
       tslib: 2.8.1
 
@@ -5019,7 +5019,7 @@ snapshots:
       '@smithy/credential-provider-imds': 4.4.1
       '@smithy/property-provider': 4.4.1
       '@smithy/shared-ini-file-loader': 4.6.1
-      '@smithy/types': 4.15.0
+      '@smithy/types': 4.15.1
       tslib: 2.8.1
     transitivePeerDependencies:
       - '@aws-sdk/client-sso-oidc'
@@ -5050,7 +5050,7 @@ snapshots:
       '@aws-sdk/types': 3.723.0
       '@smithy/property-provider': 4.4.1
       '@smithy/shared-ini-file-loader': 4.6.1
-      '@smithy/types': 4.15.0
+      '@smithy/types': 4.15.1
       tslib: 2.8.1
 
   '@aws-sdk/credential-provider-sso@3.726.0(@aws-sdk/client-sso-oidc@3.726.0(@aws-sdk/client-sts@3.726.1))':
@@ -5061,7 +5061,7 @@ snapshots:
       '@aws-sdk/types': 3.723.0
       '@smithy/property-provider': 4.4.1
       '@smithy/shared-ini-file-loader': 4.6.1
-      '@smithy/types': 4.15.0
+      '@smithy/types': 4.15.1
       tslib: 2.8.1
     transitivePeerDependencies:
       - '@aws-sdk/client-sso-oidc'
@@ -5073,7 +5073,7 @@ snapshots:
       '@aws-sdk/core': 3.723.0
       '@aws-sdk/types': 3.723.0
       '@smithy/property-provider': 4.4.1
-      '@smithy/types': 4.15.0
+      '@smithy/types': 4.15.1
       tslib: 2.8.1
 
   '@aws-sdk/middleware-bucket-endpoint@3.726.0':
@@ -5203,7 +5203,7 @@ snapshots:
       '@aws-sdk/types': 3.723.0
       '@smithy/property-provider': 4.4.1
       '@smithy/shared-ini-file-loader': 4.6.1
-      '@smithy/types': 4.15.0
+      '@smithy/types': 4.15.1
       tslib: 2.8.1
 
   '@aws-sdk/types@3.723.0':
@@ -6250,7 +6250,7 @@ snapshots:
   '@smithy/credential-provider-imds@4.4.1':
     dependencies:
       '@smithy/core': 3.25.1
-      '@smithy/types': 4.15.0
+      '@smithy/types': 4.15.1
       tslib: 2.8.1
 
   '@smithy/eventstream-serde-browser@4.4.1':
@@ -6414,7 +6414,7 @@ snapshots:
   '@smithy/signature-v4@5.5.1':
     dependencies:
       '@smithy/core': 3.25.1
-      '@smithy/types': 4.15.0
+      '@smithy/types': 4.15.1
       tslib: 2.8.1
 
   '@smithy/smithy-client@4.14.1':
@@ -6510,7 +6510,7 @@ snapshots:
       '@smithy/core': 3.25.1
       tslib: 2.8.1
 
-  '@smithy/util-stream@3.3.1':
+  '@smithy/util-stream@3.3.4':
     dependencies:
       '@smithy/fetch-http-handler': 4.1.3
       '@smithy/node-http-handler': 3.3.3
