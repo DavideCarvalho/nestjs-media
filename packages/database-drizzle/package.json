@@ -33,7 +33,7 @@
   "devDependencies": {
     "@dudousxd/nestjs-media-core": "workspace:*",
     "@dudousxd/nestjs-media-testing": "workspace:*",
-    "@types/better-sqlite3": "^7.6.12",
+    "@types/better-sqlite3": "7.6.13",
     "better-sqlite3": "11.8.1",
     "drizzle-orm": "0.38.4",
     "tsup": "8.3.5",
