@@ -60,8 +60,8 @@ importers:
   packages/core:
     dependencies:
       '@dudousxd/nestjs-diagnostics':
-        specifier: 0.6.0
-        version: 0.6.0(reflect-metadata@0.2.2)
+        specifier: 0.7.1
+        version: 0.7.1(@nestjs/common@12.0.1(reflect-metadata@0.2.2)(rxjs@7.8.2))(@nestjs/core@12.0.1)(reflect-metadata@0.2.2)
     devDependencies:
       tsup:
         specifier: 8.3.5
@@ -435,8 +435,8 @@ importers:
   packages/telescope:
     devDependencies:
       '@dudousxd/nestjs-diagnostics':
-        specifier: 0.7.0
-        version: 0.7.0(@nestjs/common@12.0.1(reflect-metadata@0.2.2)(rxjs@7.8.2))(@nestjs/core@12.0.1)(reflect-metadata@0.2.2)
+        specifier: 0.7.1
+        version: 0.7.1(@nestjs/common@12.0.1(reflect-metadata@0.2.2)(rxjs@7.8.2))(@nestjs/core@12.0.1)(reflect-metadata@0.2.2)
       '@dudousxd/nestjs-media-core':
         specifier: workspace:*
         version: link:../core
@@ -841,27 +841,12 @@ packages:
       tsx:
         optional: true
 
-  '@dudousxd/nestjs-diagnostics@0.6.0':
-    resolution: {integrity: sha512-M6SxB8ICy3pmtxmBpS5DTfWcZE4eKnuQ0s8FrwwU6WXl6Wn+7NLzMfL/DMHyZcPpbOC8wotF6rHQ0BoRxDd7BA==}
+  '@dudousxd/nestjs-diagnostics@0.7.1':
+    resolution: {integrity: sha512-Ve1jrKw64McKf7kGHTV9tVmfhQoo1hLEmjdJ9h4ghJsBSfO3Mt8sjzcvRcJ0zC4FcBzsF5kUbD0CLy3E3MnCcQ==}
     engines: {node: '>=20'}
     peerDependencies:
-      '@nestjs/common': ^10 || ^11
-      '@nestjs/core': ^10 || ^11
-      reflect-metadata: ^0.2
-    peerDependenciesMeta:
-      '@nestjs/common':
-        optional: true
-      '@nestjs/core':
-        optional: true
-      reflect-metadata:
-        optional: true
-
-  '@dudousxd/nestjs-diagnostics@0.7.0':
-    resolution: {integrity: sha512-4wFrCLL6xKEm2wPTspBShqhV9dmQ6McJM5ArOKINEj0f48j89JgHhj+98kIysFAGR0hAka4+GPdmuBoQ/cFNsA==}
-    engines: {node: '>=20'}
-    peerDependencies:
-      '@nestjs/common': ^10 || ^11
-      '@nestjs/core': ^10 || ^11
+      '@nestjs/common': ^10 || ^11 || ^12
+      '@nestjs/core': ^10 || ^11 || ^12
       reflect-metadata: ^0.2
     peerDependenciesMeta:
       '@nestjs/common':
@@ -5020,11 +5005,7 @@ snapshots:
     optionalDependencies:
       '@nestjs/common': 12.0.1(reflect-metadata@0.2.2)(rxjs@7.8.2)
 
-  '@dudousxd/nestjs-diagnostics@0.6.0(reflect-metadata@0.2.2)':
-    optionalDependencies:
-      reflect-metadata: 0.2.2
-
-  '@dudousxd/nestjs-diagnostics@0.7.0(@nestjs/common@12.0.1(reflect-metadata@0.2.2)(rxjs@7.8.2))(@nestjs/core@12.0.1)(reflect-metadata@0.2.2)':
+  '@dudousxd/nestjs-diagnostics@0.7.1(@nestjs/common@12.0.1(reflect-metadata@0.2.2)(rxjs@7.8.2))(@nestjs/core@12.0.1)(reflect-metadata@0.2.2)':
     optionalDependencies:
       '@nestjs/common': 12.0.1(reflect-metadata@0.2.2)(rxjs@7.8.2)
       '@nestjs/core': 12.0.1(@nestjs/common@12.0.1(reflect-metadata@0.2.2)(rxjs@7.8.2))(@nestjs/platform-express@12.0.1)(reflect-metadata@0.2.2)(rxjs@7.8.2)
