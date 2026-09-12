@@ -8,6 +8,13 @@
     "url": "git+https://github.com/DavideCarvalho/nestjs-media.git",
     "directory": "packages/nestjs"
   },
+  "homepage": "https://davidecarvalho.github.io/aviary/docs/media",
+  "bugs": {
+    "url": "https://github.com/DavideCarvalho/nestjs-media/issues"
+  },
+  "keywords": [
+    "tanstack-intent"
+  ],
   "type": "module",
   "main": "./dist/index.cjs",
   "module": "./dist/index.js",
@@ -66,8 +73,5 @@
     "testcontainers": "10.18.0",
     "tsup": "8.3.5",
     "typescript": "5.9.3"
-  },
-  "keywords": [
-    "tanstack-intent"
-  ]
+  }
 }

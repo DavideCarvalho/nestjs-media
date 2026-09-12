@@ -8,6 +8,15 @@
     "url": "git+https://github.com/DavideCarvalho/nestjs-media.git",
     "directory": "packages/dashboard"
   },
+  "homepage": "https://davidecarvalho.github.io/aviary/docs/media",
+  "bugs": {
+    "url": "https://github.com/DavideCarvalho/nestjs-media/issues"
+  },
+  "keywords": [
+    "nestjs",
+    "media",
+    "dashboard"
+  ],
   "author": "Davide Carvalho",
   "type": "module",
   "main": "./dist/server/index.cjs",

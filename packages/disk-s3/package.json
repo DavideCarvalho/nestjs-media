@@ -8,6 +8,16 @@
     "url": "git+https://github.com/DavideCarvalho/nestjs-media.git",
     "directory": "packages/disk-s3"
   },
+  "homepage": "https://davidecarvalho.github.io/aviary/docs/media",
+  "bugs": {
+    "url": "https://github.com/DavideCarvalho/nestjs-media/issues"
+  },
+  "keywords": [
+    "nestjs",
+    "media",
+    "disk",
+    "s3"
+  ],
   "type": "module",
   "main": "./dist/index.cjs",
   "module": "./dist/index.js",

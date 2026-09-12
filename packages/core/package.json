@@ -8,6 +8,15 @@
     "url": "git+https://github.com/DavideCarvalho/nestjs-media.git",
     "directory": "packages/core"
   },
+  "homepage": "https://davidecarvalho.github.io/aviary/docs/media",
+  "bugs": {
+    "url": "https://github.com/DavideCarvalho/nestjs-media/issues"
+  },
+  "keywords": [
+    "nestjs",
+    "media",
+    "core"
+  ],
   "type": "module",
   "main": "./dist/index.cjs",
   "module": "./dist/index.js",
