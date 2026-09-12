@@ -1,5 +1,11 @@
 # @dudousxd/nestjs-media
 
+## 0.9.3
+
+### Patch Changes
+
+- 7e5eb4b: Verification release for npm trusted publishing over OIDC, plus a comment cleanup in the tus client explaining why `uploadMedia()` skips the resume HEAD probe.
+
 ## 0.9.2
 
 ### Patch Changes
