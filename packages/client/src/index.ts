@@ -257,7 +257,7 @@ export async function uploadMedia(
     getHeaders: options.getHeaders,
   });
   await streamChunks(location, data, {
-    resume: false, // byte-identical to pre-split: no resume HEAD probe
+    resume: false, // the session was created just above, so its offset is 0: nothing to resume
     chunkSize: options.chunkSize,
     onProgress: options.onProgress,
     fetchImpl: options.fetchImpl,
