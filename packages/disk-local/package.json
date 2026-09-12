@@ -3,6 +3,11 @@
   "version": "0.6.0",
   "description": "nestjs-media local filesystem driver",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/DavideCarvalho/nestjs-media.git",
+    "directory": "packages/disk-local"
+  },
   "type": "module",
   "main": "./dist/index.cjs",
   "module": "./dist/index.js",

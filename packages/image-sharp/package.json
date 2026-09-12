@@ -3,6 +3,11 @@
   "version": "0.5.10",
   "description": "nestjs-media image processor backed by sharp",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/DavideCarvalho/nestjs-media.git",
+    "directory": "packages/image-sharp"
+  },
   "type": "module",
   "main": "./dist/index.cjs",
   "module": "./dist/index.js",

@@ -3,6 +3,11 @@
   "version": "0.2.3",
   "description": "React hook + uploader component for nestjs-media (resumable tus)",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/DavideCarvalho/nestjs-media.git",
+    "directory": "packages/react"
+  },
   "type": "module",
   "main": "./dist/index.cjs",
   "module": "./dist/index.js",

@@ -3,6 +3,11 @@
   "version": "0.5.11",
   "description": "Telescope watcher for nestjs-media (consumes nestjs:media:* diagnostics)",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/DavideCarvalho/nestjs-media.git",
+    "directory": "packages/telescope"
+  },
   "type": "module",
   "main": "./dist/index.cjs",
   "module": "./dist/index.js",
