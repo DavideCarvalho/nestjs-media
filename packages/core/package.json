@@ -44,7 +44,7 @@
     "@dudousxd/nestjs-diagnostics": "0.7.2"
   },
   "devDependencies": {
-    "tsup": "8.3.5",
+    "tsup": "8.5.1",
     "typescript": "5.9.3"
   }
 }

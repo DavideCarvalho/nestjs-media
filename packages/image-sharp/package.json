@@ -48,7 +48,7 @@
   "devDependencies": {
     "@dudousxd/nestjs-media-core": "workspace:*",
     "sharp": "0.33.5",
-    "tsup": "8.3.5",
+    "tsup": "8.5.1",
     "typescript": "5.9.3"
   }
 }
