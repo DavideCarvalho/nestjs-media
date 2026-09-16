@@ -49,9 +49,9 @@
   "devDependencies": {
     "@dudousxd/nestjs-media-core": "workspace:*",
     "@dudousxd/nestjs-media-testing": "workspace:*",
-    "@mikro-orm/core": "7.1.4",
-    "@mikro-orm/postgresql": "7.1.4",
-    "@mikro-orm/sqlite": "7.1.4",
+    "@mikro-orm/core": "7.2.0",
+    "@mikro-orm/postgresql": "7.2.0",
+    "@mikro-orm/sqlite": "7.2.0",
     "testcontainers": "10.18.0",
     "tsup": "8.3.5",
     "typescript": "5.9.3"
