@@ -1,5 +1,11 @@
 # @dudousxd/nestjs-media-core
 
+## 0.9.1
+
+### Patch Changes
+
+- fix(deps): update dependency @dudousxd/nestjs-diagnostics to v0.7.2 ([#129](https://github.com/DavideCarvalho/nestjs-media/issues/129))
+
 ## 0.9.0
 
 ### Minor Changes
