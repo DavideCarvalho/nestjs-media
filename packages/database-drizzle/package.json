@@ -1,7 +1,7 @@
 {
   "name": "@dudousxd/nestjs-media-database-drizzle",
   "version": "0.5.10",
-  "description": "nestjs-media Drizzle media store (sqlite)",
+  "description": "nestjs-media Drizzle media store (sqlite, and Postgres via /pg)",
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -16,7 +16,9 @@
     "nestjs",
     "media",
     "database",
-    "drizzle"
+    "drizzle",
+    "sqlite",
+    "postgres"
   ],
   "type": "module",
   "main": "./dist/index.cjs",
@@ -32,6 +34,16 @@
         "types": "./dist/index.d.cts",
         "default": "./dist/index.cjs"
       }
+    },
+    "./pg": {
+      "import": {
+        "types": "./dist/pg/index.d.ts",
+        "default": "./dist/pg/index.js"
+      },
+      "require": {
+        "types": "./dist/pg/index.d.cts",
+        "default": "./dist/pg/index.cjs"
+      }
     }
   },
   "files": [
@@ -43,15 +55,25 @@
   },
   "peerDependencies": {
     "@dudousxd/nestjs-media-core": ">=0.8.0 <1.0.0",
-    "drizzle-orm": "^0.38.0"
+    "drizzle-orm": ">=0.38.0 <1.0.0"
   },
   "devDependencies": {
     "@dudousxd/nestjs-media-core": "workspace:*",
     "@dudousxd/nestjs-media-testing": "workspace:*",
     "@types/better-sqlite3": "7.6.13",
+    "@types/pg": "8.11.10",
     "better-sqlite3": "11.10.0",
-    "drizzle-orm": "0.38.4",
+    "drizzle-orm": "0.45.3",
+    "pg": "8.23.0",
+    "testcontainers": "10.18.0",
     "tsup": "8.3.5",
     "typescript": "5.9.3"
+  },
+  "typesVersions": {
+    "*": {
+      "pg": [
+        "./dist/pg/index.d.ts"
+      ]
+    }
   }
 }

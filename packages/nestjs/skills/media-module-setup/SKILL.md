@@ -112,7 +112,8 @@ Each ORM store is a plain object you construct in the factory with its connectio
 
 ```ts
 import { MikroOrmMediaStore } from '@dudousxd/nestjs-media-database-mikro-orm'; // new MikroOrmMediaStore(em)
-import { DrizzleMediaStore }  from '@dudousxd/nestjs-media-database-drizzle';   // new DrizzleMediaStore(db)
+import { DrizzleMediaStore }  from '@dudousxd/nestjs-media-database-drizzle';   // new DrizzleMediaStore(db) — sqlite/libSQL
+import { DrizzlePgMediaStore } from '@dudousxd/nestjs-media-database-drizzle/pg'; // new DrizzlePgMediaStore(db) — Postgres
 import { PrismaMediaStore }   from '@dudousxd/nestjs-media-database-prisma';    // new PrismaMediaStore(prisma)
 ```
 

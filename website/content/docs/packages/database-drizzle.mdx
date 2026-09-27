@@ -1,7 +1,7 @@
 ---
 title: '@dudousxd/nestjs-media-database-drizzle'
 icon: Database
-description: Drizzle media store (sqlite), migration-first.
+description: Drizzle media store (sqlite, and Postgres via /pg), migration-first.
 ---
 
 import { Callout } from 'fumadocs-ui/components/callout';
@@ -19,9 +19,40 @@ MediaModule.forRoot({ default: 's3', disks: { s3 }, store: new DrizzleMediaStore
 
 Drizzle is migration-first by design — there's no runtime auto-schema. In production you manage the table with **drizzle-kit** using the exported `mediaTable` schema; `createMediaTable(db)` is a convenience for tests and quick dev setups that issues the `CREATE TABLE IF NOT EXISTS`.
 
-<Callout type="info" title="sqlite-first by design">
-Drizzle's schema is dialect-specific (`sqliteTable` vs `pgTable` vs `mysqlTable`), so this adapter ships the **sqlite/libSQL** schema — matching the ecosystem's other Drizzle adapters (e.g. `durable-store-drizzle`). For Postgres/MySQL, define the equivalent table with that dialect's drizzle core and pass it; the store's query logic (insert/onConflictDoUpdate/select/orderBy) is the same.
-</Callout>
+## Postgres (`/pg`)
+
+Drizzle's schema is dialect-specific, so the package root ships the **sqlite/libSQL** schema and the Postgres flavour lives on its own subpath, `@dudousxd/nestjs-media-database-drizzle/pg` (built on `drizzle-orm/pg-core`). Its stores accept any drizzle Postgres database (`PgDatabase` — node-postgres, postgres-js, neon, pglite, …).
+
+```ts
+import { drizzle } from 'drizzle-orm/node-postgres';
+import {
+  DrizzlePgMediaStore,
+  DrizzlePgUploadSessionStore,
+  createMediaPgTables,
+} from '@dudousxd/nestjs-media-database-drizzle/pg';
+
+const db = drizzle(process.env.DATABASE_URL!);
+await createMediaPgTables(db); // dev/test helper — use drizzle-kit migrations in production
+
+MediaModule.forRoot({
+  default: 's3',
+  disks: { s3 },
+  store: new DrizzlePgMediaStore(db),
+  // resumable uploads: persist sessions + multipart ETags in Postgres
+  uploadSessions: new DrizzlePgUploadSessionStore(db),
+});
+```
+
+| Export | What it is |
+|---|---|
+| `mediaPgTable` | `media` table (`jsonb` properties/conversions, `bigint` size, `timestamptz` dates) — same logical shape as `mediaTable` |
+| `DrizzlePgMediaStore` | `MediaStore` over `mediaPgTable` (count / aggregate / keyset-cursor `list` included) |
+| `mediaUploadSessionsPgTable`, `mediaUploadPartsPgTable` | `media_upload_sessions` + `media_upload_parts` (FK `ON DELETE CASCADE`, PK `(session_id, part_number)`) |
+| `DrizzlePgUploadSessionStore` | `UploadSessionStore` with every optional method: atomic `addPart` (`INSERT … ON CONFLICT DO UPDATE`), `listParts`, `list({ disk, keyPrefix })` |
+| `createMediaPgTables(db)` / `MEDIA_PG_DDL` | idempotent `CREATE TABLE/INDEX IF NOT EXISTS` for tests and dev |
+| `DrizzlePgDatabase` | the accepted db type (`PgDatabase<any, any, any>`) |
+
+For drizzle-kit, re-export `mediaPgTable`, `mediaUploadSessionsPgTable` and `mediaUploadPartsPgTable` from your schema file and generate migrations as usual.
 
 ## Attachment column
 
@@ -37,8 +68,8 @@ export const users = sqliteTable('users', {
 });
 ```
 
-On write it `JSON.stringify`s the `Attachment` (or stores `null`); on read it rehydrates an `Attachment`. Like the media store, the column is sqlite/libSQL — for Postgres/MySQL define the equivalent JSON column in that dialect and (de)serialize with the value object's `toJSON()` / `Attachment.fromJSON()`.
+On write it `JSON.stringify`s the `Attachment` (or stores `null`); on read it rehydrates an `Attachment`. The column is sqlite/libSQL — for Postgres/MySQL define the equivalent JSON column in that dialect and (de)serialize with the value object's `toJSON()` / `Attachment.fromJSON()`.
 
 ## Peer dependencies
 
-`drizzle-orm` (^0.38) and `@dudousxd/nestjs-media-core`, plus a driver (`better-sqlite3`, `libsql`, …). See [Concepts → Persistence](/docs/concepts/persistence) and [Concepts → Attachments](/docs/concepts/attachments).
+`drizzle-orm` (>=0.38 <1, tested on 0.45) and `@dudousxd/nestjs-media-core`, plus a driver (`better-sqlite3`, `libsql`, … — or `pg` / `postgres` for `/pg`). See [Concepts → Persistence](/docs/concepts/persistence) and [Concepts → Attachments](/docs/concepts/attachments).
