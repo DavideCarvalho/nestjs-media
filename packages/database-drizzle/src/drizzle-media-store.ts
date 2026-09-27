@@ -10,29 +10,10 @@ import type {
 } from '@dudousxd/nestjs-media-core';
 import { and, asc, count, eq, gt, max, or, sql, sum } from 'drizzle-orm';
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
+import { decodeListCursor, encodeListCursor } from './list-cursor';
 import { mediaTable } from './media.schema';
 
 type DB = BetterSQLite3Database<Record<string, never>>;
-
-/** Opaque keyset cursor over `(createdAt, id)`. Mirrors the in-memory store's encoding. */
-function encodeListCursor(record: MediaRecord): string {
-  return Buffer.from(`${record.createdAt.toISOString()}|${record.id}`, 'utf8').toString('base64');
-}
-
-interface DecodedListCursor {
-  createdAt: Date;
-  id: string;
-}
-
-function decodeListCursor(cursor: string): DecodedListCursor | null {
-  const decoded = Buffer.from(cursor, 'base64').toString('utf8');
-  const separator = decoded.indexOf('|');
-  if (separator === -1) return null;
-  const createdAt = new Date(decoded.slice(0, separator));
-  if (Number.isNaN(createdAt.getTime())) return null;
-  const id = decoded.slice(separator + 1);
-  return { createdAt, id };
-}
 
 /**
  * Migration-first (§3.10): Drizzle has no auto-ensure. Run migrations with

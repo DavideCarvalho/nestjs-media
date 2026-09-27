@@ -45,7 +45,7 @@ Where the ORM allows it, the table is created on first use without you running a
 |---|---|
 | [TypeORM](/docs/packages/database-typeorm) | `ensureMediaSchema` — create table + add missing columns; never drop/alter. `autoCreateSchema: false` to opt out |
 | [MikroORM](/docs/packages/database-mikro-orm) | `updateSchema({ safe: true })` — same guarantees, native |
-| [Drizzle](/docs/packages/database-drizzle) | migration-first (drizzle-kit); `createMediaTable` helper for dev/test |
+| [Drizzle](/docs/packages/database-drizzle) | migration-first (drizzle-kit); `createMediaTable` (sqlite) / `createMediaPgTables` (Postgres, `/pg`) helpers for dev/test |
 | [Prisma](/docs/packages/database-prisma) | consumer-managed — you own the schema + migrations |
 
 <Callout type="warn" title="Forward-compatible columns">
