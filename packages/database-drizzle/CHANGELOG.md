@@ -1,5 +1,11 @@
 # @dudousxd/nestjs-media-database-drizzle
 
+## 0.6.0
+
+### Minor Changes
+
+- [#131](https://github.com/DavideCarvalho/nestjs-media/pull/131) [`d302fa4`](https://github.com/DavideCarvalho/nestjs-media/commit/d302fa45d87c642f230361bfe977ce5f13bee203) Thanks [@DavideCarvalho](https://github.com/DavideCarvalho)! - Add Postgres support on a new `@dudousxd/nestjs-media-database-drizzle/pg` subpath (the package root stays the sqlite/libSQL store, unchanged). It exports `mediaPgTable` + `DrizzlePgMediaStore` (a full `MediaStore`, including count/aggregate/keyset-cursor list), `mediaUploadSessionsPgTable` / `mediaUploadPartsPgTable` + `DrizzlePgUploadSessionStore` (a resumable-upload `UploadSessionStore` with atomic `addPart` upserts, `listParts` and filtered `list`), and `createMediaPgTables(db)` / `MEDIA_PG_DDL` for tests and dev. Stores accept any drizzle Postgres database (`PgDatabase`). The `drizzle-orm` peer range is widened to `>=0.38.0 <1.0.0`, so 0.39–0.45 consumers install cleanly.
+
 ## 0.5.10
 
 ### Patch Changes
