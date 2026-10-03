@@ -71,7 +71,7 @@
     "reflect-metadata": "0.2.2",
     "rxjs": "7.8.2",
     "testcontainers": "10.18.0",
-    "tsup": "8.3.5",
+    "tsup": "8.5.1",
     "typescript": "5.9.3"
   }
 }
