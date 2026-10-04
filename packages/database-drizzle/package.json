@@ -61,10 +61,10 @@
     "@dudousxd/nestjs-media-core": "workspace:*",
     "@dudousxd/nestjs-media-testing": "workspace:*",
     "@types/better-sqlite3": "7.6.13",
-    "@types/pg": "8.11.10",
+    "@types/pg": "8.23.1",
     "better-sqlite3": "11.10.0",
     "drizzle-orm": "0.45.3",
-    "pg": "8.23.0",
+    "pg": "8.23.1",
     "testcontainers": "10.18.0",
     "tsup": "8.3.5",
     "typescript": "5.9.3"
