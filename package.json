@@ -5,7 +5,7 @@
   "description": "Filesystem + media-library for NestJS (spatie-style), one package",
   "license": "MIT",
   "author": "Davide Carvalho",
-  "packageManager": "pnpm@11.5.0",
+  "packageManager": "pnpm@11.28.4",
   "engines": {
     "node": ">=20"
   },
