@@ -1,5 +1,11 @@
 # @dudousxd/nestjs-media-disk-s3
 
+## 0.8.2
+
+### Patch Changes
+
+- fix(deps): update dependency @smithy/signature-v4 to v5.7.4 ([#153](https://github.com/DavideCarvalho/nestjs-media/issues/153))
+
 ## 0.8.1
 
 ### Patch Changes
