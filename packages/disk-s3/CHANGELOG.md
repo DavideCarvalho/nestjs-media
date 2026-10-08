@@ -1,5 +1,11 @@
 # @dudousxd/nestjs-media-disk-s3
 
+## 0.8.1
+
+### Patch Changes
+
+- fix(deps): update dependency @smithy/protocol-http to v5.6.2 ([#152](https://github.com/DavideCarvalho/nestjs-media/issues/152))
+
 ## 0.8.0
 
 ### Minor Changes
