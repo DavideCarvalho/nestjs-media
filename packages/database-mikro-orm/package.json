@@ -52,7 +52,7 @@
     "@mikro-orm/core": "7.2.3",
     "@mikro-orm/postgresql": "7.2.3",
     "@mikro-orm/sqlite": "7.2.3",
-    "testcontainers": "10.18.0",
+    "testcontainers": "10.28.0",
     "tsup": "8.5.1",
     "typescript": "5.9.3"
   }
