@@ -51,8 +51,8 @@ importers:
   packages/codegen:
     devDependencies:
       '@dudousxd/nestjs-codegen':
-        specifier: 0.25.2
-        version: 0.25.2(@nestjs/common@12.1.2(reflect-metadata@0.2.2)(rxjs@7.8.2))(typescript@5.9.3)
+        specifier: 0.27.2
+        version: 0.27.2(@nestjs/common@12.1.2(reflect-metadata@0.2.2)(rxjs@7.8.2))(typescript@5.9.3)
       tsup:
         specifier: 8.5.1
         version: 8.5.1(@swc/core@1.16.13)(jiti@2.7.0)(postcss@8.5.28)(typescript@5.9.3)(yaml@2.9.0)
@@ -851,8 +851,8 @@ packages:
     resolution: {integrity: sha512-Vd/9EVDiu6PPJt9yAh6roZP6El1xHrdvIVGjyBsHR0RYwNHgL7FJPyIIW4fANJNG6FtyZfvlRPpFI4ZM/lubvw==}
     engines: {node: '>=18'}
 
-  '@dudousxd/nestjs-codegen@0.25.2':
-    resolution: {integrity: sha512-ufNVD22rgIJVU0CoC7+FXvJEGWB179vstpKWBr1y63EqtN7+8x+OWQbTQy86YTw3g1hesrFO63170HECRvoHgQ==}
+  '@dudousxd/nestjs-codegen@0.27.2':
+    resolution: {integrity: sha512-jTYryq1D+UDLuI5S4hwcVKWdfbHzq6IRKLVL11ZZXG1+BKDdMjpxX2lX6oC2p/x1B5MBupYGWGLdgtzW/GDsMg==}
     engines: {node: '>=20'}
     hasBin: true
     peerDependencies:
@@ -5175,7 +5175,7 @@ snapshots:
 
   '@csstools/css-tokenizer@3.0.4': {}
 
-  '@dudousxd/nestjs-codegen@0.25.2(@nestjs/common@12.1.2(reflect-metadata@0.2.2)(rxjs@7.8.2))(typescript@5.9.3)':
+  '@dudousxd/nestjs-codegen@0.27.2(@nestjs/common@12.1.2(reflect-metadata@0.2.2)(rxjs@7.8.2))(typescript@5.9.3)':
     dependencies:
       cac: 6.7.14
       chokidar: 3.6.0
