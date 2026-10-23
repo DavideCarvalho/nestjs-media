@@ -1,5 +1,5 @@
 import { CreateBucketCommand, S3Client } from '@aws-sdk/client-s3';
-import { GenericContainer, type StartedTestContainer } from 'testcontainers';
+import { GenericContainer, type StartedTestContainer, Wait } from 'testcontainers';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { S3Driver } from './s3-driver';
 
@@ -8,10 +8,10 @@ let client: S3Client;
 const BUCKET = 'stat-deletemany';
 
 beforeAll(async () => {
-  container = await new GenericContainer('minio/minio:latest')
+  container = await new GenericContainer('rustfs/rustfs:1.0.3')
     .withExposedPorts(9000)
-    .withEnvironment({ MINIO_ROOT_USER: 'minioadmin', MINIO_ROOT_PASSWORD: 'minioadmin' })
-    .withCommand(['server', '/data'])
+    .withEnvironment({ RUSTFS_ACCESS_KEY: 'minioadmin', RUSTFS_SECRET_KEY: 'minioadmin' })
+    .withWaitStrategy(Wait.forHttp('/health', 9000).forStatusCode(200))
     .start();
   client = new S3Client({
     region: 'us-east-1',

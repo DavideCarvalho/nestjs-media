@@ -9,7 +9,7 @@ import { uploadMediaParallel } from '@dudousxd/nestjs-media-client';
 import { S3Driver } from '@dudousxd/nestjs-media-disk-s3';
 import { NestFactory } from '@nestjs/core';
 import express from 'express';
-import { GenericContainer } from 'testcontainers';
+import { GenericContainer, Wait } from 'testcontainers';
 
 // Minimal in-memory UploadSessionStore (the -testing package's index pulls in vitest,
 // which can't be imported outside a test run) — same contract: create/get/update/delete
@@ -51,10 +51,10 @@ const t0 = Date.now();
 const ms = () => String(Date.now() - t0).padStart(5, ' ');
 
 console.log(`[${ms()}ms] starting MinIO (testcontainers)...`);
-const container = await new GenericContainer('minio/minio:latest')
+const container = await new GenericContainer('rustfs/rustfs:1.0.3')
   .withExposedPorts(9000)
-  .withEnvironment({ MINIO_ROOT_USER: 'minioadmin', MINIO_ROOT_PASSWORD: 'minioadmin' })
-  .withCommand(['server', '/data'])
+  .withEnvironment({ RUSTFS_ACCESS_KEY: 'minioadmin', RUSTFS_SECRET_KEY: 'minioadmin' })
+  .withWaitStrategy(Wait.forHttp('/health', 9000).forStatusCode(200))
   .start();
 
 const endpoint = `http://${container.getHost()}:${container.getMappedPort(9000)}`;
