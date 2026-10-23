@@ -15,7 +15,7 @@ import { InMemoryUploadSessionStore } from '@dudousxd/nestjs-media-testing';
 import { NestFactory } from '@nestjs/core';
 import type { NestExpressApplication } from '@nestjs/platform-express';
 import express from 'express';
-import { GenericContainer, type StartedTestContainer } from 'testcontainers';
+import { GenericContainer, type StartedTestContainer, Wait } from 'testcontainers';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { MediaModule } from './media.module';
 
@@ -29,10 +29,10 @@ let app: NestExpressApplication;
 let baseUrl: string;
 
 beforeAll(async () => {
-  container = await new GenericContainer('minio/minio:latest')
+  container = await new GenericContainer('rustfs/rustfs:1.0.3')
     .withExposedPorts(9000)
-    .withEnvironment({ MINIO_ROOT_USER: 'minioadmin', MINIO_ROOT_PASSWORD: 'minioadmin' })
-    .withCommand(['server', '/data'])
+    .withEnvironment({ RUSTFS_ACCESS_KEY: 'minioadmin', RUSTFS_SECRET_KEY: 'minioadmin' })
+    .withWaitStrategy(Wait.forHttp('/health', 9000).forStatusCode(200))
     .start();
 
   const endpoint = `http://${container.getHost()}:${container.getMappedPort(9000)}`;
