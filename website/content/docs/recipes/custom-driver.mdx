@@ -40,6 +40,8 @@ Set `capabilities` honestly — the library trusts them. `presign: true` means `
 
 `ranged: true` is the one to be most careful with, because getting it wrong fails *quietly*. It promises that `stream(path, { start, end })` returns exactly those bytes — both bounds inclusive, and `end` omitted meaning "to EOF". A driver that accepts the argument and ignores it hands back the whole object, and a caller that asked for a 64 KB page will happily read a 2 GB body as if it were one. That is why the field is required rather than optional: adding it forces every driver to answer the question. If your backing store can't seek, say `ranged: false` — the console will fall back to whole-object reads instead of quietly reading garbage.
 
+`put` must accept a `Readable` as well as a Buffer, and should consume it as it arrives rather than collecting it first: on a disk with `multipart: false`, finishing a resumable upload hands `put` one stream of every part in order (read back through your `stream`), so buffering it means holding the whole upload in memory. The optional `deleteMany(paths)` deletes a batch in one call; the dashboard's folder delete uses it per listed page (up to 1000 keys) when present and falls back to `delete` per key otherwise.
+
 <Callout type="warn" title="Error semantics matter">
 `get`, `stream`, and `size` must throw `FileNotFoundError` for a missing key (not return null), and `delete` must be idempotent. The conformance suite checks exactly these — they're what the media-library layer relies on.
 </Callout>
