@@ -9,7 +9,7 @@ import {
 } from './errors';
 import type { ConversionPreset, ImageProcessor } from './image-processor';
 import { type MediaCollectionConfig, MediaCollectionRegistry } from './media-collection';
-import type { MediaRecord } from './media-record';
+import type { MediaConversion, MediaRecord } from './media-record';
 import type { MediaStore } from './media-store';
 import type { StorageManager } from './storage-manager';
 
@@ -62,6 +62,7 @@ export class MediaLibrary {
   private readonly emitDiagnostics: boolean;
   private readonly newId: () => string;
   private readonly now: () => Date;
+  private readonly conversionsInFlight = new Map<string, Promise<MediaRecord>>();
 
   constructor(options: MediaLibraryOptions) {
     this.storage = options.storage;
@@ -139,13 +140,39 @@ export class MediaLibrary {
     // is a later phase; sync is the baseline fallback).
     const eager = (config.conversions ?? []).filter((p) => p.eager);
     if (eager.length === 0) return saved;
-    let current = saved;
-    for (const preset of eager) current = await this.ensureConversion(saved.id, preset.name);
-    return current;
+    if (!this.imageProcessor) throw new ImageProcessorMissingError();
+    const original = Buffer.isBuffer(input.contents)
+      ? input.contents
+      : await this.storage.disk(disk).get(path);
+    const generated: Record<string, MediaConversion> = {};
+    try {
+      for (const preset of eager) {
+        if (generated[preset.name]) continue;
+        generated[preset.name] = await this.generateConversion(saved, preset, original);
+      }
+    } catch (error) {
+      if (Object.keys(generated).length > 0) await this.saveConversions(saved, generated);
+      throw error;
+    }
+    return this.saveConversions(saved, generated);
   }
 
-  /** Generate (if absent) and persist a named conversion; returns the updated record. Lazy entry point. */
-  async ensureConversion(id: string, conversionName: string): Promise<MediaRecord> {
+  /**
+   * Generate (if absent) and persist a named conversion; returns the updated record. Lazy entry point.
+   * Concurrent calls for the same media and conversion share one generation.
+   */
+  ensureConversion(id: string, conversionName: string): Promise<MediaRecord> {
+    const key = `${id}\u0000${conversionName}`;
+    const pending = this.conversionsInFlight.get(key);
+    if (pending) return pending;
+    const run = this.ensureConversionNow(id, conversionName).finally(() => {
+      this.conversionsInFlight.delete(key);
+    });
+    this.conversionsInFlight.set(key, run);
+    return run;
+  }
+
+  private async ensureConversionNow(id: string, conversionName: string): Promise<MediaRecord> {
     const record = await this.store.find(id);
     if (!record) throw new MediaNotFoundError(id);
     if (record.conversions[conversionName]) return record;
@@ -157,22 +184,38 @@ export class MediaLibrary {
     if (!this.imageProcessor) throw new ImageProcessorMissingError();
 
     const original = await this.storage.disk(record.disk).get(record.path);
+    const conversion = await this.generateConversion(record, preset, original);
+    return this.saveConversions(record, { [conversionName]: conversion });
+  }
+
+  /** Convert `original` with `preset` and write the variant beside the record's file. */
+  private async generateConversion(
+    record: MediaRecord,
+    preset: ConversionPreset,
+    original: Buffer,
+  ): Promise<MediaConversion> {
+    if (!this.imageProcessor) throw new ImageProcessorMissingError();
     const result = await this.imageProcessor.convert(original, preset);
     const dir = record.path.slice(0, record.path.lastIndexOf('/'));
-    const conversionPath = `${dir}/conversions/${conversionName}.${result.format}`;
+    const conversionPath = `${dir}/conversions/${preset.name}.${result.format}`;
     await this.storage.disk(record.disk).put(conversionPath, result.data, {
       contentType: result.contentType,
     });
+    return { path: conversionPath, disk: record.disk };
+  }
 
+  private async saveConversions(
+    record: MediaRecord,
+    conversions: Record<string, MediaConversion>,
+  ): Promise<MediaRecord> {
     const updated = await this.store.save({
       ...record,
-      conversions: {
-        ...record.conversions,
-        [conversionName]: { path: conversionPath, disk: record.disk },
-      },
+      conversions: { ...record.conversions, ...conversions },
       updatedAt: this.now(),
     });
-    this.emit('conversion', { id, conversion: conversionName, path: conversionPath });
+    for (const [conversion, { path }] of Object.entries(conversions)) {
+      this.emit('conversion', { id: record.id, conversion, path });
+    }
     return updated;
   }
 

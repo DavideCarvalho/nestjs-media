@@ -1,4 +1,5 @@
-import { createReadStream } from 'node:fs';
+import { randomUUID } from 'node:crypto';
+import { createReadStream, createWriteStream } from 'node:fs';
 import {
   copyFile,
   stat as fsStat,
@@ -11,6 +12,7 @@ import {
 } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import type { Readable } from 'node:stream';
+import { pipeline } from 'node:stream/promises';
 import {
   type DriverCapabilities,
   FileNotFoundError,
@@ -22,7 +24,6 @@ import {
   type StatResult,
   type StorageDriver,
   UnsupportedOperationError,
-  collectStream,
 } from '@dudousxd/nestjs-media-core';
 import { resolveWithinRoot } from './path-safety';
 
@@ -76,8 +77,20 @@ export class LocalDriver implements StorageDriver {
   async put(path: string, contents: Buffer | Readable, _options?: PutOptions): Promise<void> {
     const abs = this.abs(path);
     await mkdir(dirname(abs), { recursive: true });
-    const data = Buffer.isBuffer(contents) ? contents : await collectStream(contents);
-    await writeFile(abs, data);
+    if (Buffer.isBuffer(contents)) {
+      await writeFile(abs, contents);
+      return;
+    }
+    // Written beside the target and renamed into place, so a stream that fails midway leaves any
+    // existing file untouched instead of truncated.
+    const tmp = `${abs}.${randomUUID()}.tmp`;
+    try {
+      await pipeline(contents, createWriteStream(tmp));
+      await rename(tmp, abs);
+    } catch (error) {
+      await rm(tmp, { force: true });
+      throw error;
+    }
   }
 
   async get(path: string): Promise<Buffer> {

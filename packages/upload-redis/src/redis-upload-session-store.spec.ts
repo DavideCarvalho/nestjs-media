@@ -13,17 +13,29 @@ function makeFakeRedis(): MinimalRedis & {
   store: Map<string, string>;
   setCalls: SetCall[];
   hashes: Map<string, Map<string, string>>;
+  calls: { get: number; mget: number };
 } {
   const store = new Map<string, string>();
   const setCalls: SetCall[] = [];
   const hashes = new Map<string, Map<string, string>>();
+  const calls = { get: 0, mget: 0 };
 
   return {
     store,
     setCalls,
     hashes,
+    calls,
+    // Mirrors real Redis: GET on a hash is a WRONGTYPE error, MGET reports it as nil.
     async get(key: string): Promise<string | null> {
+      calls.get += 1;
+      if (hashes.has(key)) {
+        throw new Error('WRONGTYPE Operation against a key holding the wrong kind of value');
+      }
       return store.get(key) ?? null;
+    },
+    async mget(...keys: string[]): Promise<Array<string | null>> {
+      calls.mget += 1;
+      return keys.map((key) => store.get(key) ?? null);
     },
     async set(key: string, value: string, ...args: unknown[]): Promise<unknown> {
       store.set(key, value);
@@ -43,7 +55,7 @@ function makeFakeRedis(): MinimalRedis & {
       const regex = new RegExp(
         `^${pattern.replace(/[.+?^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*')}$`,
       );
-      const keys = [...store.keys()].filter((key) => regex.test(key));
+      const keys = [...store.keys(), ...hashes.keys()].filter((key) => regex.test(key));
       // Single-pass fake: return every match with a terminal '0' cursor.
       return ['0', keys];
     },
@@ -181,6 +193,23 @@ describe('RedisUploadSessionStore', () => {
     await store.create(makeSession({ id: 'c', disk: 'files', key: 'other/z.csv' }));
     const scoped = await store.list({ disk: 'files', keyPrefix: 'reports/2026/' });
     expect(scoped.map((s) => s.id)).toEqual(['a']);
+  });
+
+  it('list() reads every session in one MGET and skips the parts hashes', async () => {
+    for (const id of ['a', 'b', 'c']) await store.create(makeSession({ id }));
+    await store.addPart('a', { partNumber: 1, etag: 'e1' });
+    redis.calls.get = 0;
+    const all = await store.list();
+    expect(all.map((s) => s.id).sort()).toEqual(['a', 'b', 'c']);
+    expect(redis.calls).toEqual({ get: 0, mget: 1 });
+  });
+
+  it('list() without mget falls back to GET and still skips the parts hashes', async () => {
+    const noMget = { ...redis, mget: undefined } as unknown as MinimalRedis;
+    const noMgetStore = new RedisUploadSessionStore(noMget);
+    await noMgetStore.create(makeSession({ id: 'a' }));
+    await noMgetStore.addPart('a', { partNumber: 1, etag: 'e1' });
+    expect((await noMgetStore.list()).map((s) => s.id)).toEqual(['a']);
   });
 
   it('list() throws when the redis client lacks scan', async () => {

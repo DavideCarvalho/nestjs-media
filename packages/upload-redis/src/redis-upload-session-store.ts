@@ -7,6 +7,8 @@ import type {
 
 export interface MinimalRedis {
   get(key: string): Promise<string | null>;
+  /** Multi-key get (ioredis signature). Optional — `list()` falls back to one `get` per key. */
+  mget?(...keys: string[]): Promise<Array<string | null>>;
   set(key: string, value: string, ...args: unknown[]): Promise<unknown>;
   del(...keys: string[]): Promise<unknown>;
   /**
@@ -21,6 +23,9 @@ export interface MinimalRedis {
   /** Set a key TTL in seconds (ioredis signature). Optional — bounds orphaned part hashes. */
   expire?(key: string, seconds: number): Promise<unknown>;
 }
+
+const PARTS_SUFFIX = ':parts';
+const LIST_BATCH = 100;
 
 export interface RedisUploadSessionStoreOptions {
   keyPrefix?: string;
@@ -61,7 +66,7 @@ export class RedisUploadSessionStore implements UploadSessionStore {
   }
 
   private partsKey(id: string): string {
-    return `${this.keyPrefix}:${id}:parts`;
+    return `${this.keyPrefix}:${id}${PARTS_SUFFIX}`;
   }
 
   async create(session: UploadSession): Promise<UploadSession> {
@@ -114,10 +119,11 @@ export class RedisUploadSessionStore implements UploadSessionStore {
     const sessions: UploadSession[] = [];
     let cursor = '0';
     do {
-      const [next, keys] = await this.redis.scan(cursor, 'MATCH', match, 'COUNT', 100);
+      const [next, keys] = await this.redis.scan(cursor, 'MATCH', match, 'COUNT', LIST_BATCH);
       cursor = next;
-      for (const redisKey of keys) {
-        const raw = await this.redis.get(redisKey);
+      // The pattern also matches each session's `:parts` hash, which GET/MGET cannot read.
+      const sessionKeys = keys.filter((key) => !key.endsWith(PARTS_SUFFIX));
+      for (const raw of await this.readMany(sessionKeys)) {
         if (!raw) continue;
         const session = this.deserialize(raw);
         if (!session) continue;
@@ -129,6 +135,17 @@ export class RedisUploadSessionStore implements UploadSessionStore {
       }
     } while (cursor !== '0');
     return sessions;
+  }
+
+  private async readMany(keys: string[]): Promise<Array<string | null>> {
+    const mget = this.redis.mget?.bind(this.redis);
+    if (!mget) return Promise.all(keys.map((key) => this.redis.get(key)));
+    const values: Array<string | null> = [];
+    for (let start = 0; start < keys.length; start += LIST_BATCH) {
+      const batch = keys.slice(start, start + LIST_BATCH);
+      if (batch.length > 0) values.push(...(await mget(...batch)));
+    }
+    return values;
   }
 
   async update(session: UploadSession): Promise<UploadSession> {

@@ -166,6 +166,44 @@ describe('MediaConsoleService', () => {
     expect(deleted).toEqual(['reports/deep/a.txt', 'reports/b.txt', 'reports/']);
   });
 
+  it('deletes each listed page of a folder in one deleteMany call when the disk supports it', async () => {
+    const batches: string[][] = [];
+    const deleted: string[] = [];
+    const driver = {
+      capabilities: { presign: true, multipart: true, publicUrls: false, list: true },
+      list: async (_prefix: string, options?: { cursor?: string }) => {
+        if (options?.cursor === undefined) {
+          return {
+            folders: [],
+            files: [
+              { key: 'reports/a.txt', name: 'a.txt' },
+              { key: 'reports/deep/b.txt', name: 'deep/b.txt' },
+            ],
+            cursor: 'p2',
+          };
+        }
+        return { folders: [], files: [{ key: 'reports/c.txt', name: 'c.txt' }] };
+      },
+      deleteMany: async (keys: string[]) => {
+        batches.push(keys);
+      },
+      delete: async (key: string) => {
+        deleted.push(key);
+      },
+    };
+    const storage = {
+      defaultDisk: 'primary',
+      diskNames: () => ['primary'],
+      disk: () => driver,
+    } as unknown as StorageManager;
+    const service = new MediaConsoleService(storage, null, null, true);
+
+    await service.deleteFolder('primary', 'reports');
+
+    expect(batches).toEqual([['reports/a.txt', 'reports/deep/b.txt'], ['reports/c.txt']]);
+    expect(deleted).toEqual(['reports/']);
+  });
+
   it('moves a folder recursively, preserving relative paths and relocating the marker', async () => {
     const moves: Array<{ from: string; to: string }> = [];
     const puts: string[] = [];

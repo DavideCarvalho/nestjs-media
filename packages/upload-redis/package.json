@@ -46,6 +46,8 @@
   },
   "devDependencies": {
     "@dudousxd/nestjs-media-core": "workspace:*",
+    "ioredis": "5.8.2",
+    "testcontainers": "10.18.0",
     "tsup": "8.5.1",
     "typescript": "5.9.3"
   },
