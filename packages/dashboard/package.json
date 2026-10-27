@@ -68,7 +68,7 @@
     }
   },
   "devDependencies": {
-    "@base-ui/react": "1.8.0",
+    "@base-ui/react": "1.9.0",
     "@dudousxd/nestjs-media-core": "workspace:*",
     "@nestjs/common": "12.1.2",
     "@nestjs/core": "12.1.2",
