@@ -31,6 +31,10 @@ new LocalDriver({
 
 Every path is resolved under `root` with a traversal guard: absolute paths and `..` escapes are rejected before any filesystem call. Nested directories are created on `put` automatically.
 
+## Writes
+
+`put` with a Buffer writes it directly. `put` with a `Readable` pipes the stream to a temporary file beside the target (`<target>.<uuid>.tmp`) and renames it into place when the stream ends, so a large upload never sits in memory whole. If the stream errors midway, the temporary file is removed and any existing file at the target is left untouched.
+
 <Callout type="warn">
 The guard protects against path traversal in keys, but `root` itself should still be a dedicated directory — never point it at an app or system folder.
 </Callout>

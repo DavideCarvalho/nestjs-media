@@ -51,11 +51,19 @@ The store accepts any object satisfying the minimal `MinimalRedis` shape, so it 
 interface MinimalRedis {
   get(key: string): Promise<string | null>;
   set(key: string, value: string, ...args: unknown[]): Promise<unknown>;
-  del(key: string): Promise<unknown>;
+  del(...keys: string[]): Promise<unknown>;
+  // Optional; each one is only needed by the method noted.
+  mget?(...keys: string[]): Promise<Array<string | null>>;                // list(), batched reads
+  scan?(cursor: string | number, ...args: unknown[]): Promise<[string, string[]]>; // list()
+  hset?(key: string, field: string, value: string): Promise<unknown>;      // addPart()
+  hgetall?(key: string): Promise<Record<string, string>>;                  // listParts()
+  expire?(key: string, seconds: number): Promise<unknown>;                 // TTL on part hashes
 }
 ```
 
-Sessions are stored as JSON under `${keyPrefix}:${id}` and written with an `EX` TTL on every `create`/`update`, so abandoned uploads expire on their own.
+Sessions are stored as JSON under `${keyPrefix}:${id}` and written with an `EX` TTL on every `create`/`update`, so abandoned uploads expire on their own. A session's recorded multipart parts live in a hash at `${keyPrefix}:${id}:parts`.
+
+`list()` (the dashboard's in-progress uploads view) walks `SCAN MATCH ${keyPrefix}:*` with `COUNT 100`, skips the `:parts` hashes, and reads the session keys of each scan page with `MGET` in batches of up to 100. A client without `mget` gets one `GET` per session key instead. ioredis provides every method above.
 
 ## Options
 

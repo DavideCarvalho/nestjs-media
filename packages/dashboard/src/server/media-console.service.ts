@@ -419,9 +419,9 @@ export class MediaConsoleService {
         limit: DELETE_SWEEP_LIMIT,
         ...(cursor ? { cursor } : {}),
       });
-      for (const entry of result.files) {
-        await driver.delete(entry.key);
-      }
+      const keys = result.files.map((entry) => entry.key);
+      if (driver.deleteMany) await driver.deleteMany(keys);
+      else for (const key of keys) await driver.delete(key);
       cursor = result.cursor;
     } while (cursor);
     await driver.delete(sweepPrefix);

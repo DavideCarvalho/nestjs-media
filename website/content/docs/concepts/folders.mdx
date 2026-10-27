@@ -94,7 +94,7 @@ do {
 } while (cursor);
 ```
 
-The dashboard's recursive folder delete and folder move/copy are exactly this loop — a flat sweep, then an operation per key. The default `/` delimiter would have hidden the nested keys inside `folders`, and the sweep would have missed them.
+The dashboard's recursive folder delete and folder move/copy are exactly this loop — a flat sweep, then work per page: the delete removes each listed page (up to 1000 keys) with one `deleteMany` call, which S3 does as a single `DeleteObjects` request (a disk without `deleteMany` gets one `delete` per key); move and copy run an operation per key. The default `/` delimiter would have hidden the nested keys inside `folders`, and the sweep would have missed them.
 
 ### Pagination
 

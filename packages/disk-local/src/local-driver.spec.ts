@@ -1,6 +1,7 @@
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, readdir, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { PassThrough } from 'node:stream';
 import { FileNotFoundError, UnsupportedOperationError } from '@dudousxd/nestjs-media-core';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { LocalDriver } from './local-driver';
@@ -19,6 +20,50 @@ describe('LocalDriver', () => {
     await d.put('docs/a.txt', Buffer.from('hello'));
     expect((await d.get('docs/a.txt')).toString()).toBe('hello');
     expect(await readFile(join(root, 'docs/a.txt'), 'utf8')).toBe('hello');
+  });
+
+  it('writes a stream to disk as it arrives instead of buffering it whole', async () => {
+    const d = new LocalDriver({ root });
+    const source = new PassThrough();
+    const writing = d.put('big/stream.bin', source);
+    source.write(Buffer.alloc(64 * 1024, 1));
+
+    // The first chunk must reach the filesystem while the source is still open.
+    const bytesOnDisk = async (): Promise<number> => {
+      const names = await readdir(join(root, 'big')).catch(() => [] as string[]);
+      const sizes = await Promise.all(
+        names.map(async (n) => (await stat(join(root, 'big', n))).size),
+      );
+      return sizes.reduce((a, b) => a + b, 0);
+    };
+    let written = 0;
+    for (let attempt = 0; attempt < 200 && written === 0; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      written = await bytesOnDisk();
+    }
+    expect(written).toBe(64 * 1024);
+
+    source.end(Buffer.from('tail'));
+    await writing;
+    expect(await d.size('big/stream.bin')).toBe(64 * 1024 + 4);
+    expect(await readdir(join(root, 'big'))).toEqual(['stream.bin']);
+  });
+
+  it('keeps the existing file and leaves no temp file when a stream fails midway', async () => {
+    const d = new LocalDriver({ root });
+    await d.put('keep.txt', Buffer.from('original'));
+    const source = new PassThrough();
+    const writing = d.put('keep.txt', source);
+    source.write('partial');
+    // Fail only once the write is under way (a temp file exists beside the target).
+    for (let attempt = 0; attempt < 200 && (await readdir(root)).length === 1; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    source.destroy(new Error('connection reset'));
+
+    await expect(writing).rejects.toThrow('connection reset');
+    expect((await d.get('keep.txt')).toString()).toBe('original');
+    expect(await readdir(root)).toEqual(['keep.txt']);
   });
 
   it('reports existence and size', async () => {

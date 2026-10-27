@@ -121,7 +121,7 @@ const { key } = await media.uploads.complete(session.id); // assembles + cleans 
 // media.uploads.status(id) to resume; media.uploads.abort(id) to cancel
 ```
 
-Each chunk is written immediately as a *part* on the target disk (under `uploadTmpPrefix`), so resuming needs no in-memory buffering and a half-finished upload survives a process restart. `complete` concatenates the parts into the final object and removes them. Reach `media.uploads` directly when you want to drive uploads from your own protocol or a non-HTTP transport.
+Each chunk is written immediately as a *part* on the target disk (under `uploadTmpPrefix`), so resuming needs no in-memory buffering and a half-finished upload survives a process restart. `complete` assembles the parts into the final object and removes them. On a disk with native multipart (S3) that is a server-side `completeMultipartUpload`; on any other disk the parts are streamed, in order, into a single `put` of the final key, each part opened only once the previous one has been read, so assembly holds about one part's chunks in memory rather than the whole object. Reach `media.uploads` directly when you want to drive uploads from your own protocol or a non-HTTP transport.
 
 ## Direct (presigned multipart) server
 

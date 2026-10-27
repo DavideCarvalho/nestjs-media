@@ -1,3 +1,4 @@
+import { Readable } from 'node:stream';
 import { InMemoryDriver, InMemoryUploadSessionStore } from '@dudousxd/nestjs-media-testing';
 import { beforeEach, describe, expect, it } from 'vitest';
 import {
@@ -119,6 +120,52 @@ describe('ResumableUploadManager', () => {
     const result = await manager.complete(session.id);
     expect(result).toMatchObject({ key: 'videos/clip.bin', disk: 'local', size: 6 });
     expect((await disk.get('videos/clip.bin')).toString()).toBe('abcdef');
+  });
+
+  it('assembles parts by streaming them into put, opening each part only after the previous one drains', async () => {
+    const events: string[] = [];
+    class TracingDriver extends InMemoryDriver {
+      override async get(path: string): Promise<Buffer> {
+        events.push(`get ${path}`);
+        return super.get(path);
+      }
+      override async stream(path: string): Promise<Readable> {
+        events.push(`open ${path}`);
+        return Readable.from([await super.get(path)]);
+      }
+      override async put(path: string, contents: Buffer | Readable): Promise<void> {
+        if (path !== 'big.bin') return super.put(path, contents);
+        if (Buffer.isBuffer(contents)) {
+          events.push('put buffer');
+          return super.put(path, contents);
+        }
+        const received: Buffer[] = [];
+        for await (const chunk of contents) {
+          events.push(`read ${chunk.toString()}`);
+          received.push(chunk);
+        }
+        return super.put(path, Buffer.concat(received));
+      }
+    }
+    const tracing = new TracingDriver();
+    const streaming = makeManager(tracing);
+    const session = await streaming.createUpload({ disk: 'd', key: 'big.bin' });
+    await streaming.writeChunk(session.id, 0, Buffer.from('aa'));
+    await streaming.writeChunk(session.id, 2, Buffer.from('bb'));
+    await streaming.writeChunk(session.id, 4, Buffer.from('cc'));
+
+    await streaming.complete(session.id);
+
+    const prefix = `.uploads/${session.id}`;
+    expect(events).toEqual([
+      `open ${prefix}/0`,
+      'read aa',
+      `open ${prefix}/1`,
+      'read bb',
+      `open ${prefix}/2`,
+      'read cc',
+    ]);
+    expect((await tracing.get('big.bin')).toString()).toBe('aabbcc');
   });
 
   it('reports status so a client can resume from the offset', async () => {

@@ -52,6 +52,12 @@ You can also force generation ahead of a request:
 await media.library.ensureConversion(mediaId, 'thumb'); // generate + cache now, return the record
 ```
 
+Concurrent `url` / `ensureConversion` calls for the same media and conversion share one in-flight generation within a process, so a burst of first requests for a new variant converts and uploads it once. The shared promise is dropped as soon as it settles, so a failed generation is retried on the next call. The sharing is per `MediaLibrary` instance; separate processes can still each generate the same variant.
+
+<Callout type="warn" title="Different variants of one media, generated at the same moment">
+Generating a variant reads the record, adds its one entry to `conversions`, and saves the whole record. Two *different* presets of the same media generated concurrently can therefore overwrite each other's `conversions` entry. The variant file itself is written, and the dropped entry is regenerated the next time that variant is requested.
+</Callout>
+
 ## Eager (opt-in)
 
 Mark a preset `eager` and it's generated synchronously during `attach`, so it's ready the instant the upload returns — ideal for variants you *know* you'll need immediately, like an OG image a crawler will hit seconds later, or the one size your list view always shows.
@@ -59,6 +65,8 @@ Mark a preset `eager` and it's generated synchronously during `attach`, so it's 
 ```ts
 { name: 'og', width: 1200, height: 630, eager: true }
 ```
+
+All eager presets of an `attach` share one read of the original: none at all when `contents` was a Buffer, one `disk.get` when it was a stream. The record is then saved once with every generated variant. If a preset fails, the variants generated before it are still saved on the record, and `attach` rethrows the error.
 
 <Callout type="info" title="Background dispatch is a later phase">
 Eager conversions run synchronously today — the dependable baseline. A durable/bullmq dispatcher (so eager generation rides the workflow engine's replay + dead-letter and doesn't block the request) is on the roadmap. Until then, keep heavy eager work to a small number of presets, and lean on lazy for the long tail.

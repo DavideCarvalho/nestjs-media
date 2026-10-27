@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { Readable } from 'node:stream';
 import { publishMedia } from './diagnostics';
 import {
   InvalidPartNumberError,
@@ -228,13 +229,9 @@ export class ResumableUploadManager {
       );
       await disk.completeMultipartUpload(session.key, session.multipartUploadId, parts);
     } else {
-      const chunks: Buffer[] = [];
-      for (let part = 0; part < session.parts; part += 1) {
-        chunks.push(await disk.get(this.partKey(session, part)));
-      }
       await disk.put(
         session.key,
-        Buffer.concat(chunks),
+        Readable.from(this.readParts(session)),
         session.contentType ? { contentType: session.contentType } : {},
       );
     }
@@ -272,6 +269,17 @@ export class ResumableUploadManager {
     payload: Parameters<typeof publishMedia<E>>[1],
   ): void {
     if (this.emitDiagnostics) publishMedia(event, payload);
+  }
+
+  /** The session's parts in order, each opened only once the previous one is drained, so the
+   *  assembled object is never held in memory. */
+  private async *readParts(session: UploadSession): AsyncGenerator<Buffer> {
+    const disk = this.storage.disk(session.disk);
+    for (let part = 0; part < session.parts; part += 1) {
+      for await (const chunk of await disk.stream(this.partKey(session, part))) {
+        yield Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+      }
+    }
   }
 
   private async cleanup(session: UploadSession): Promise<void> {
