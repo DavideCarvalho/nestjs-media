@@ -56,7 +56,7 @@
     "@aws-sdk/s3-request-presigner": "3.1156.0",
     "@dudousxd/nestjs-media-core": "workspace:*",
     "@dudousxd/nestjs-media-testing": "workspace:*",
-    "@smithy/util-stream": "3.3.4",
+    "@smithy/util-stream": "4.8.2",
     "aws-sdk-client-mock": "4.1.0",
     "testcontainers": "10.18.0",
     "tsup": "8.5.1",
