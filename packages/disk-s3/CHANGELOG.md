@@ -1,5 +1,11 @@
 # @dudousxd/nestjs-media-disk-s3
 
+## 0.8.3
+
+### Patch Changes
+
+- [#185](https://github.com/DavideCarvalho/nestjs-media/pull/185) [`f5cce8e`](https://github.com/DavideCarvalho/nestjs-media/commit/f5cce8e47ce16e2b3c13d2ac9f6b4c15fb1a296f) Thanks [@DavideCarvalho](https://github.com/DavideCarvalho)! - `deleteMany` now works on MinIO versions that reject `DeleteObjects` with `MissingContentMD5`: it falls back to single deletes and remembers.
+
 ## 0.8.2
 
 ### Patch Changes
