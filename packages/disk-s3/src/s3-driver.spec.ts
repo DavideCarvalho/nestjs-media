@@ -335,6 +335,32 @@ describe('S3Driver.deleteMany', () => {
   });
 });
 
+describe('S3Driver.deleteMany on MinIO', () => {
+  it('falls back to single deletes on MissingContentMD5 and stops trying the batch call', async () => {
+    s3Mock
+      .on(DeleteObjectsCommand)
+      .rejects(Object.assign(new Error('missing md5'), { name: 'MissingContentMD5' }));
+    s3Mock.on(DeleteObjectCommand).resolves({});
+    const driver = new S3Driver({ client: new S3Client({ region: 'us-east-1' }), bucket: 'b' });
+
+    await driver.deleteMany(['a', 'b']);
+    await driver.deleteMany(['c']);
+
+    expect(s3Mock.commandCalls(DeleteObjectsCommand).length).toBe(1);
+    expect(s3Mock.commandCalls(DeleteObjectCommand).map((call) => call.args[0].input.Key)).toEqual([
+      'a',
+      'b',
+      'c',
+    ]);
+  });
+
+  it('rethrows any other batch error', async () => {
+    s3Mock.on(DeleteObjectsCommand).rejects(new Error('boom'));
+    const driver = new S3Driver({ client: new S3Client({ region: 'us-east-1' }), bucket: 'b' });
+    await expect(driver.deleteMany(['a'])).rejects.toThrow('boom');
+  });
+});
+
 describe('S3Driver.list fallback', () => {
   afterEach(() => vi.unstubAllGlobals());
 
