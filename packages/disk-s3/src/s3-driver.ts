@@ -6,6 +6,7 @@ import {
   CreateMultipartUploadCommand,
   DeleteObjectCommand,
   DeleteObjectsCommand,
+  type DeleteObjectsCommandOutput,
   GetObjectCommand,
   HeadObjectCommand,
   ListObjectsV2Command,
@@ -51,6 +52,7 @@ function isNotFound(err: unknown): boolean {
 }
 
 export class S3Driver implements StorageDriver, MultipartUploadDriver {
+  private batchDeleteUnsupported = false;
   readonly capabilities: DriverCapabilities;
   private readonly client: S3Client;
   private readonly bucket: string;
@@ -171,18 +173,39 @@ export class S3Driver implements StorageDriver, MultipartUploadDriver {
     // S3 caps a DeleteObjects batch at 1000 keys.
     for (let start = 0; start < paths.length; start += 1000) {
       const batch = paths.slice(start, start + 1000);
-      const res = await this.client.send(
-        new DeleteObjectsCommand({
-          Bucket: this.bucket,
-          Delete: { Objects: batch.map((path) => ({ Key: this.key(path) })) },
-        }),
-      );
+      if (this.batchDeleteUnsupported) {
+        await this.deleteOneByOne(batch);
+        continue;
+      }
+      let res: DeleteObjectsCommandOutput;
+      try {
+        res = await this.client.send(
+          new DeleteObjectsCommand({
+            Bucket: this.bucket,
+            Delete: { Objects: batch.map((path) => ({ Key: this.key(path) })) },
+          }),
+        );
+      } catch (error) {
+        const { name, Code } = (error ?? {}) as { name?: string; Code?: string };
+        if (name !== 'MissingContentMD5' && Code !== 'MissingContentMD5') throw error;
+        // MinIO without flexible-checksum support insists on Content-MD5, which current SDKs no
+        // longer send on DeleteObjects (they send CRC32). Remember it: the batch call never works.
+        this.batchDeleteUnsupported = true;
+        await this.deleteOneByOne(batch);
+        continue;
+      }
       // DeleteObjects returns 200 with a per-key Errors[] on partial failure;
       // single delete() throws on failure, so match that instead of swallowing.
       if (res.Errors && res.Errors.length > 0) {
         const failed = res.Errors.map((error) => error.Key ?? '?').join(', ');
         throw new Error(`deleteMany failed for keys: ${failed}`);
       }
+    }
+  }
+
+  private async deleteOneByOne(paths: string[]): Promise<void> {
+    for (const path of paths) {
+      await this.client.send(new DeleteObjectCommand({ Bucket: this.bucket, Key: this.key(path) }));
     }
   }
 
