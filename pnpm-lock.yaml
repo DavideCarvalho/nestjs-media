@@ -453,8 +453,8 @@ importers:
         specifier: workspace:*
         version: link:../core
       '@dudousxd/nestjs-telescope':
-        specifier: 1.30.0
-        version: 1.30.0(@nestjs/common@12.2.0(reflect-metadata@0.2.2)(rxjs@7.8.2))(@nestjs/core@12.2.0)(reflect-metadata@0.2.2)(rxjs@7.8.2)
+        specifier: 1.31.0
+        version: 1.31.0(@nestjs/common@12.2.0(reflect-metadata@0.2.2)(rxjs@7.8.2))(@nestjs/core@12.2.0)(reflect-metadata@0.2.2)(rxjs@7.8.2)
       tsup:
         specifier: 8.5.1
         version: 8.5.1(@swc/core@1.16.21)(jiti@2.7.0)(postcss@8.5.32)(typescript@5.9.3)(yaml@2.9.0)
@@ -886,8 +886,8 @@ packages:
       reflect-metadata:
         optional: true
 
-  '@dudousxd/nestjs-telescope@1.30.0':
-    resolution: {integrity: sha512-EnGv/IZUMTNSrd0TZHpp/5PBznVqHQxicwxH3ggrPaNHsWxcFkqlPB6irTtOCLGzyEQMG1GE/Wr+sjR+IiPHsQ==}
+  '@dudousxd/nestjs-telescope@1.31.0':
+    resolution: {integrity: sha512-SCUlT/XygC4ph7nzR8Kc7Kb6/7p/5Arc0J2yorJsHpoSPMeKLNceoJufAKPw2GSrccTl8ltxs5vVf1NE83Q7Uw==}
     engines: {node: '>=20'}
     peerDependencies:
       '@dudousxd/nestjs-context': '>=0.1.0'
@@ -5186,7 +5186,7 @@ snapshots:
       '@nestjs/core': 12.2.0(@nestjs/common@12.2.0(reflect-metadata@0.2.2)(rxjs@7.8.2))(@nestjs/platform-express@12.2.0)(reflect-metadata@0.2.2)(rxjs@7.8.2)
       reflect-metadata: 0.2.2
 
-  '@dudousxd/nestjs-telescope@1.30.0(@nestjs/common@12.2.0(reflect-metadata@0.2.2)(rxjs@7.8.2))(@nestjs/core@12.2.0)(reflect-metadata@0.2.2)(rxjs@7.8.2)':
+  '@dudousxd/nestjs-telescope@1.31.0(@nestjs/common@12.2.0(reflect-metadata@0.2.2)(rxjs@7.8.2))(@nestjs/core@12.2.0)(reflect-metadata@0.2.2)(rxjs@7.8.2)':
     dependencies:
       '@nestjs/common': 12.2.0(reflect-metadata@0.2.2)(rxjs@7.8.2)
       '@nestjs/core': 12.2.0(@nestjs/common@12.2.0(reflect-metadata@0.2.2)(rxjs@7.8.2))(@nestjs/platform-express@12.2.0)(reflect-metadata@0.2.2)(rxjs@7.8.2)
