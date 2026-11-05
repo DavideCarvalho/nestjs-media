@@ -48,7 +48,7 @@
     "@dudousxd/nestjs-media-core": "workspace:*",
     "@dudousxd/nestjs-media-testing": "workspace:*",
     "@prisma/client": "6.19.3",
-    "@testcontainers/postgresql": "10.18.0",
+    "@testcontainers/postgresql": "10.28.0",
     "prisma": "6.19.3",
     "tsup": "8.5.1",
     "typescript": "5.9.3"
