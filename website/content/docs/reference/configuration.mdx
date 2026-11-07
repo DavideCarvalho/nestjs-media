@@ -42,6 +42,7 @@ interface MediaModuleOptions {
   guards?: Type<CanActivate>[] | MediaUploadGuards; // plain array = uniform, object = per-surface
   imports?: DynamicModule['imports'];       // modules providing DI deps for `guards`
   decorators?: ClassDecorator[];            // applied to every upload controller, e.g. Can(...)
+  mount?: false | { tus?: boolean; multipart?: boolean; direct?: boolean }; // false → mount none
 }
 ```
 
@@ -58,7 +59,8 @@ interface MediaModuleOptions {
 | `direct` | — | Enables `media.directUploads` + mounts `MediaDirectUploadController` (needs a presign/multipart disk, e.g. S3) |
 | `guards` | — | Gate the upload controllers; plain array = uniform, `{ tus?, multipart?, direct? }` = per-surface. **Omitted → unauthenticated.** |
 | `imports` | — | Modules providing DI deps for `guards` (or anything else you inject into them) |
-| `decorators` | — | Class decorators applied to every mounted upload controller, e.g. `[UseGuards(AuthenticationGuard), Can(MediaPolicy, 'upload')]`. Default none; the controllers are `@Can.Anyone()`-open to `@nestjs/authorization`'s global guard either way. See [Gating with `@nestjs/authorization`](/docs/packages/nestjs#gating-with-nestjsauthorization-decorators). |
+| `decorators` | — | Class decorators applied to every mounted upload controller, e.g. `[UseGuards(AuthenticationGuard), Can(MediaPolicy, 'upload')]`. Default none; the controllers are `@Can.Anyone()`-open to `@nestjs/authorization`'s global guard either way. See [Protecting the routes](/docs/packages/nestjs#protecting-the-routes). |
+| `mount` | what's configured | `false` mounts no upload controller (serve them from your own, see [Mount it yourself](/docs/packages/nestjs#1-mount-it-yourself-recommended)); `{ tus?, multipart?, direct? }` turns single surfaces off. Providers work either way. |
 
 ## `MediaUploadGuards`
 
@@ -82,15 +84,15 @@ interface MediaModuleAsyncOptions {
   inject?: any[];
   useFactory: (...args: any[]) => MediaModuleOptions | Promise<MediaModuleOptions>;
   guards?: Type<CanActivate>[] | MediaUploadGuards;                  // static — see MediaModuleOptions.guards
-  mount?: { tus?: boolean; multipart?: boolean; direct?: boolean };  // static, default all true
+  mount?: false | { tus?: boolean; multipart?: boolean; direct?: boolean };  // static, default all true
   decorators?: ClassDecorator[];                                     // static — see MediaModuleOptions.decorators
 }
 ```
 
 Use this whenever a disk or store needs an injected dependency (an `S3Client`, a `DataSource`, config service).
 
-<Callout type="warn" title="`mount` is forRootAsync-only">
-`forRootAsync` can't know at module-build time whether `tus`/`direct` will end up configured by `useFactory`, so by default it mounts all three controllers and each 501s if its feature is left unconfigured. Set the ones you never use to `false` in `mount` so they don't exist as dead, always-501 surface — e.g. `mount: { direct: false }`. `forRoot` doesn't need this: it already only mounts a controller when the matching option is present.
+<Callout title="`mount` on forRootAsync">
+`forRootAsync` can't know at module-build time whether `tus`/`direct` will end up configured by `useFactory`, so by default it mounts all three controllers and each 501s if its feature is left unconfigured. Set the ones you never use to `false` in `mount` so they don't exist as dead, always-501 surface — e.g. `mount: { direct: false }` — or `mount: false` to mount none and serve them yourself. (`forRoot` takes the same `mount`, on top of only mounting what's configured.)
 </Callout>
 
 ## `MediaCollectionConfig`
