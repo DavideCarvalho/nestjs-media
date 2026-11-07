@@ -58,6 +58,9 @@ import { getDataSourceToken } from '@nestjs/typeorm';
 @Module({
   imports: [
     MediaModule.forRootAsync({
+      // No upload routes in this app (forRootAsync would otherwise mount them). Mounting them?
+      // Protect them: see "Protecting the routes" in the nestjs package docs.
+      routes: false,
       inject: [getDataSourceToken(), S3Client],
       useFactory: (ds, s3: S3Client) => ({
         default: 's3',

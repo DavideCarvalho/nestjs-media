@@ -41,6 +41,7 @@ import { MediaModule } from '@dudousxd/nestjs-media';
 import { RedisUploadSessionStore } from '@dudousxd/nestjs-media-upload-redis';
 
 MediaModule.forRootAsync({
+  decorators: [UseGuards(AuthenticationGuard), Can(MediaPolicy, 'upload')], // required in production
   inject: ['REDIS'],
   useFactory: (redis) => ({
     default: 'local',
@@ -163,3 +164,20 @@ MediaModule.forRoot({ default: 's3', disks: { s3 }, direct: { disk: 's3' } });
 `uploadSessions` powers the resumable proxy/tus engine where the backend tracks
 the resume offset; the direct path keeps state in S3 under its `uploadId`.
 Source: `website/content/docs/concepts/uploads.mdx`.
+
+### Mistake 4 — mounting the upload routes unprotected
+
+The upload controllers have no auth of their own, and with `NODE_ENV=production` a module that
+mounts them without `decorators` refuses to boot. Protect them one of two ways:
+
+```ts
+// 1. decorators on the mounted controllers
+MediaModule.forRoot({ /* … */, decorators: [UseGuards(AuthenticationGuard), Can(MediaPolicy, 'upload')] });
+
+// 2. routes: false, and mount them yourself
+MediaModule.forRoot({ /* … */, routes: false });
+@Can(MediaPolicy, 'upload') @Controller('media/uploads')
+class UploadsController extends MediaUploadController {}
+```
+
+Source: `website/content/docs/packages/nestjs.mdx` ("Protecting the routes").

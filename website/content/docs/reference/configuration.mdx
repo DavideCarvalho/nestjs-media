@@ -38,11 +38,11 @@ interface MediaModuleOptions {
     partSize?: number;                      // default 8 MiB
   };
 
-  // ── guarding the upload controllers ──────────────────────────────────
-  guards?: Type<CanActivate>[] | MediaUploadGuards; // plain array = uniform, object = per-surface
-  imports?: DynamicModule['imports'];       // modules providing DI deps for `guards`
+  // ── protecting and mounting the upload controllers ───────────────────
   decorators?: ClassDecorator[];            // applied to every upload controller, e.g. Can(...)
-  mount?: false | { tus?: boolean; multipart?: boolean; direct?: boolean }; // false → mount none
+  routes?: boolean;                         // false → mount no upload controller
+  mount?: { tus?: boolean; multipart?: boolean; direct?: boolean }; // turn single surfaces off
+  imports?: DynamicModule['imports'];       // modules providing DI deps for a decorator's guards
 }
 ```
 
@@ -57,35 +57,32 @@ interface MediaModuleOptions {
 | `uploadTmpPrefix` | — | Where in-progress chunks are staged on the disk |
 | `tus` | — | Mounts `MediaUploadController` (needs `uploadSessions`) |
 | `direct` | — | Enables `media.directUploads` + mounts `MediaDirectUploadController` (needs a presign/multipart disk, e.g. S3) |
-| `guards` | — | Gate the upload controllers; plain array = uniform, `{ tus?, multipart?, direct? }` = per-surface. **Omitted → unauthenticated.** |
-| `imports` | — | Modules providing DI deps for `guards` (or anything else you inject into them) |
-| `decorators` | — | Class decorators applied to every mounted upload controller, e.g. `[UseGuards(AuthenticationGuard), Can(MediaPolicy, 'upload')]`. Default none; the controllers are `@Can.Anyone()`-open to `@nestjs/authorization`'s global guard either way. See [Protecting the routes](/docs/packages/nestjs#protecting-the-routes). |
-| `mount` | what's configured | `false` mounts no upload controller (serve them from your own, see [Mount it yourself](/docs/packages/nestjs#1-mount-it-yourself-recommended)); `{ tus?, multipart?, direct? }` turns single surfaces off. Providers work either way. |
+| `decorators` | in production, unless nothing is mounted | Class decorators applied to every mounted upload controller, e.g. `[UseGuards(AuthenticationGuard), Can(MediaPolicy, 'upload')]`. The controllers are `@Can.Anyone()`-open to `@nestjs/authorization`'s global guard either way. See [Protecting the routes](#protecting-the-routes). |
+| `routes` | — | `false` mounts no upload controller; serve them from your own (see [Mount it yourself](/docs/packages/nestjs#1-mount-it-yourself)). Providers work either way. Default `true`. |
+| `mount` | — | `{ tus?, multipart?, direct? }` turns single surfaces off. Default: mount what's configured. |
+| `imports` | — | Modules providing DI deps for a guard passed through `decorators` |
 
-## `MediaUploadGuards`
+## Protecting the routes
 
-Per-surface guard lists for the `guards` option — each key gates one controller; an omitted key leaves that controller unguarded (it does not fall back to another surface's guards). The plain-array form of `guards` gates all three uniformly instead.
+The upload controllers (and the [`/media` console](/docs/packages/dashboard#protecting-the-routes)) have no auth of their own. Protect them with NestJS's first-party tools, one of two ways:
 
-```ts
-interface MediaUploadGuards {
-  tus?: Type<CanActivate>[];        // MediaUploadController (tus session create/HEAD/PATCH)
-  multipart?: Type<CanActivate>[];  // MediaMultipartUploadController (part PUTs + /complete)
-  direct?: Type<CanActivate>[];     // MediaDirectUploadController (S3 presign endpoints)
-}
-```
+1. **Mount them yourself**: `routes: false`, then extend the exported controllers — `@Can(MediaPolicy, 'upload') @Controller('media/uploads') class UploadsController extends MediaUploadController {}`.
+2. **`decorators`** on the mounted controllers — `MediaModule.forRoot({ ..., decorators: [UseGuards(AuthenticationGuard), Can(MediaPolicy, 'upload')] })`.
+
+**Production rule:** when `NODE_ENV === 'production'`, `MediaModule.forRoot`/`forRootAsync` and `MediaDashboardModule.forRoot`/`forRootAsync` throw at module definition if they mount routes with no `decorators` (an empty array counts as none), with an error naming both ways. Outside production undecorated routes mount open.
 
 ## `MediaModule.forRootAsync(options)`
 
-Same options, resolved through a factory with DI — **except `guards`, `mount` and `decorators`**, which are static fields on the config object itself, not part of what `useFactory` resolves (controllers, and the enhancers bound to them, are wired at module-build time, before any async factory runs):
+Same options, resolved through a factory with DI — **except `decorators`, `routes` and `mount`**, which are static fields on the config object itself, not part of what `useFactory` resolves (controllers, and the enhancers bound to them, are wired at module-build time, before any async factory runs):
 
 ```ts
 interface MediaModuleAsyncOptions {
   imports?: any[];
   inject?: any[];
   useFactory: (...args: any[]) => MediaModuleOptions | Promise<MediaModuleOptions>;
-  guards?: Type<CanActivate>[] | MediaUploadGuards;                  // static — see MediaModuleOptions.guards
-  mount?: false | { tus?: boolean; multipart?: boolean; direct?: boolean };  // static, default all true
-  decorators?: ClassDecorator[];                                     // static — see MediaModuleOptions.decorators
+  decorators?: ClassDecorator[];                                // static — see MediaModuleOptions.decorators
+  routes?: boolean;                                             // static, default true
+  mount?: { tus?: boolean; multipart?: boolean; direct?: boolean }; // static, default all true
 }
 ```
 

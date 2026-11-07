@@ -57,15 +57,24 @@ app.use('/media/uploads', express.raw({ type: 'application/offset+octet-stream' 
 
 ## Protecting the routes
 
-The upload controllers (`MediaUploadController` for tus, `MediaMultipartUploadController`, `MediaDirectUploadController`) carry **no auth of their own: uploads are unauthenticated until you protect them.** In order of preference:
+The upload controllers (`MediaUploadController` for tus, `MediaMultipartUploadController`, `MediaDirectUploadController`) carry **no auth of their own**: you protect them with NestJS's first-party tools (`@nestjs/authentication`, `@nestjs/authorization`), one of two ways:
 
-1. **Mount them yourself** with the official tools (recommended).
+1. **Mount them yourself**: `routes: false`, then extend the exported controllers.
 2. **`decorators`** on the routes this module mounts.
-3. **`guards`**, kept for compatibility.
 
-Every upload controller is marked `@Can.Anyone()`-open (it defines `'authorization:can-anyone'` metadata, with no dependency on `@nestjs/authorization`), so the official deny-by-default global `AuthorizationGuard` doesn't refuse it. That mark only opens a route that declares no requirement: a `@Can(...)` you add, by any of the three ways below, is still checked (401 for a guest, 403 for a user the policy denies).
+**Production rule.** When `NODE_ENV === 'production'`, a registration that mounts upload routes without `decorators` (an empty array counts as none) refuses to boot:
 
-### 1. Mount it yourself (recommended)
+```txt
+MediaModule.forRoot() mounts routes with no protection, which is refused when NODE_ENV=production. Protect them one of two ways:
+  1. decorators on the mounted controllers: MediaModule.forRoot({ ..., decorators: [UseGuards(AuthenticationGuard), Can(MediaPolicy, 'upload')] })
+  2. routes: false, and mount them yourself: MediaModule.forRoot({ ..., routes: false }) + @Can(MediaPolicy, 'upload') @Controller('media/uploads') class UploadsController extends MediaUploadController {}
+```
+
+A registration that mounts nothing (`routes: false`, every surface off through `mount`, or no upload feature configured on `forRoot`) boots as usual. Outside production, undecorated routes mount open.
+
+Every upload controller is marked `@Can.Anyone()`-open (it defines `'authorization:can-anyone'` metadata, with no dependency on `@nestjs/authorization`), so the official deny-by-default global `AuthorizationGuard` doesn't refuse it. That mark only opens a route that declares no requirement: a `@Can(...)` you add, either way, is still checked (401 for a guest, 403 for a user the policy denies).
+
+### 1. Mount it yourself
 
 This is how NestJS's first-party packages work: they give you the service, you write the controller, and you protect it like any other route of yours. `routes: false` mounts **no** upload controller, while every provider keeps working (`MediaService`, and the `MEDIA_TUS` / `MEDIA_UPLOADS` / `MEDIA_DIRECT` handlers). You then serve the same routes by extending the exported controller classes, at a path you pick, with ordinary Nest decorators:
 
@@ -123,20 +132,7 @@ MediaModule.forRoot({
 });
 ```
 
-On `forRootAsync` it is a static field on the config object, like `guards` and `mount`, since it shapes the routes before any factory runs. Each registration decorates a fresh subclass of each controller, so one registration's decorators never leak into another. With `decorators` set, resolve the controllers by route, not with `app.get(MediaUploadController)`.
-
-### 3. `guards` (compatibility)
-
-`guards` gates the mounted controllers with guard classes. A plain array gates all three uniformly; a per-surface object gates each independently, since the surfaces often carry different sensitivity (session creation admin-only, part PUTs any authenticated user):
-
-```ts
-MediaModule.forRoot({
-  // …
-  guards: { tus: [AdminGuard], multipart: [AuthenticatedGuard] }, // direct omitted → unguarded
-});
-```
-
-An omitted key (or the whole option) leaves that surface unguarded. On `forRootAsync`, `guards` is a *static* field on the config object, not resolved via `useFactory`, since controllers are wired at module-build time; a guard that needs async-resolved config (e.g. a `ConfigService` secret) should inject it itself via DI, with its providing module passed through `imports`. `guards` composes with `decorators` (both must pass; `guards` runs first). The guards are stamped on the shared controller classes, so subclasses you mount yourself inherit them too.
+On `forRootAsync` it is a static field on the config object, like `mount`, since it shapes the routes before any factory runs. Each registration decorates a fresh subclass of each controller, so one registration's decorators never leak into another. With `decorators` set, resolve the controllers by route, not with `app.get(MediaUploadController)`.
 
 ## Mounting only what you use
 
@@ -149,7 +145,7 @@ MediaModule.forRootAsync({
 });
 ```
 
-`routes: false` turns them all off (see [Mount it yourself](#1-mount-it-yourself-recommended)).
+`routes: false` turns them all off (see [Mount it yourself](#1-mount-it-yourself)).
 
 ## Direct upload controller
 

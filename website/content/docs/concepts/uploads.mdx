@@ -62,7 +62,7 @@ MediaModule.forRoot({
 This mounts `MediaUploadController`, implementing the tus creation + termination protocol (`OPTIONS / POST / HEAD / PATCH / DELETE`) at `media/uploads`.
 
 <Callout type="warn" title="No built-in auth">
-`MediaUploadController` (and `MediaDirectUploadController` for the [direct path](/docs/recipes/direct-s3-upload)) ship **without any authentication or authorization guard** — anyone who can reach `media/uploads` (or `media/uploads/direct`) can create, append to, and abort uploads. Protect these routes yourself: apply a NestJS guard (e.g. a global `APP_GUARD`, or a route-prefix guard/middleware on `media/uploads`) appropriate to your app.
+`MediaUploadController` (and `MediaDirectUploadController` for the [direct path](/docs/recipes/direct-s3-upload)) ship **without any authentication or authorization of their own** — anyone who can reach `media/uploads` (or `media/uploads/direct`) can create, append to, and abort uploads. Protect them with `decorators` or by mounting them yourself (`routes: false`) — see [Protecting the routes](/docs/packages/nestjs#protecting-the-routes). In production (`NODE_ENV=production`) the module refuses to boot until you do one of the two.
 </Callout>
 
 </Step>

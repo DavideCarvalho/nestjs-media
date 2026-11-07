@@ -41,6 +41,8 @@ import { SharpImageProcessor } from '@dudousxd/nestjs-media-image-sharp';
 @Module({
   imports: [
     MediaModule.forRootAsync({
+      // No upload routes in this app. Mounting them? Protect them — see "Protecting the routes".
+      routes: false,
       inject: [getDataSourceToken(), S3Client],
       useFactory: (ds, s3) => ({
         default: 's3',
@@ -97,27 +99,36 @@ proxied (resumable **tus**) vs direct (presigned S3 multipart). The proxy path i
 implemented end to end: `ResumableUploadManager` engine → framework-agnostic
 `TusUploadHandler` → NestJS `MediaUploadController` → React `useMediaUpload`/`MediaUploader`.
 
-> **Protecting the routes:** the upload controllers ship with **no built-in auth**. In order of
-> preference: (1) **mount them yourself**, as NestJS's first-party packages have you do: pass
-> `routes: false` (every provider keeps working) and extend the exported controller classes in your
-> own module, protected with ordinary decorators; (2) pass `decorators`, applied to every mounted
-> controller; (3) `guards` (and the console's built-in `auth`), kept for compatibility.
->
-> ```ts
-> MediaModule.forRoot({ /* … */, tus: { disk: 'local', basePath: '/api/uploads' }, routes: false });
->
-> @Can(MediaPolicy, 'upload')
-> @Controller('api/uploads')
-> export class UploadsController extends MediaUploadController {}
->
-> // or, keeping the library's routes:
-> MediaModule.forRoot({ /* … */, decorators: [UseGuards(AuthenticationGuard), Can(MediaPolicy, 'upload')] });
-> MediaDashboardModule.forRoot({ decorators: [Can(MediaPolicy, 'console')] });
-> ```
->
-> Every controller this library mounts (uploads and the `/media` console) is marked
-> `@Can.Anyone()`-open, so `@nestjs/authorization`'s deny-by-default global guard doesn't refuse it;
-> a `@Can(...)` you add is still checked. `MediaDashboardModule` takes the same `routes: false`.
+## Protecting the routes
+
+The upload controllers and the `/media` console ship with **no auth of their own**: you protect them
+with NestJS's first-party tools (`@nestjs/authentication`, `@nestjs/authorization`), one of two ways.
+
+1. **Mount them yourself.** Pass `routes: false` (every provider keeps working) and extend the
+   exported controllers in your own module, decorated like any other controller:
+
+   ```ts
+   MediaModule.forRoot({ /* … */, tus: { disk: 'local', basePath: '/api/uploads' }, routes: false });
+
+   @Can(MediaPolicy, 'upload')
+   @Controller('api/uploads')
+   export class UploadsController extends MediaUploadController {}
+   ```
+
+2. **`decorators` on the mounted controllers**, applied to every controller the module mounts:
+
+   ```ts
+   MediaModule.forRoot({ /* … */, decorators: [UseGuards(AuthenticationGuard), Can(MediaPolicy, 'upload')] });
+   MediaDashboardModule.forRoot({ decorators: [UseGuards(AuthenticationGuard), Can(MediaPolicy, 'console')] });
+   ```
+
+**Production rule:** when `NODE_ENV === 'production'`, a `MediaModule` or `MediaDashboardModule`
+that mounts routes without `decorators` (an empty list counts as none) refuses to boot, with an
+error naming both ways. Outside production undecorated routes mount open.
+
+Every controller this library mounts is marked `@Can.Anyone()`-open, so `@nestjs/authorization`'s
+deny-by-default global guard doesn't refuse it; a `@Can(...)` you add is still checked. `mount`
+(`{ tus?, multipart?, direct? }`) still turns single upload surfaces off.
 
 ## Status
 
