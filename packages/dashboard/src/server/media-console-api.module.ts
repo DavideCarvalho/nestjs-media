@@ -1,5 +1,5 @@
 import { type DynamicModule, Module, type ModuleMetadata, type Provider } from '@nestjs/common';
-import { decoratedController } from './controller-decorators.js';
+import { assertRoutesProtected, decoratedController } from './controller-decorators.js';
 import { MediaConsoleActionsController } from './media-console-actions.controller.js';
 import { MediaConsoleReadController } from './media-console-read.controller.js';
 import { MediaConsoleService } from './media-console.service.js';
@@ -39,6 +39,15 @@ interface ApiModuleOptions {
 @Module({})
 export class MediaConsoleApiModule {
   static register(options: ApiModuleOptions): DynamicModule {
+    assertRoutesProtected({
+      module: 'MediaConsoleApiModule.register',
+      mountsRoutes: options.routes !== false,
+      decorators: options.decorators,
+      decoratorsExample:
+        "MediaConsoleApiModule.register({ ..., decorators: [UseGuards(AuthenticationGuard), Can(MediaPolicy, 'console')] })",
+      selfMountExample:
+        "MediaConsoleApiModule.register({ ..., routes: false }) + @Can(MediaPolicy, 'console') @Controller('media/api') class ConsoleApiController extends MediaConsoleReadController {}",
+    });
     return {
       module: MediaConsoleApiModule,
       imports: options.imports ?? [],

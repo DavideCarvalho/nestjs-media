@@ -5,7 +5,7 @@ import { Can, Policy } from '@nestjs/authorization';
 import { type DynamicModule, Global, Module } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { MediaConsoleService, MediaDashboardModule } from './index.js';
+import { MediaConsoleApiModule, MediaConsoleService, MediaDashboardModule } from './index.js';
 
 const STORAGE = Symbol.for('nestjs-media:storage');
 const STORE = Symbol.for('nestjs-media:store');
@@ -79,6 +79,23 @@ describe('in production', () => {
       expect(message).toContain('extends MediaConsoleReadController');
     });
   }
+
+  it('MediaConsoleApiModule.register follows the same rule', () => {
+    const objectUrls = { strategy: 'auto' as const, apiBasePath: '/media/api' };
+    expect(() => MediaConsoleApiModule.register({ actions: false, objectUrls })).toThrow(
+      /^MediaConsoleApiModule\.register\(\) mounts routes with no protection/,
+    );
+    expect(
+      MediaConsoleApiModule.register({
+        actions: false,
+        objectUrls,
+        decorators: [Can(ConsolePolicy, 'console')],
+      }).controllers,
+    ).toHaveLength(1);
+    expect(
+      MediaConsoleApiModule.register({ actions: false, objectUrls, routes: false }).controllers,
+    ).toEqual([]);
+  });
 
   it('boots with decorators', async () => {
     await boots(() =>
