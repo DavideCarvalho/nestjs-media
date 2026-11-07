@@ -125,7 +125,7 @@ export interface MediaDashboardOptions {
    *
    * Default `true`.
    */
-  mount?: boolean;
+  routes?: boolean;
 }
 
 /**
@@ -175,8 +175,8 @@ export interface MediaDashboardAsyncOptions {
    * the decorators shape the routes when the module is built.
    */
   decorators?: ClassDecorator[];
-  /** See {@link MediaDashboardOptions.mount}. Static, like `guards`/`decorators`. */
-  mount?: boolean;
+  /** See {@link MediaDashboardOptions.routes}. Static, like `guards`/`decorators`. */
+  routes?: boolean;
 }
 
 /** Leading slash, no trailing slash. */
@@ -241,7 +241,7 @@ export class MediaDashboardModule {
       objectUrls?: ObjectUrlStrategy;
       guards?: Array<Type<CanActivate> | CanActivate>;
       decorators?: ClassDecorator[];
-      mount?: boolean;
+      routes?: boolean;
     },
     apiBasePath: string,
     authProvider: Provider,
@@ -250,7 +250,7 @@ export class MediaDashboardModule {
   ): DynamicModule {
     const basePath = normalize(options.basePath ?? '/media');
     const actions = options.actions === true;
-    const mount = options.mount !== false;
+    const mount = options.routes !== false;
     // MediaDashboardUiController ships with no guard of its own, so this is a plain REPLACE (base
     // `[]`) — matches `MediaConsoleApiModule`'s own `stampGuards` call for the read/action
     // controllers, which DOES have a built-in base to append onto.
@@ -283,7 +283,7 @@ export class MediaDashboardModule {
           imports,
           ...(options.guards ? { guards: options.guards } : {}),
           ...(options.decorators ? { decorators: options.decorators } : {}),
-          mount,
+          routes: mount,
         }),
         ...(mount
           ? [
@@ -303,7 +303,7 @@ export class MediaDashboardModule {
         ...(options.guards ?? []).filter(isGuardClass),
       ],
       // Re-export the API module so its MediaConsoleService reaches importers if they want it; the
-      // resolved paths too, so a host mounting the controllers itself (`mount: false`) can extend
+      // resolved paths too, so a host mounting the controllers itself (`routes: false`) can extend
       // `MediaDashboardUiController` in a module of its own.
       exports: [MediaConsoleApiModule, MEDIA_DASHBOARD_BASE_PATH, MEDIA_DASHBOARD_API_PATH],
     };

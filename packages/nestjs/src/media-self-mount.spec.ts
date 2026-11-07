@@ -1,5 +1,5 @@
 // "Mount it yourself", end to end against the REAL first-party `@nestjs/authorization`:
-// `MediaModule.forRoot({ mount: false })` mounts no upload controller, every provider still works,
+// `MediaModule.forRoot({ routes: false })` mounts no upload controller, every provider still works,
 // and the developer serves the same routes from controllers of their own — subclasses of the
 // exported controller classes — protected with ordinary `@Can(...)` decorators under the official
 // deny-by-default global `AuthorizationGuard`.
@@ -59,7 +59,7 @@ function options(): MediaModuleOptions {
     // `basePath` is what the tus Location header points at: the developer's own mount.
     tus: { disk: 'local', basePath: '/api/uploads', keyFor: (filename) => `uploads/${filename}` },
     direct: { disk: 'local' },
-    mount: false,
+    routes: false,
   };
 }
 
@@ -97,10 +97,10 @@ function createUpload(baseUrl: string, path: string, headers: Record<string, str
   });
 }
 
-describe('mount: false', () => {
+describe('routes: false', () => {
   for (const [name, register] of [
     ['forRoot', () => MediaModule.forRoot(options())],
-    ['forRootAsync', () => MediaModule.forRootAsync({ useFactory: options, mount: false })],
+    ['forRootAsync', () => MediaModule.forRootAsync({ useFactory: options, routes: false })],
   ] as const) {
     it(`${name}: mounts no upload route, every provider still works`, async () => {
       const baseUrl = await boot(register(), []);
@@ -121,7 +121,12 @@ describe('mount: false', () => {
 
   it('the object form still drops single surfaces on forRoot', async () => {
     const baseUrl = await boot(
-      MediaModule.forRoot({ ...options(), tus: { disk: 'local' }, mount: { direct: false } }),
+      MediaModule.forRoot({
+        ...options(),
+        routes: true,
+        tus: { disk: 'local' },
+        mount: { direct: false },
+      }),
       [],
     );
 
@@ -183,7 +188,7 @@ describe('upload routes mounted by the developer, protected with @Can(...)', () 
   });
 
   it('works with forRootAsync too', async () => {
-    const baseUrl = await boot(MediaModule.forRootAsync({ useFactory: options, mount: false }), [
+    const baseUrl = await boot(MediaModule.forRootAsync({ useFactory: options, routes: false }), [
       UploadsController,
     ]);
 

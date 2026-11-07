@@ -102,39 +102,43 @@ export interface MediaModuleOptions extends StorageManagerOptions {
   /**
    * Which upload controllers this module mounts. `forRoot` mounts a controller only when its
    * feature is configured (`tus` → tus, `uploadSessions` → multipart, `direct` → direct); `mount`
-   * narrows that further. `mount: false` mounts NONE, while every provider (`MediaService`,
-   * `MEDIA_TUS`, `MEDIA_UPLOADS`, `MEDIA_DIRECT`, …) still works — so you serve the routes from a
-   * controller of your own, protected with ordinary Nest decorators (`@Can`, `@UseGuards`), by
-   * extending the exported controller classes:
+   * narrows that further (`{ direct: false }`). See {@link MediaUploadMount}. Default: mount what's
+   * configured.
+   */
+  mount?: MediaUploadMount;
+  /**
+   * `false` mounts NO upload controller, while every provider (`MediaService`, `MEDIA_TUS`,
+   * `MEDIA_UPLOADS`, `MEDIA_DIRECT`, …) still works — the way NestJS's own packages leave routes to
+   * you: serve them from a controller of your own, protected with ordinary Nest decorators (`@Can`,
+   * `@UseGuards`), by extending the exported controller classes. The same name as the other Aviary
+   * libraries' `routes: false`.
    *
    * ```ts
    * @Can(MediaPolicy, 'upload')
    * @Controller('media/uploads')
    * export class UploadsController extends MediaUploadController {}
    * ```
-   *
-   * See {@link MediaUploadMount} for the per-surface form. Default: mount what's configured.
    */
-  mount?: MediaUploadMount;
+  routes?: boolean;
 }
 
 /**
- * `mount` for `MediaModule.forRoot`/`forRootAsync`: `false` mounts no upload controller at all
- * (the "mount it yourself" mode); the object form turns single surfaces off (`{ direct: false }`).
- * An omitted key (or `true`) keeps that surface's default.
+ * `mount` for `MediaModule.forRoot`/`forRootAsync`: turns single surfaces off (`{ direct: false }`).
+ * An omitted key (or `true`) keeps that surface's default. To mount none, `routes: false`.
  */
-export type MediaUploadMount =
-  | false
-  | {
-      tus?: boolean;
-      multipart?: boolean;
-      direct?: boolean;
-    };
+export interface MediaUploadMount {
+  tus?: boolean;
+  multipart?: boolean;
+  direct?: boolean;
+}
 
-/** Whether `mount` leaves `surface` on (its default when not mentioned). */
-function mounts(mount: MediaUploadMount | undefined, surface: 'tus' | 'multipart' | 'direct') {
-  if (mount === false) return false;
-  return mount?.[surface] !== false;
+/** Whether `surface` is mounted: on by default, off under `routes: false` or `mount[surface]: false`. */
+function mounts(
+  options: { mount?: MediaUploadMount; routes?: boolean },
+  surface: 'tus' | 'multipart' | 'direct',
+) {
+  if (options.routes === false) return false;
+  return options.mount?.[surface] !== false;
 }
 
 export interface MediaModuleAsyncOptions {
@@ -163,11 +167,12 @@ export interface MediaModuleAsyncOptions {
    * runs — so `forRootAsync` mounts all three by default (each 501s when its
    * underlying feature is left unconfigured by the factory). Set the ones you
    * never configure to `false` so they don't exist as dead surface at all, e.g.
-   * `mount: { direct: false }` when you don't configure `direct` uploads. `mount: false` mounts
-   * none of them (serve them from your own controller — see `MediaModuleOptions.mount`). A `mount`
-   * returned by `useFactory` is ignored.
+   * `mount: { direct: false }` when you don't configure `direct` uploads. A `mount` returned by
+   * `useFactory` is ignored.
    */
   mount?: MediaUploadMount;
+  /** As {@link MediaModuleOptions.routes}: static, so it lives here, not in `useFactory`'s result. */
+  routes?: boolean;
   /**
    * Class decorators applied to every mounted upload controller — see
    * `MediaModuleOptions.decorators`. Static (not resolved by `useFactory`) for the same reason as
@@ -355,9 +360,9 @@ export class MediaModule {
         MediaService,
       ],
       controllers: [
-        ...(tus && mounts(options.mount, 'tus') ? [controllers.tus] : []),
-        ...(uploads && mounts(options.mount, 'multipart') ? [controllers.multipart] : []),
-        ...(direct && mounts(options.mount, 'direct') ? [controllers.direct] : []),
+        ...(tus && mounts(options, 'tus') ? [controllers.tus] : []),
+        ...(uploads && mounts(options, 'multipart') ? [controllers.multipart] : []),
+        ...(direct && mounts(options, 'direct') ? [controllers.direct] : []),
       ],
       exports: [
         MediaService,
@@ -440,9 +445,9 @@ export class MediaModule {
       // hatch (see its JSDoc on `MediaModuleAsyncOptions`) for dropping a
       // controller's route surface entirely instead of leaving it mounted-but-501.
       controllers: [
-        ...(mounts(options.mount, 'tus') ? [controllers.tus] : []),
-        ...(mounts(options.mount, 'multipart') ? [controllers.multipart] : []),
-        ...(mounts(options.mount, 'direct') ? [controllers.direct] : []),
+        ...(mounts(options, 'tus') ? [controllers.tus] : []),
+        ...(mounts(options, 'multipart') ? [controllers.multipart] : []),
+        ...(mounts(options, 'direct') ? [controllers.direct] : []),
       ],
       exports: [
         MediaService,

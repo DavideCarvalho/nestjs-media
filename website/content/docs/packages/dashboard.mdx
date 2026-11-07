@@ -36,7 +36,7 @@ interface MediaDashboardOptions {
   guards?: Array<Type<CanActivate> | CanActivate>; // bring-your-own guard(s)
   imports?: DynamicModule['imports'];        // DI resolution path for `guards`
   decorators?: ClassDecorator[];             // applied to every console controller, e.g. Can(...)
-  mount?: boolean;                           // false → mount no controller (mount them yourself)
+  routes?: boolean;                           // false → mount no controller (mount them yourself)
   objectInsights?: ObjectInsightProvider[];  // host context shown in the preview
   objectUrls?: 'auto' | 'proxy';             // presigned store URLs, or same-origin — default 'auto'
 }
@@ -68,7 +68,7 @@ The console mounts a page/asset controller, the read and action JSON APIs, and a
 
 ### 1. Mount it yourself (recommended)
 
-`mount: false` registers **no** console controller, while every provider keeps working and is exported (`MediaConsoleService`, `MediaConsoleGuard`, the resolved paths, `auth`). Serve the console by extending the exported controller classes in a module of your own and protect them like any of your routes. Keep `basePath`/`apiBasePath` equal to where you mount them, since the SPA reads both:
+`routes: false` registers **no** console controller, while every provider keeps working and is exported (`MediaConsoleService`, `MediaConsoleGuard`, the resolved paths, `auth`). Serve the console by extending the exported controller classes in a module of your own and protect them like any of your routes. Keep `basePath`/`apiBasePath` equal to where you mount them, since the SPA reads both:
 
 ```ts
 import { Can } from '@nestjs/authorization';
@@ -100,7 +100,7 @@ export class ConsoleAuthController extends MediaConsoleAuthController {} // the 
 @Module({
   imports: [
     AuthorizationModule.forRoot(),
-    MediaDashboardModule.forRoot({ basePath: '/media', apiBasePath: '/media/api', mount: false }),
+    MediaDashboardModule.forRoot({ basePath: '/media', apiBasePath: '/media/api', routes: false }),
   ],
   controllers: [ConsolePageController, ConsoleApiController, ConsoleActionsController, ConsoleAuthController],
   providers: [MediaPolicy],

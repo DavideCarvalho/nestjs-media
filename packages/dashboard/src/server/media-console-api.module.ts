@@ -72,9 +72,9 @@ interface ApiModuleOptions {
   decorators?: ClassDecorator[];
   /**
    * `false` registers no controller, only the providers (exported), for a host that mounts the
-   * controllers itself — see `MediaDashboardOptions.mount`. Default `true`.
+   * controllers itself — see `MediaDashboardOptions.routes`. Default `true`.
    */
-  mount?: boolean;
+  routes?: boolean;
 }
 
 /**
@@ -95,7 +95,7 @@ export class MediaConsoleApiModule {
       module: MediaConsoleApiModule,
       imports: options.imports ?? [],
       controllers:
-        options.mount === false
+        options.routes === false
           ? []
           : [
               decoratedController(MediaConsoleReadController, options.decorators, (target) =>
@@ -133,7 +133,7 @@ export class MediaConsoleApiModule {
       // hand an unauthenticated navigation to the host's `unauthenticatedPage`. Exporting keeps the
       // single `authProvider` instance shared; re-providing the same factory in both modules would
       // run a `forRootAsync` host's `useAuth` twice.
-      // The rest is exported for a host mounting the controllers itself (`mount: false`): a subclass of
+      // The rest is exported for a host mounting the controllers itself (`routes: false`): a subclass of
       // the auth controller, or `MediaConsoleGuard` on the read/action ones, injects them in the
       // host's module.
       exports: [

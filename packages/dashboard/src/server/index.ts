@@ -6,7 +6,7 @@ export {
 export { MediaConsoleApiModule } from './media-console-api.module.js';
 export type { ObjectUrlConfig, ObjectUrlStrategy } from './object-urls.js';
 export { MediaConsoleService } from './media-console.service.js';
-// The controllers, for a host that mounts the console itself (`mount: false`) by extending them.
+// The controllers, for a host that mounts the console itself (`routes: false`) by extending them.
 export { MediaDashboardUiController } from './media-dashboard-ui.controller.js';
 export { MediaConsoleReadController } from './media-console-read.controller.js';
 export { MediaConsoleActionsController } from './media-console-actions.controller.js';

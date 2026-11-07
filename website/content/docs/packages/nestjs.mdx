@@ -67,7 +67,7 @@ Every upload controller is marked `@Can.Anyone()`-open (it defines `'authorizati
 
 ### 1. Mount it yourself (recommended)
 
-This is how NestJS's first-party packages work: they give you the service, you write the controller, and you protect it like any other route of yours. `mount: false` mounts **no** upload controller, while every provider keeps working (`MediaService`, and the `MEDIA_TUS` / `MEDIA_UPLOADS` / `MEDIA_DIRECT` handlers). You then serve the same routes by extending the exported controller classes, at a path you pick, with ordinary Nest decorators:
+This is how NestJS's first-party packages work: they give you the service, you write the controller, and you protect it like any other route of yours. `routes: false` mounts **no** upload controller, while every provider keeps working (`MediaService`, and the `MEDIA_TUS` / `MEDIA_UPLOADS` / `MEDIA_DIRECT` handlers). You then serve the same routes by extending the exported controller classes, at a path you pick, with ordinary Nest decorators:
 
 ```ts
 import { Can } from '@nestjs/authorization';
@@ -97,7 +97,7 @@ export class DirectUploadsController extends MediaDirectUploadController {} // S
     MediaModule.forRoot({
       // …
       tus: { disk: 'local', basePath: '/api/uploads' }, // the tus Location header points here
-      mount: false,
+      routes: false,
     }),
   ],
   controllers: [UploadsController, UploadPartsController, DirectUploadsController],
@@ -149,7 +149,7 @@ MediaModule.forRootAsync({
 });
 ```
 
-`mount: false` turns them all off (see [Mount it yourself](#1-mount-it-yourself-recommended)).
+`routes: false` turns them all off (see [Mount it yourself](#1-mount-it-yourself-recommended)).
 
 ## Direct upload controller
 

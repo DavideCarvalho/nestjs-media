@@ -99,12 +99,12 @@ implemented end to end: `ResumableUploadManager` engine → framework-agnostic
 
 > **Protecting the routes:** the upload controllers ship with **no built-in auth**. In order of
 > preference: (1) **mount them yourself**, as NestJS's first-party packages have you do: pass
-> `mount: false` (every provider keeps working) and extend the exported controller classes in your
+> `routes: false` (every provider keeps working) and extend the exported controller classes in your
 > own module, protected with ordinary decorators; (2) pass `decorators`, applied to every mounted
 > controller; (3) `guards` (and the console's built-in `auth`), kept for compatibility.
 >
 > ```ts
-> MediaModule.forRoot({ /* … */, tus: { disk: 'local', basePath: '/api/uploads' }, mount: false });
+> MediaModule.forRoot({ /* … */, tus: { disk: 'local', basePath: '/api/uploads' }, routes: false });
 >
 > @Can(MediaPolicy, 'upload')
 > @Controller('api/uploads')
@@ -117,7 +117,7 @@ implemented end to end: `ResumableUploadManager` engine → framework-agnostic
 >
 > Every controller this library mounts (uploads and the `/media` console) is marked
 > `@Can.Anyone()`-open, so `@nestjs/authorization`'s deny-by-default global guard doesn't refuse it;
-> a `@Can(...)` you add is still checked. `MediaDashboardModule` takes the same `mount: false`.
+> a `@Can(...)` you add is still checked. `MediaDashboardModule` takes the same `routes: false`.
 
 ## Status
 

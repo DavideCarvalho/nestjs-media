@@ -1,5 +1,5 @@
 // "Mount it yourself" for the console, against the REAL first-party `@nestjs/authorization`:
-// `mount: false` registers no console controller, the providers stay exported, and the host serves
+// `routes: false` registers no console controller, the providers stay exported, and the host serves
 // the console from subclasses of the exported controllers, protected with `@Can(...)`.
 import 'reflect-metadata';
 import { AuthorizationModule, Can, Policy } from '@nestjs/authorization';
@@ -102,12 +102,12 @@ async function boot(
 
 const as = (role?: string): RequestInit => (role ? { headers: { 'x-role': role } } : {});
 
-describe('mount: false', () => {
+describe('routes: false', () => {
   for (const [name, register] of [
-    ['forRoot', () => MediaDashboardModule.forRoot({ actions: true, mount: false })],
+    ['forRoot', () => MediaDashboardModule.forRoot({ actions: true, routes: false })],
     [
       'forRootAsync',
-      () => MediaDashboardModule.forRootAsync({ useAuth: () => undefined, mount: false }),
+      () => MediaDashboardModule.forRootAsync({ useAuth: () => undefined, routes: false }),
     ],
   ] as const) {
     it(`${name}: mounts no console route, the service still works`, async () => {
@@ -122,7 +122,7 @@ describe('mount: false', () => {
 
 describe('console mounted by the host, protected with @Can(...)', () => {
   it('a guest gets 401, a denied user 403, an allowed user through — on every controller', async () => {
-    const url = await boot(MediaDashboardModule.forRoot({ actions: true, mount: false }), [
+    const url = await boot(MediaDashboardModule.forRoot({ actions: true, routes: false }), [
       ConsolePageController,
       ConsoleReadController,
       ConsoleActionsController,
@@ -152,7 +152,7 @@ describe('console mounted by the host, protected with @Can(...)', () => {
   it("the subclasses resolve the controllers' @Optional() dependencies (built-in auth reaches them)", async () => {
     const url = await boot(
       MediaDashboardModule.forRoot({
-        mount: false,
+        routes: false,
         auth: { secret: 'x'.repeat(32), login: () => null },
       }),
       [ConsoleReadController, ConsoleAuthController],

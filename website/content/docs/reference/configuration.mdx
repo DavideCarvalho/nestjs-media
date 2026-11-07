@@ -92,7 +92,7 @@ interface MediaModuleAsyncOptions {
 Use this whenever a disk or store needs an injected dependency (an `S3Client`, a `DataSource`, config service).
 
 <Callout title="`mount` on forRootAsync">
-`forRootAsync` can't know at module-build time whether `tus`/`direct` will end up configured by `useFactory`, so by default it mounts all three controllers and each 501s if its feature is left unconfigured. Set the ones you never use to `false` in `mount` so they don't exist as dead, always-501 surface — e.g. `mount: { direct: false }` — or `mount: false` to mount none and serve them yourself. (`forRoot` takes the same `mount`, on top of only mounting what's configured.)
+`forRootAsync` can't know at module-build time whether `tus`/`direct` will end up configured by `useFactory`, so by default it mounts all three controllers and each 501s if its feature is left unconfigured. Set the ones you never use to `false` in `mount` so they don't exist as dead, always-501 surface — e.g. `mount: { direct: false }` — or `routes: false` to mount none and serve them yourself. (`forRoot` takes the same `mount`, on top of only mounting what's configured.)
 </Callout>
 
 ## `MediaCollectionConfig`
