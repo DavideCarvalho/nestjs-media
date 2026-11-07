@@ -1,11 +1,11 @@
-import { InMemoryDriver } from '@dudousxd/nestjs-media-testing';
+import { storageOf } from '@dudousxd/nestjs-media-testing';
+import { InMemoryDisk, type Storage } from '@nestjs/storage';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { Attachment, AttachmentManager } from './attachment';
 import type { ImageProcessor } from './image-processor';
-import { StorageManager } from './storage-manager';
 
-let disk: InMemoryDriver;
-let storage: StorageManager;
+let disk: InMemoryDisk;
+let storage: Storage;
 let ids: number;
 
 const processor = (): ImageProcessor => ({
@@ -26,8 +26,8 @@ function manager(imageProcessor?: ImageProcessor) {
 }
 
 beforeEach(() => {
-  disk = new InMemoryDriver();
-  storage = new StorageManager({ default: 'local', disks: { local: disk } });
+  disk = new InMemoryDisk();
+  storage = storageOf({ local: disk }, 'local');
 });
 
 describe('AttachmentManager', () => {
@@ -41,7 +41,7 @@ describe('AttachmentManager', () => {
     expect(att.disk).toBe('local');
     expect(att.path).toBe('attachments/att-1/avatar.png');
     expect(att.size).toBe(5);
-    expect((await disk.get(att.path)).toString()).toBe('bytes');
+    expect(await disk.getText(att.path)).toBe('bytes');
   });
 
   it('generates variants when presets + a processor are given', async () => {
@@ -51,7 +51,7 @@ describe('AttachmentManager', () => {
       { variants: [{ name: 'thumb', width: 100 }] },
     );
     expect(att.variants.thumb?.path).toBe('attachments/att-1/variants/thumb.webp');
-    expect((await disk.get(att.variants.thumb?.path ?? '')).toString()).toBe('thumb-data');
+    expect(await disk.getText(att.variants.thumb?.path ?? '')).toBe('thumb-data');
     expect(proc.convert).toHaveBeenCalledTimes(1);
   });
 
@@ -100,19 +100,18 @@ describe('AttachmentManager', () => {
     );
     expect(second.path).toBe('base/date/inspections/insp-1/af1800.pdf');
     // Same key: only one object exists, holding the latest bytes.
-    expect((await disk.get(second.path)).toString()).toBe('bb');
+    expect(await disk.getText(second.path)).toBe('bb');
   });
 
   it('throws for an unknown variant on url()', async () => {
-    const publicDisk = new InMemoryDriver();
-    vi.spyOn(publicDisk, 'url').mockResolvedValue('https://cdn/x');
-    storage = new StorageManager({ default: 'local', disks: { local: publicDisk } });
+    const publicDisk = new InMemoryDisk({ publicUrl: 'https://cdn' });
+    storage = storageOf({ local: publicDisk }, 'local');
     const att = await manager().createFromFile({
       fileName: 'a.png',
       mimeType: 'image/png',
       contents: Buffer.from('x'),
     });
-    expect(await manager().url(att)).toBe('https://cdn/x');
+    expect(await manager().url(att)).toBe(`https://cdn/${att.path}`);
     await expect(manager().url(att, 'nope')).rejects.toThrow(/variant/);
   });
 });

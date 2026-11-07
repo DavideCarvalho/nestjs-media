@@ -1,6 +1,6 @@
 import { defineConfig } from 'tsup';
 
-const external = ['@dudousxd/nestjs-media-core', 'vitest'];
+const external = ['@dudousxd/nestjs-media-core', '@nestjs/storage', 'vitest'];
 
 export default defineConfig([
   {

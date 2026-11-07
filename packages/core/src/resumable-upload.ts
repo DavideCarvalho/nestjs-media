@@ -7,9 +7,9 @@ import {
   UploadOffsetConflictError,
   UploadSessionNotFoundError,
 } from './errors';
-import { isMultipartCapable } from './multipart';
-import type { StorageManager } from './storage-manager';
-import type { MultipartPart } from './types';
+import { assertMediaKey } from './keys';
+import { type MultipartDrivers, multipartFor } from './multipart';
+import type { MediaDisks, MultipartPart } from './types';
 
 export interface UploadSession {
   id: string;
@@ -73,9 +73,16 @@ export interface CreateUploadInput {
 }
 
 export interface ResumableUploadManagerOptions {
-  storage: StorageManager;
+  /** The disks: `Storage` from `@nestjs/storage`, or any {@link MediaDisks}. */
+  storage: MediaDisks;
+  /**
+   * Native multipart side-cars by disk name. A session on such a disk uploads each chunk as a part
+   * and the store assembles them; on other disks chunks are written as temporary files and
+   * streamed into the final file on completion.
+   */
+  multipart?: MultipartDrivers;
   sessions: UploadSessionStore;
-  /** Prefix for temporary chunk parts on the target disk. Default `.uploads`. */
+  /** Prefix for temporary chunk parts on the target disk. Default `.uploads`. Must be a valid key. */
   tmpPrefix?: string;
   idGenerator?: () => string;
   /** Emit `nestjs:media:upload.*` diagnostics events (default true). */
@@ -89,7 +96,8 @@ export interface ResumableUploadManagerOptions {
  * assembles the parts into the final object. A tus HTTP handler wraps this.
  */
 export class ResumableUploadManager {
-  private readonly storage: StorageManager;
+  private readonly storage: MediaDisks;
+  private readonly multipart: MultipartDrivers | undefined;
   private readonly sessions: UploadSessionStore;
   private readonly tmpPrefix: string;
   private readonly newId: () => string;
@@ -97,8 +105,10 @@ export class ResumableUploadManager {
 
   constructor(options: ResumableUploadManagerOptions) {
     this.storage = options.storage;
+    this.multipart = options.multipart;
     this.sessions = options.sessions;
-    this.tmpPrefix = options.tmpPrefix ?? '.uploads';
+    this.tmpPrefix = (options.tmpPrefix ?? '.uploads').replace(/\/+$/, '');
+    assertMediaKey(this.tmpPrefix);
     this.newId = options.idGenerator ?? (() => randomUUID());
     this.emitDiagnostics = options.emitDiagnostics ?? true;
   }
@@ -108,11 +118,14 @@ export class ResumableUploadManager {
   }
 
   async createUpload(input: CreateUploadInput): Promise<UploadSession> {
-    const disk = this.storage.disk(input.disk);
-    const multipart = isMultipartCapable(disk)
+    assertMediaKey(input.key);
+    // Resolves (and so validates) the disk name before anything is created.
+    this.storage.disk(input.disk);
+    const driver = multipartFor(this.multipart, input.disk);
+    const multipart = driver
       ? {
           multipartUploadId: (
-            await disk.createMultipartUpload(
+            await driver.createMultipartUpload(
               input.key,
               input.contentType ? { contentType: input.contentType } : undefined,
             )
@@ -147,12 +160,12 @@ export class ResumableUploadManager {
     if (offset !== session.offset) {
       throw new UploadOffsetConflictError(session.offset, offset);
     }
-    const disk = this.storage.disk(session.disk);
-    if (session.multipartUploadId && isMultipartCapable(disk)) {
+    const driver = multipartFor(this.multipart, session.disk);
+    if (session.multipartUploadId && driver) {
       if (typeof this.sessions.addPart !== 'function') {
         throw new UnsupportedOperationError('session store', 'multipart part recording');
       }
-      const part = await disk.uploadPart(
+      const part = await driver.uploadPart(
         session.key,
         session.multipartUploadId,
         session.parts + 1,
@@ -160,7 +173,7 @@ export class ResumableUploadManager {
       );
       await this.sessions.addPart(id, part);
     } else {
-      await disk.put(this.partKey(session, session.parts), chunk);
+      await this.storage.disk(session.disk).put(this.partKey(session, session.parts), chunk);
     }
     session.parts += 1;
     session.offset += chunk.byteLength;
@@ -183,8 +196,8 @@ export class ResumableUploadManager {
    */
   async writePart(id: string, partNumber: number, chunk: Buffer): Promise<MultipartPart> {
     const session = await this.require(id);
-    const disk = this.storage.disk(session.disk);
-    if (!session.multipartUploadId || !isMultipartCapable(disk)) {
+    const driver = multipartFor(this.multipart, session.disk);
+    if (!session.multipartUploadId || !driver) {
       throw new UnsupportedOperationError(session.disk, 'parallel multipart upload');
     }
     if (!Number.isInteger(partNumber) || partNumber < 1 || partNumber > 10_000) {
@@ -193,7 +206,7 @@ export class ResumableUploadManager {
     if (typeof this.sessions.addPart !== 'function') {
       throw new UnsupportedOperationError('session store', 'concurrent part writes');
     }
-    const part = await disk.uploadPart(session.key, session.multipartUploadId, partNumber, chunk);
+    const part = await driver.uploadPart(session.key, session.multipartUploadId, partNumber, chunk);
     await this.sessions.addPart(id, part);
     this.emit('upload.progress', {
       id: session.id,
@@ -218,22 +231,24 @@ export class ResumableUploadManager {
   /** Assemble all parts into the final object, clean up, and return the final key. */
   async complete(id: string): Promise<{ key: string; disk: string; size: number }> {
     const session = await this.require(id);
-    const disk = this.storage.disk(session.disk);
+    const driver = multipartFor(this.multipart, session.disk);
 
-    if (session.multipartUploadId && isMultipartCapable(disk)) {
+    if (session.multipartUploadId && driver) {
       // Both write paths (sequential writeChunk and parallel writePart) record parts
       // via the store's part side-index. Sort ascending, which S3 requires for
       // completeMultipartUpload.
       const parts = [...((await this.sessions.listParts?.(id)) ?? [])].sort(
         (a, b) => a.partNumber - b.partNumber,
       );
-      await disk.completeMultipartUpload(session.key, session.multipartUploadId, parts);
+      await driver.completeMultipartUpload(session.key, session.multipartUploadId, parts);
     } else {
-      await disk.put(
-        session.key,
-        Readable.from(this.readParts(session)),
-        session.contentType ? { contentType: session.contentType } : {},
-      );
+      await this.storage
+        .disk(session.disk)
+        .put(session.key, Readable.from(this.readParts(session)), {
+          ...(session.contentType ? { contentType: session.contentType } : {}),
+          // The bytes received, so a missing or extra part fails the write instead of landing.
+          contentLength: session.offset,
+        });
     }
 
     await this.cleanup(session);
@@ -255,9 +270,9 @@ export class ResumableUploadManager {
   async abort(id: string): Promise<void> {
     const session = await this.sessions.get(id);
     if (!session) return;
-    const disk = this.storage.disk(session.disk);
-    if (session.multipartUploadId && isMultipartCapable(disk)) {
-      await disk.abortMultipartUpload(session.key, session.multipartUploadId);
+    const driver = multipartFor(this.multipart, session.disk);
+    if (session.multipartUploadId && driver) {
+      await driver.abortMultipartUpload(session.key, session.multipartUploadId);
     }
     await this.cleanup(session);
     await this.sessions.delete(id);
@@ -276,7 +291,8 @@ export class ResumableUploadManager {
   private async *readParts(session: UploadSession): AsyncGenerator<Buffer> {
     const disk = this.storage.disk(session.disk);
     for (let part = 0; part < session.parts; part += 1) {
-      for await (const chunk of await disk.stream(this.partKey(session, part))) {
+      const { body } = await disk.get(this.partKey(session, part));
+      for await (const chunk of body) {
         yield Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
       }
     }
@@ -284,10 +300,8 @@ export class ResumableUploadManager {
 
   private async cleanup(session: UploadSession): Promise<void> {
     if (session.multipartUploadId) return;
-    const disk = this.storage.disk(session.disk);
-    for (let part = 0; part < session.parts; part += 1) {
-      await disk.delete(this.partKey(session, part));
-    }
+    const keys = Array.from({ length: session.parts }, (_, part) => this.partKey(session, part));
+    await this.storage.disk(session.disk).delete(keys);
   }
 
   private async require(id: string): Promise<UploadSession> {

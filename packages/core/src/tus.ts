@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { UploadOffsetConflictError, UploadSessionNotFoundError } from './errors';
+import { keySegment } from './keys';
 import type { CreateUploadInput, ResumableUploadManager } from './resumable-upload';
 
 export const TUS_VERSION = '1.0.0';
@@ -26,7 +27,10 @@ export interface TusUploadHandlerOptions {
   basePath?: string;
   /** Reject creations whose Upload-Length exceeds this. */
   maxSize?: number;
-  /** Compute the final object key. Default: `uploads/<token>/<filename>`. */
+  /**
+   * Compute the final object key. Default: `uploads/<token>/<filename>`, with the client's file
+   * name made a safe single segment (`keySegment()`). A key `@nestjs/storage` refuses answers 400.
+   */
   keyFor?: (filename: string, token: string, metadata: Record<string, string>) => string;
   idGenerator?: () => string;
 }
@@ -60,7 +64,8 @@ export class TusUploadHandler {
     this.disk = options.disk;
     this.basePath = options.basePath ?? '/uploads';
     this.maxSize = options.maxSize;
-    this.keyFor = options.keyFor ?? ((filename, token) => `uploads/${token}/${filename}`);
+    this.keyFor =
+      options.keyFor ?? ((filename, token) => `uploads/${token}/${keySegment(filename)}`);
     this.newId = options.idGenerator ?? (() => randomUUID());
   }
 
@@ -92,7 +97,13 @@ export class TusUploadHandler {
         };
         if (Number.isFinite(length)) input.size = length;
         if (metadata.filetype) input.contentType = metadata.filetype;
-        const session = await this.manager.createUpload(input);
+        let session: Awaited<ReturnType<ResumableUploadManager['createUpload']>>;
+        try {
+          session = await this.manager.createUpload(input);
+        } catch (err) {
+          if (isBadKey(err)) return { status: 400, headers: base, body: 'Invalid upload key' };
+          throw err;
+        }
         return {
           status: 201,
           headers: { ...base, Location: `${this.basePath}/${session.id}`, 'Upload-Offset': '0' },
@@ -148,4 +159,13 @@ export class TusUploadHandler {
         return { status: 405, headers: base };
     }
   }
+}
+
+/** `InvalidMediaKeyError` or `@nestjs/storage`'s `StorageInvalidKeyError` (both carry `status` 400). */
+function isBadKey(err: unknown): boolean {
+  return (
+    err instanceof Error &&
+    (err.name === 'InvalidMediaKeyError' || err.name === 'StorageInvalidKeyError') &&
+    (err as { status?: unknown }).status === 400
+  );
 }

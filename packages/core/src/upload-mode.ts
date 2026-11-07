@@ -1,5 +1,5 @@
 import { UnsupportedOperationError } from './errors';
-import type { DriverCapabilities } from './types';
+import type { MediaDiskCapabilities } from './types';
 
 export type UploadMode = 'auto' | 'proxy' | 'direct';
 export type ResolvedUploadMode = 'proxy' | 'direct';
@@ -18,21 +18,21 @@ export interface UploadModeLevels {
  * Decide whether an upload goes through the backend (`proxy`, resumable tus) or
  * straight to the disk (`direct`, presigned/native-multipart).
  *
- * - `proxy`: always allowed (every driver can accept bytes through `put`).
- * - `direct`: requires the driver to support presign or native multipart; otherwise throws.
- * - `auto`: `direct` when the driver is presign/multipart-capable, else `proxy`.
+ * - `proxy`: always allowed (every disk accepts bytes through `put`).
+ * - `direct`: requires presign or a multipart side-car; otherwise throws.
+ * - `auto`: `direct` when the disk can presign or has a multipart side-car, else `proxy`.
  */
 export function resolveUploadMode(
   levels: UploadModeLevels,
-  capabilities: DriverCapabilities,
-  driverName = 'driver',
+  capabilities: Pick<MediaDiskCapabilities, 'presign' | 'multipart'>,
+  diskName = 'disk',
 ): ResolvedUploadMode {
   const mode: UploadMode = levels.perCall ?? levels.perDisk ?? levels.global ?? 'auto';
   const directCapable = capabilities.presign || capabilities.multipart;
 
   if (mode === 'proxy') return 'proxy';
   if (mode === 'direct') {
-    if (!directCapable) throw new UnsupportedOperationError(driverName, 'direct upload');
+    if (!directCapable) throw new UnsupportedOperationError(diskName, 'direct upload');
     return 'direct';
   }
   return directCapable ? 'direct' : 'proxy';

@@ -1,11 +1,11 @@
-import { InMemoryDriver, InMemoryMediaStore } from '@dudousxd/nestjs-media-testing';
+import { InMemoryMediaStore, storageOf } from '@dudousxd/nestjs-media-testing';
+import { InMemoryDisk, type Storage } from '@nestjs/storage';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { MimeNotAllowedError } from './errors';
 import { MediaLibrary } from './media-library';
-import { StorageManager } from './storage-manager';
 
-let disk: InMemoryDriver;
-let storage: StorageManager;
+let disk: InMemoryDisk;
+let storage: Storage;
 let store: InMemoryMediaStore;
 let ids: number;
 
@@ -21,8 +21,8 @@ function makeLibrary(collections?: ConstructorParameters<typeof MediaLibrary>[0]
 }
 
 beforeEach(() => {
-  disk = new InMemoryDriver();
-  storage = new StorageManager({ default: 'local', disks: { local: disk } });
+  disk = new InMemoryDisk();
+  storage = storageOf({ local: disk }, 'local');
   store = new InMemoryMediaStore();
 });
 
@@ -44,7 +44,7 @@ describe('MediaLibrary', () => {
     expect(media.path).toBe('Post/7/gallery/id-1/photo.png');
     expect(media.size).toBe(5);
     expect(media.order).toBe(0);
-    expect((await disk.get(media.path)).toString()).toBe('bytes');
+    expect(await disk.getText(media.path)).toBe('bytes');
     expect((await store.find('id-1'))?.id).toBe('id-1');
   });
 
@@ -84,8 +84,8 @@ describe('MediaLibrary', () => {
   });
 
   it('honors the collection disk override', async () => {
-    const s3 = new InMemoryDriver();
-    storage = new StorageManager({ default: 'local', disks: { local: disk, s3 } });
+    const s3 = new InMemoryDisk();
+    storage = storageOf({ local: disk, s3 }, 'local');
     const lib = makeLibrary([{ name: 'gallery', disk: 's3' }]);
     const media = await lib.attach({
       ownerType: 'Post',
@@ -128,5 +128,60 @@ describe('MediaLibrary', () => {
     expect(media.ownerId).toBe('42');
     expect((await post.list('gallery')).map((r) => r.id)).toEqual([media.id]);
     expect((await post.list()).map((r) => r.id)).toEqual([media.id]);
+  });
+});
+
+describe('MediaLibrary on @nestjs/storage', () => {
+  const input = {
+    ownerType: 'Post',
+    ownerId: '7',
+    collection: 'gallery',
+    mimeType: 'image/png',
+    contents: Buffer.from('bytes'),
+  };
+
+  it('makes a hostile file name one safe key segment, keeping the record’s fileName', async () => {
+    const media = await makeLibrary().attach({ ...input, fileName: '../../etc/passwd' });
+    expect(media.path).toBe('Post/7/gallery/id-1/.._.._etc_passwd');
+    expect(media.fileName).toBe('../../etc/passwd');
+    expect(await disk.getText(media.path)).toBe('bytes');
+  });
+
+  it('url() is the public URL when the disk has one', async () => {
+    disk = new InMemoryDisk({ publicUrl: 'https://cdn.example.com/media' });
+    storage = storageOf({ local: disk });
+    const lib = makeLibrary();
+    const media = await lib.attach({ ...input, fileName: 'a b.png' });
+    expect(await lib.url(media.id)).toBe(
+      'https://cdn.example.com/media/Post/7/gallery/id-1/a%20b.png',
+    );
+  });
+
+  it('url() falls back to a signed URL on a private disk', async () => {
+    disk = new InMemoryDisk({
+      signedUrls: { baseUrl: 'https://api.example.com/files', keys: ['k'.repeat(32)] },
+    });
+    storage = storageOf({ local: disk });
+    const lib = makeLibrary();
+    const media = await lib.attach({ ...input, fileName: 'a.png' });
+    const url = await lib.url(media.id);
+    expect(url.startsWith('https://api.example.com/files?')).toBe(true);
+    expect(disk.verifySignedUrl(url).key).toBe(media.path);
+  });
+
+  it('url() on a disk with neither public nor signed URLs throws the disk’s error', async () => {
+    const lib = makeLibrary();
+    const media = await lib.attach({ ...input, fileName: 'a.png' });
+    await expect(lib.url(media.id)).rejects.toThrow(/signedUrls/);
+  });
+
+  it('locate() names the stored file', async () => {
+    const lib = makeLibrary();
+    const media = await lib.attach({ ...input, fileName: 'a.png' });
+    expect(await lib.locate(media.id)).toMatchObject({
+      disk: 'local',
+      path: media.path,
+      fileName: 'a.png',
+    });
   });
 });

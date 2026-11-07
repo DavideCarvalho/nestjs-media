@@ -1,13 +1,13 @@
 import { Readable } from 'node:stream';
-import { InMemoryDriver, InMemoryMediaStore } from '@dudousxd/nestjs-media-testing';
+import { InMemoryMediaStore, storageOf } from '@dudousxd/nestjs-media-testing';
+import { InMemoryDisk, type Storage } from '@nestjs/storage';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ConversionNotDefinedError, ImageProcessorMissingError } from './errors';
 import type { ImageProcessor } from './image-processor';
 import { MediaLibrary } from './media-library';
-import { StorageManager } from './storage-manager';
 
-let disk: InMemoryDriver;
-let storage: StorageManager;
+let disk: InMemoryDisk;
+let storage: Storage;
 let store: InMemoryMediaStore;
 
 // Fake processor: prefixes the bytes so we can assert it ran, and reports webp.
@@ -20,8 +20,8 @@ const fakeProcessor = (): ImageProcessor => ({
 });
 
 beforeEach(() => {
-  disk = new InMemoryDriver();
-  storage = new StorageManager({ default: 'local', disks: { local: disk } });
+  disk = new InMemoryDisk();
+  storage = storageOf({ local: disk }, 'local');
   store = new InMemoryMediaStore();
 });
 
@@ -50,10 +50,8 @@ describe('MediaLibrary conversions', () => {
 
   it('lazily produces + caches the variant and serves it', async () => {
     const processor = fakeProcessor();
-    const publicDisk = new InMemoryDriver();
-    // Give the disk a public url by spying:
-    vi.spyOn(publicDisk, 'url').mockImplementation(async (p: string) => `https://cdn/${p}`);
-    storage = new StorageManager({ default: 'local', disks: { local: publicDisk } });
+    const publicDisk = new InMemoryDisk({ publicUrl: 'https://cdn' });
+    storage = storageOf({ local: publicDisk }, 'local');
 
     const lib = new MediaLibrary({
       storage,
@@ -69,8 +67,8 @@ describe('MediaLibrary conversions', () => {
     expect(url).toBe('https://cdn/Post/1/gallery/id-1/conversions/thumb.webp');
     expect(processor.convert).toHaveBeenCalledTimes(1);
     // Cached bytes contain the processor marker:
-    const stored = await publicDisk.get('Post/1/gallery/id-1/conversions/thumb.webp');
-    expect(stored.toString()).toBe('thumb:IMG');
+    const stored = await publicDisk.getText('Post/1/gallery/id-1/conversions/thumb.webp');
+    expect(stored).toBe('thumb:IMG');
 
     // Second access reuses the cache (no second convert call).
     await lib.url('id-1', 'thumb');
@@ -117,9 +115,7 @@ describe('MediaLibrary conversions', () => {
     const media = await lib.attach(attachInput);
 
     expect(Object.keys(media.conversions)).toEqual(['thumb', 'og', 'hero']);
-    expect((await disk.get('Post/1/gallery/id-1/conversions/hero.webp')).toString()).toBe(
-      'hero:IMG',
-    );
+    expect(await disk.getText('Post/1/gallery/id-1/conversions/hero.webp')).toBe('hero:IMG');
     expect(processor.convert).toHaveBeenCalledTimes(3);
     expect(find).not.toHaveBeenCalled();
     // One save for the new record, one for its conversions.
@@ -144,9 +140,9 @@ describe('MediaLibrary conversions', () => {
       idGenerator: () => 'id-1',
       clock: () => new Date(0),
     });
-    const get = vi.spyOn(disk, 'get');
+    const get = vi.spyOn(disk, 'getBuffer');
 
-    // `size` is passed so the only read is the conversions' source.
+    // The only read is the conversions' source (the size comes back from put()).
     await lib.attach({ ...attachInput, size: 3, contents: Readable.from([Buffer.from('IMG')]) });
 
     expect(get).toHaveBeenCalledTimes(1);
@@ -162,7 +158,7 @@ describe('MediaLibrary conversions', () => {
       idGenerator: () => 'id-1',
       clock: () => new Date(0),
     });
-    const get = vi.spyOn(disk, 'get');
+    const get = vi.spyOn(disk, 'getBuffer');
 
     await lib.attach({ ...attachInput, size: 3 });
 

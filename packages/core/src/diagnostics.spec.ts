@@ -2,10 +2,11 @@ import { subscribe, unsubscribe } from 'node:diagnostics_channel';
 import { channelName } from '@dudousxd/nestjs-diagnostics';
 import type { DiagnosticEvent } from '@dudousxd/nestjs-diagnostics';
 import {
-  InMemoryDriver,
   InMemoryMediaStore,
   InMemoryUploadSessionStore,
+  storageOf,
 } from '@dudousxd/nestjs-media-testing';
+import { InMemoryDisk, type Storage } from '@nestjs/storage';
 import { afterEach, describe, expect, it } from 'vitest';
 import { AttachmentManager } from './attachment';
 import {
@@ -15,12 +16,11 @@ import {
 } from './diagnostics';
 import { MediaLibrary } from './media-library';
 import { ResumableUploadManager } from './resumable-upload';
-import { StorageManager } from './storage-manager';
 
 function library(emitDiagnostics = true) {
-  const disk = new InMemoryDriver();
+  const disk = new InMemoryDisk();
   return new MediaLibrary({
-    storage: new StorageManager({ default: 'local', disks: { local: disk } }),
+    storage: storageOf({ local: disk }, 'local'),
     store: new InMemoryMediaStore(),
     emitDiagnostics,
     idGenerator: () => 'id-1',
@@ -82,9 +82,9 @@ describe('media diagnostics channels', () => {
 
 describe('resumable upload diagnostics', () => {
   function uploads() {
-    const disk = new InMemoryDriver();
+    const disk = new InMemoryDisk();
     return new ResumableUploadManager({
-      storage: new StorageManager({ default: 'local', disks: { local: disk } }),
+      storage: storageOf({ local: disk }, 'local'),
       sessions: new InMemoryUploadSessionStore(),
       idGenerator: () => 'up-1',
     });
@@ -117,9 +117,9 @@ describe('resumable upload diagnostics', () => {
 
 describe('attachment diagnostics', () => {
   function attachments() {
-    const disk = new InMemoryDriver();
+    const disk = new InMemoryDisk();
     return new AttachmentManager({
-      storage: new StorageManager({ default: 'local', disks: { local: disk } }),
+      storage: storageOf({ local: disk }, 'local'),
       idGenerator: () => 'att-1',
     });
   }

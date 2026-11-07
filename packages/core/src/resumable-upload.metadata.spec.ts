@@ -1,9 +1,9 @@
 import { subscribe, unsubscribe } from 'node:diagnostics_channel';
 import { channelName } from '@dudousxd/nestjs-diagnostics';
-import { InMemoryDriver, InMemoryUploadSessionStore } from '@dudousxd/nestjs-media-testing';
+import { InMemoryUploadSessionStore, storageOf } from '@dudousxd/nestjs-media-testing';
+import { InMemoryDisk, type Storage } from '@nestjs/storage';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { ResumableUploadManager } from './resumable-upload';
-import { StorageManager } from './storage-manager';
 
 let manager: ResumableUploadManager;
 let sessions: InMemoryUploadSessionStore;
@@ -25,7 +25,7 @@ function capture(event: 'upload.start' | 'upload.complete'): Record<string, unkn
 beforeEach(() => {
   sessions = new InMemoryUploadSessionStore();
   manager = new ResumableUploadManager({
-    storage: new StorageManager({ default: 'd', disks: { d: new InMemoryDriver() } }),
+    storage: storageOf({ d: new InMemoryDisk() }, 'd'),
     sessions,
   });
 });

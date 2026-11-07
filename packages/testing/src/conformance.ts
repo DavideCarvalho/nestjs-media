@@ -1,149 +1,225 @@
-import type { Readable } from 'node:stream';
-import { FileNotFoundError, type StorageDriver } from '@dudousxd/nestjs-media-core';
+import { Readable } from 'node:stream';
+import { type MultipartUploadDriver, foldListing } from '@dudousxd/nestjs-media-core';
+import { type StorageDisk, StorageFileNotFoundError } from '@nestjs/storage';
 import { describe, expect, it } from 'vitest';
 
-/** Drain a driver stream to a string, so a range assertion reads as the substring it is. */
-async function readAll(stream: Readable): Promise<string> {
-  const chunks: Buffer[] = [];
-  for await (const chunk of stream) chunks.push(Buffer.from(chunk));
-  return Buffer.concat(chunks).toString();
+export interface MediaDiskConformanceExtensions {
+  /**
+   * The disk's multipart side-car, to check it against the disk (same keys, assembled bytes). A
+   * function is called in each test, for a side-car built in `beforeAll` (a container's port).
+   */
+  multipart?: MultipartUploadDriver | (() => MultipartUploadDriver);
+  /** A unique key prefix per run, for disks shared between test runs (a bucket). Default: random. */
+  prefix?: string;
 }
 
-/** Shared behavioral contract every StorageDriver must satisfy. Call inside a spec file. */
-export function runStorageDriverConformance(
+/**
+ * What nestjs-media relies on from a `StorageDisk`, checked against a real disk: `LocalDisk`,
+ * `InMemoryDisk`, `S3Disk` on MinIO, or your own subclass. `@nestjs/storage` tests its disks
+ * itself; this suite covers the media layer's use of them — streamed writes of unknown length
+ * (resumable assembly), sizes from `put()`, ranged reads (the dashboard's previews), flat listing
+ * folded into folders, batch delete, streamed cross-disk copies — plus, with `ext.multipart`, the
+ * multipart side-car addressing the same objects as the disk.
+ *
+ * Call it inside a spec file. `makeDisk` may return the same disk every time; every test writes
+ * under its own prefix.
+ */
+export function describeMediaDiskConformance(
   name: string,
-  makeDriver: () => StorageDriver | Promise<StorageDriver>,
+  makeDisk: () => StorageDisk | Promise<StorageDisk>,
+  ext: MediaDiskConformanceExtensions = {},
 ): void {
-  describe(`StorageDriver conformance: ${name}`, () => {
-    it('round-trips a buffer through put/get', async () => {
-      const d = await makeDriver();
-      await d.put('a/b.txt', Buffer.from('hello'));
-      expect((await d.get('a/b.txt')).toString()).toBe('hello');
+  const run = ext.prefix ?? `conformance-${Math.random().toString(36).slice(2, 10)}`;
+  let counter = 0;
+  const scope = () => `${run}/${++counter}`;
+  const read = async (stream: NodeJS.ReadableStream) => {
+    const chunks: Buffer[] = [];
+    for await (const chunk of stream) chunks.push(Buffer.from(chunk as Buffer));
+    return Buffer.concat(chunks).toString();
+  };
+
+  describe(`media disk conformance: ${name}`, () => {
+    it('put() reports the size of a stream of unknown length, and get() streams it back', async () => {
+      const disk = await makeDisk();
+      const key = `${scope()}/streamed.bin`;
+      const parts = ['hello ', 'streamed ', 'world'];
+      const written = await disk.put(key, Readable.from(parts.map((p) => Buffer.from(p))), {
+        contentType: 'application/octet-stream',
+      });
+      expect(written.size).toBe(20);
+      expect(await read((await disk.get(key)).body)).toBe(parts.join(''));
     });
 
-    it('exists + size reflect writes', async () => {
-      const d = await makeDriver();
-      expect(await d.exists('x')).toBe(false);
-      await d.put('x', Buffer.from('1234'));
-      expect(await d.exists('x')).toBe(true);
-      expect(await d.size('x')).toBe(4);
+    it('keeps the content type it was given', async () => {
+      const disk = await makeDisk();
+      const key = `${scope()}/a.bin`;
+      await disk.put(key, Buffer.from('x'), { contentType: 'image/webp' });
+      expect((await disk.stat(key)).contentType).toBe('image/webp');
     });
 
-    it('get() rejects with FileNotFoundError when absent', async () => {
-      const d = await makeDriver();
-      await expect(d.get('nope')).rejects.toBeInstanceOf(FileNotFoundError);
+    it('a contentLength that does not match fails the write and writes nothing', async () => {
+      const disk = await makeDisk();
+      const key = `${scope()}/short.bin`;
+      await expect(
+        disk.put(key, Readable.from([Buffer.from('abc')]), { contentLength: 5 }),
+      ).rejects.toThrow();
+      expect(await disk.exists(key)).toBe(false);
     });
 
-    it('delete() removes and is idempotent', async () => {
-      const d = await makeDriver();
-      await d.put('y', Buffer.from('z'));
-      await d.delete('y');
-      expect(await d.exists('y')).toBe(false);
-      await expect(d.delete('y')).resolves.toBeUndefined();
+    it('reads byte ranges with an inclusive end, clamped at EOF, and suffixes', async () => {
+      const disk = await makeDisk();
+      const key = `${scope()}/alphabet.txt`;
+      await disk.put(key, 'abcdefghijklmnopqrstuvwxyz');
+      const slice = await disk.get(key, { range: { start: 3, end: 7 } });
+      expect(await read(slice.body)).toBe('defgh');
+      expect(slice.range).toEqual({ start: 3, end: 7 });
+      expect(slice.size).toBe(26);
+      expect(await read((await disk.get(key, { range: { start: 20, end: 9999 } })).body)).toBe(
+        'uvwxyz',
+      );
+      expect(await read((await disk.get(key, { range: { suffix: 3 } })).body)).toBe('xyz');
     });
 
-    it('copy() and move() behave', async () => {
-      const d = await makeDriver();
-      await d.put('s', Buffer.from('data'));
-      await d.copy('s', 'c');
-      expect((await d.get('c')).toString()).toBe('data');
-      await d.move('c', 'm');
-      expect(await d.exists('c')).toBe(false);
-      expect((await d.get('m')).toString()).toBe('data');
+    it('a missing file is StorageFileNotFoundError on get() and stat()', async () => {
+      const disk = await makeDisk();
+      const key = `${scope()}/missing`;
+      await expect(disk.get(key)).rejects.toBeInstanceOf(StorageFileNotFoundError);
+      await expect(disk.stat(key)).rejects.toBeInstanceOf(StorageFileNotFoundError);
     });
 
-    it('stream() yields the stored bytes', async () => {
-      const d = await makeDriver();
-      await d.put('st', Buffer.from('streamed'));
-      const chunks: Buffer[] = [];
-      for await (const c of await d.stream('st')) chunks.push(Buffer.from(c));
-      expect(Buffer.concat(chunks).toString()).toBe('streamed');
+    it('delete([...]) removes several keys and ignores missing ones', async () => {
+      const disk = await makeDisk();
+      const base = scope();
+      await disk.put(`${base}/a`, 'a');
+      await disk.put(`${base}/b`, 'b');
+      await disk.delete([`${base}/a`, `${base}/b`, `${base}/never`]);
+      expect(await disk.exists(`${base}/a`)).toBe(false);
+      expect(await disk.exists(`${base}/b`)).toBe(false);
+      await expect(disk.delete([])).resolves.toBeUndefined();
     });
 
-    it('stat reports the size and a last-modified date', async () => {
-      const driver = await makeDriver();
-      await driver.put('s/file.txt', Buffer.from('12345'));
-      const meta = await driver.stat('s/file.txt');
-      expect(meta.size).toBe(5);
-      expect(meta.lastModified).toBeInstanceOf(Date);
+    it('lists flat, in key order, and the flat listing folds into one folder level', async () => {
+      const disk = await makeDisk();
+      const base = scope();
+      for (const key of [
+        'docs/a.txt',
+        'docs/b.txt',
+        'docs/sub/c.txt',
+        'docs/sub/deep/d.txt',
+        'top.txt',
+      ]) {
+        await disk.put(`${base}/${key}`, key);
+      }
+      const flat: string[] = [];
+      for await (const entry of disk.listAll({ prefix: `${base}/docs/` })) flat.push(entry.key);
+      expect(flat).toEqual([
+        `${base}/docs/a.txt`,
+        `${base}/docs/b.txt`,
+        `${base}/docs/sub/c.txt`,
+        `${base}/docs/sub/deep/d.txt`,
+      ]);
+
+      const level = await foldListing(disk, `${base}/docs/`, { limit: 50 });
+      expect(level.folders).toEqual([`${base}/docs/sub/`]);
+      expect(level.files.map((f) => f.key)).toEqual([`${base}/docs/a.txt`, `${base}/docs/b.txt`]);
+      expect(level.cursor).toBeUndefined();
     });
 
-    it('deleteMany removes every listed key and no-ops on []', async () => {
-      const driver = await makeDriver();
-      if (!driver.deleteMany) throw new Error('driver does not implement deleteMany');
-      await driver.put('m/a', Buffer.from('a'));
-      await driver.put('m/b', Buffer.from('b'));
-      await driver.deleteMany(['m/a', 'm/b']);
-      expect(await driver.exists('m/a')).toBe(false);
-      expect(await driver.exists('m/b')).toBe(false);
-      await expect(driver.deleteMany([])).resolves.toBeUndefined();
+    it('folding pages without repeating a folder across a page boundary', async () => {
+      const disk = await makeDisk();
+      const base = scope();
+      for (const key of ['a/1', 'a/2', 'a/3', 'b.txt', 'c/1', 'd.txt'])
+        await disk.put(`${base}/${key}`, 'x');
+      const seen: string[] = [];
+      let cursor: string | undefined;
+      do {
+        const page = await foldListing(disk, `${base}/`, {
+          limit: 1,
+          ...(cursor ? { cursor } : {}),
+          pageSize: 2,
+        });
+        seen.push(...page.folders, ...page.files.map((f) => f.key));
+        cursor = page.cursor;
+      } while (cursor);
+      expect(seen).toEqual([`${base}/a/`, `${base}/b.txt`, `${base}/c/`, `${base}/d.txt`]);
     });
 
-    /**
-     * `stream(path, range)` — the primitive behind reading a few KB out of a huge object.
-     *
-     * Capability-gated: a driver that advertises `ranged: false` is allowed to ignore the argument,
-     * so each case bails early rather than failing a driver for a capability it never claimed. For
-     * every driver bundled here that flag is `true`, so these do run.
-     */
-    describe('ranged reads', () => {
-      const alphabet = 'abcdefghijklmnopqrstuvwxyz';
+    it('streams a copy from one disk to another without buffering it', async () => {
+      const disk = await makeDisk();
+      const base = scope();
+      await disk.put(`${base}/src.txt`, 'copied bytes', { contentType: 'text/plain' });
+      const source = await disk.get(`${base}/src.txt`);
+      await disk.put(`${base}/dst.txt`, source.body, {
+        contentType: source.contentType,
+        contentLength: source.size,
+      });
+      expect(await disk.getText(`${base}/dst.txt`)).toBe('copied bytes');
+      expect((await disk.stat(`${base}/dst.txt`)).contentType).toMatch(/^text\/plain/);
+    });
 
-      it('serves a mid-file range, with end INCLUSIVE', async () => {
-        const driver = await makeDriver();
-        if (!driver.capabilities.ranged) return;
-        await driver.put('r/alphabet.txt', Buffer.from(alphabet));
-        // 3..7 inclusive is five bytes, not four — the off-by-one this whole contract turns on.
-        expect(await readAll(await driver.stream('r/alphabet.txt', { start: 3, end: 7 }))).toBe(
-          'defgh',
+    if (ext.multipart) {
+      const source = ext.multipart;
+      const sidecar = () => (typeof source === 'function' ? source() : source);
+      it('the multipart side-car assembles parts at a key the disk reads back', async () => {
+        const disk = await makeDisk();
+        const multipart = sidecar();
+        const key = `${scope()}/multipart.bin`;
+        const MIB = 1024 * 1024;
+        const part1 = Buffer.alloc(5 * MIB, 1);
+        const part2 = Buffer.from('tail');
+        const { uploadId } = await multipart.createMultipartUpload(key, {
+          contentType: 'application/x-test',
+        });
+        const parts = await Promise.all([
+          multipart.uploadPart(key, uploadId, 2, part2),
+          multipart.uploadPart(key, uploadId, 1, part1),
+        ]);
+        await multipart.completeMultipartUpload(
+          key,
+          uploadId,
+          parts.sort((a, b) => a.partNumber - b.partNumber),
         );
-        // Degenerate but legal: a one-byte range where start === end.
-        expect(await readAll(await driver.stream('r/alphabet.txt', { start: 0, end: 0 }))).toBe(
-          'a',
-        );
+        const stat = await disk.stat(key);
+        expect(stat.size).toBe(part1.length + part2.length);
+        expect(stat.contentType).toBe('application/x-test');
+        const tail = await disk.get(key, { range: { suffix: 4 } });
+        expect(await read(tail.body)).toBe('tail');
       });
 
-      it('clamps a range that runs past EOF rather than throwing', async () => {
-        const driver = await makeDriver();
-        if (!driver.capabilities.ranged) return;
-        await driver.put('r/alphabet.txt', Buffer.from(alphabet));
-        // A reader that asks for "the next 64 KB from offset N" near the end of an object must get
-        // the tail back, not an error — callers size their reads from a page size, not the file.
-        expect(await readAll(await driver.stream('r/alphabet.txt', { start: 20, end: 9999 }))).toBe(
-          'uvwxyz',
-        );
+      it('abort leaves nothing behind', async () => {
+        const disk = await makeDisk();
+        const multipart = sidecar();
+        const key = `${scope()}/aborted.bin`;
+        const { uploadId } = await multipart.createMultipartUpload(key);
+        await multipart.uploadPart(key, uploadId, 1, Buffer.from('x'));
+        await multipart.abortMultipartUpload(key, uploadId);
+        expect(await disk.exists(key)).toBe(false);
       });
 
-      it('reads to EOF when end is omitted', async () => {
-        const driver = await makeDriver();
-        if (!driver.capabilities.ranged) return;
-        await driver.put('r/alphabet.txt', Buffer.from(alphabet));
-        expect(await readAll(await driver.stream('r/alphabet.txt', { start: 23 }))).toBe('xyz');
-        // start: 0 with no end is the whole object — the range path must not corrupt a full read.
-        expect(await readAll(await driver.stream('r/alphabet.txt', { start: 0 }))).toBe(alphabet);
-      });
-    });
-
-    describe('list', () => {
-      it('returns files directly under a prefix and rolls deeper keys into folders', async () => {
-        const driver = await makeDriver();
-        await driver.put('docs/a.txt', Buffer.from('a'));
-        await driver.put('docs/b.txt', Buffer.from('bb'));
-        await driver.put('docs/sub/c.txt', Buffer.from('ccc'));
-
-        const result = await driver.list('docs/', { delimiter: '/' });
-
-        const fileKeys = result.files.map((entry) => entry.key).sort();
-        expect(fileKeys).toEqual(['docs/a.txt', 'docs/b.txt']);
-        expect(result.folders).toEqual(['docs/sub/']);
+      it('presigns a part URL', async () => {
+        const multipart = sidecar();
+        const key = `${scope()}/presigned.bin`;
+        const { uploadId } = await multipart.createMultipartUpload(key);
+        const url = await multipart.presignUploadPart(key, uploadId, 1, 60);
+        expect(url).toMatch(/partNumber=1/);
+        expect(url).toMatch(/uploadId=/);
+        await multipart.abortMultipartUpload(key, uploadId);
       });
 
-      it('lists root when prefix is empty', async () => {
-        const driver = await makeDriver();
-        await driver.put('top.txt', Buffer.from('x'));
-        const result = await driver.list('', { delimiter: '/' });
-        expect(result.files.map((entry) => entry.name)).toContain('top.txt');
+      it('listFolders (when the side-car has it) agrees with the folded flat listing', async () => {
+        const multipart = sidecar();
+        if (!multipart.listFolders) return;
+        const listFolders = multipart.listFolders.bind(multipart);
+        const disk = await makeDisk();
+        const base = scope();
+        for (const key of ['docs/a.txt', 'docs/sub/c.txt', 'docs/sub/deep/d.txt', 'docs/z/1']) {
+          await disk.put(`${base}/${key}`, 'x');
+        }
+        const native = await listFolders(`${base}/docs/`);
+        const folded = await foldListing(disk, `${base}/docs/`, { limit: 50 });
+        expect(native.folders).toEqual(folded.folders);
+        expect(native.files.map((f) => f.key)).toEqual(folded.files.map((f) => f.key));
       });
-    });
+    }
   });
 }
