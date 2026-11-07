@@ -44,6 +44,16 @@
         "types": "./dist/pg/index.d.cts",
         "default": "./dist/pg/index.cjs"
       }
+    },
+    "./nest": {
+      "import": {
+        "types": "./dist/nest/index.d.ts",
+        "default": "./dist/nest/index.js"
+      },
+      "require": {
+        "types": "./dist/nest/index.d.cts",
+        "default": "./dist/nest/index.cjs"
+      }
     }
   },
   "files": [
@@ -55,7 +65,8 @@
   },
   "peerDependencies": {
     "@dudousxd/nestjs-media-core": ">=0.8.0 <1.0.0",
-    "drizzle-orm": ">=0.38.0 <1.0.0"
+    "drizzle-orm": ">=0.38.0 <1.0.0",
+    "@nestjs/drizzle": ">=0.0.2 <0.1.0"
   },
   "devDependencies": {
     "@dudousxd/nestjs-media-core": "workspace:*",
@@ -67,13 +78,23 @@
     "pg": "8.23.1",
     "testcontainers": "10.18.0",
     "tsup": "8.5.1",
-    "typescript": "5.9.3"
+    "typescript": "5.9.3",
+    "@nestjs/drizzle": "0.0.2",
+    "@nestjs/common": "12.3.2",
+    "@nestjs/core": "12.3.2",
+    "reflect-metadata": "0.2.2",
+    "rxjs": "7.8.2"
   },
   "typesVersions": {
     "*": {
       "pg": [
         "./dist/pg/index.d.ts"
       ]
+    }
+  },
+  "peerDependenciesMeta": {
+    "@nestjs/drizzle": {
+      "optional": true
     }
   }
 }

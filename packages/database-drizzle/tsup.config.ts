@@ -1,8 +1,12 @@
 import { defineConfig } from 'tsup';
 
-const external = ['@dudousxd/nestjs-media-core', 'drizzle-orm'];
-// Root = sqlite/libSQL store; `/pg` = the Postgres store (`@dudousxd/nestjs-media-database-drizzle/pg`).
-const entry = { index: 'src/index.ts', 'pg/index': 'src/pg/index.ts' };
+const external = ['@dudousxd/nestjs-media-core', 'drizzle-orm', '@nestjs/drizzle'];
+// Root = sqlite/libSQL store; `/pg` = the Postgres store; `/nest` = factories on @nestjs/drizzle.
+const entry = {
+  index: 'src/index.ts',
+  'pg/index': 'src/pg/index.ts',
+  'nest/index': 'src/nest/index.ts',
+};
 
 export default defineConfig([
   {

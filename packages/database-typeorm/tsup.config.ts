@@ -1,10 +1,10 @@
 import { defineConfig } from 'tsup';
 
-const external = ['@dudousxd/nestjs-media-core', 'typeorm'];
+const external = ['@dudousxd/nestjs-media-core', 'typeorm', '@nestjs/typeorm'];
 
 export default defineConfig([
   {
-    entry: ['src/index.ts'],
+    entry: { index: 'src/index.ts', 'nest/index': 'src/nest/index.ts' },
     format: ['esm'],
     dts: true,
     clean: true,
@@ -14,7 +14,7 @@ export default defineConfig([
     external,
   },
   {
-    entry: ['src/index.ts'],
+    entry: { index: 'src/index.ts', 'nest/index': 'src/nest/index.ts' },
     format: ['cjs'],
     dts: true,
     clean: false,
