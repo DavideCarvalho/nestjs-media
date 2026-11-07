@@ -4,13 +4,14 @@ const external = [
   '@dudousxd/nestjs-media-core',
   '@nestjs/common',
   '@nestjs/core',
+  '@nestjs/storage',
   'reflect-metadata',
   'rxjs',
 ];
 
 export default defineConfig([
   {
-    entry: ['src/index.ts', 'src/storage.ts'],
+    entry: ['src/index.ts'],
     format: ['esm'],
     dts: true,
     clean: true,
@@ -20,7 +21,7 @@ export default defineConfig([
     external,
   },
   {
-    entry: ['src/index.ts', 'src/storage.ts'],
+    entry: ['src/index.ts'],
     format: ['cjs'],
     dts: true,
     clean: false,

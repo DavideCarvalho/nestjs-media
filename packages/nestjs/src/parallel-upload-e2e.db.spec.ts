@@ -7,54 +7,93 @@
 // seams the review touched: concurrent writePart, the server-derived key, and the
 // complete() contract. Excluded from `pnpm test` (`*.db.spec.ts`); run with Docker via
 // `pnpm test:db`.
+import { createHash, createHmac, randomBytes } from 'node:crypto';
 import type { AddressInfo } from 'node:net';
-import { CreateBucketCommand, GetObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import { uploadMediaParallel } from '@dudousxd/nestjs-media-client';
-import { S3Driver } from '@dudousxd/nestjs-media-disk-s3';
+import { s3Multipart } from '@dudousxd/nestjs-media-disk-s3';
 import { InMemoryUploadSessionStore } from '@dudousxd/nestjs-media-testing';
+import { Module } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import type { NestExpressApplication } from '@nestjs/platform-express';
+import { S3Disk, type S3DiskOptions, StorageModule } from '@nestjs/storage';
 import express from 'express';
 import { GenericContainer, type StartedTestContainer, Wait } from 'testcontainers';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { MediaModule } from './media.module';
 
-const BUCKET = 'media-e2e';
 const KEY = 'k/e2e-parallel.bin';
 const MIB = 1024 * 1024;
 
 let container: StartedTestContainer;
-let s3: S3Client;
+let disk: S3Disk;
 let app: NestExpressApplication;
 let baseUrl: string;
 
+/** `PUT /<bucket>` on MinIO, SigV4-signed (S3Disk can't create buckets). */
+async function createBucket(endpoint: string, bucket: string): Promise<void> {
+  const url = new URL(`${endpoint}/${bucket}`);
+  const stamp = new Date().toISOString().replace(/[:-]|\.\d{3}/g, '');
+  const day = stamp.slice(0, 8);
+  const empty = createHash('sha256').update('').digest('hex');
+  const canonical = `PUT\n${url.pathname}\n\nhost:${url.host}\nx-amz-content-sha256:${empty}\nx-amz-date:${stamp}\n\nhost;x-amz-content-sha256;x-amz-date\n${empty}`;
+  const scope = `${day}/us-east-1/s3/aws4_request`;
+  const toSign = `AWS4-HMAC-SHA256\n${stamp}\n${scope}\n${createHash('sha256').update(canonical).digest('hex')}`;
+  let key: Buffer = createHmac('sha256', 'AWS4mediaadmin-secret').update(day).digest();
+  for (const part of ['us-east-1', 's3', 'aws4_request'])
+    key = createHmac('sha256', key).update(part).digest();
+  const signature = createHmac('sha256', key).update(toSign).digest('hex');
+  const res = await fetch(url, {
+    method: 'PUT',
+    headers: {
+      'x-amz-content-sha256': empty,
+      'x-amz-date': stamp,
+      authorization: `AWS4-HMAC-SHA256 Credential=mediaadmin/${scope}, SignedHeaders=host;x-amz-content-sha256;x-amz-date, Signature=${signature}`,
+    },
+  });
+  if (!res.ok) throw new Error(`CreateBucket: ${res.status} ${await res.text()}`);
+}
+
 beforeAll(async () => {
-  container = await new GenericContainer('rustfs/rustfs:1.0.3')
+  // MinIO no longer publishes images to Docker Hub; Chainguard's build, pinned by digest.
+  container = await new GenericContainer(
+    'cgr.dev/chainguard/minio@sha256:869ca3178831d9f521ea02258a0f0d4fbc1e9f84302e707514e1f861b860865d',
+  )
+    .withName(`media-minio-e2e-${randomBytes(4).toString('hex')}`)
+    .withCommand(['server', '/tmp/minio-data'])
     .withExposedPorts(9000)
-    .withEnvironment({ RUSTFS_ACCESS_KEY: 'minioadmin', RUSTFS_SECRET_KEY: 'minioadmin' })
-    .withWaitStrategy(Wait.forHttp('/health', 9000).forStatusCode(200))
+    .withEnvironment({ MINIO_ROOT_USER: 'mediaadmin', MINIO_ROOT_PASSWORD: 'mediaadmin-secret' })
+    .withWaitStrategy(Wait.forHttp('/minio/health/ready', 9000).forStatusCode(200))
     .start();
 
   const endpoint = `http://${container.getHost()}:${container.getMappedPort(9000)}`;
-  s3 = new S3Client({
+  await createBucket(endpoint, 'media-e2e');
+  const s3: S3DiskOptions = {
+    bucket: 'media-e2e',
     region: 'us-east-1',
     endpoint,
     forcePathStyle: true,
-    credentials: { accessKeyId: 'minioadmin', secretAccessKey: 'minioadmin' },
-  });
-  await s3.send(new CreateBucketCommand({ Bucket: BUCKET }));
+    credentials: { accessKeyId: 'mediaadmin', secretAccessKey: 'mediaadmin-secret' },
+  };
+  disk = new S3Disk(s3);
 
-  app = await NestFactory.create<NestExpressApplication>(
-    MediaModule.forRoot({
-      default: BUCKET,
-      disks: { [BUCKET]: new S3Driver({ client: s3, bucket: BUCKET }) },
-      uploadSessions: new InMemoryUploadSessionStore(),
-      // Deterministic server-derived key so the test knows where to read the object;
-      // the client never sees or controls it (GameWarden-safe).
-      tus: { disk: BUCKET, basePath: '/media/uploads', keyFor: () => KEY },
-    }),
-    { bodyParser: false, logger: false },
-  );
+  @Module({
+    imports: [
+      StorageModule.forRoot({ disks: { s3: disk } }),
+      MediaModule.forRoot({
+        uploadSessions: new InMemoryUploadSessionStore(),
+        multipart: { s3: s3Multipart(s3) },
+        // Deterministic server-derived key so the test knows where to read the object;
+        // the client never sees or controls it (GameWarden-safe).
+        tus: { disk: 's3', basePath: '/media/uploads', keyFor: () => KEY },
+      }),
+    ],
+  })
+  class AppModule {}
+
+  app = await NestFactory.create<NestExpressApplication>(AppModule, {
+    bodyParser: false,
+    logger: false,
+  });
   // The parts route and tus PATCH arrive as `application/offset+octet-stream`; mount a
   // raw parser with a per-part cap so bodies land as Buffers.
   app.use(express.raw({ type: 'application/offset+octet-stream', limit: '32mb' }));
@@ -65,7 +104,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await app?.close();
-  await container?.stop();
+  await container?.stop({ remove: true });
 });
 
 describe('parallel multipart upload over HTTP (client -> Nest -> MinIO)', () => {
@@ -108,9 +147,7 @@ describe('parallel multipart upload over HTTP (client -> Nest -> MinIO)', () => 
     expect(maxInFlight).toBeGreaterThanOrEqual(2);
 
     // The assembled object is byte-identical to the original.
-    const got = await s3.send(new GetObjectCommand({ Bucket: BUCKET, Key: KEY }));
-    if (!got.Body) throw new Error('expected GetObject to return a body');
-    const bytes = Buffer.from(await got.Body.transformToByteArray());
+    const bytes = await disk.getBuffer(KEY);
     expect(bytes.length).toBe(part1.length + part2.length);
     expect(bytes.equals(Buffer.concat([part1, part2]))).toBe(true);
   }, 120_000);

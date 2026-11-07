@@ -1,9 +1,10 @@
 // The safe default: in production, an upload module that mounts routes with no `decorators` refuses
 // to boot. Outside production it mounts them open, as before.
-import { InMemoryDriver, InMemoryUploadSessionStore } from '@dudousxd/nestjs-media-testing';
+import { InMemoryUploadSessionStore } from '@dudousxd/nestjs-media-testing';
 import { Can, Policy } from '@nestjs/authorization';
 import { type DynamicModule, Module } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
+import { InMemoryDisk, StorageModule } from '@nestjs/storage';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { MediaModule, type MediaModuleOptions } from './media.module';
 import { MediaService } from './media.service';
@@ -17,8 +18,6 @@ class MediaPolicy {
 
 function options(): MediaModuleOptions {
   return {
-    default: 'local',
-    disks: { local: new InMemoryDriver() },
     uploadSessions: new InMemoryUploadSessionStore(),
     tus: { disk: 'local' },
     direct: { disk: 'local' },
@@ -26,7 +25,10 @@ function options(): MediaModuleOptions {
 }
 
 async function boots(media: () => DynamicModule): Promise<void> {
-  @Module({ imports: [media()], providers: [MediaPolicy] })
+  @Module({
+    imports: [StorageModule.forRoot({ disks: { local: new InMemoryDisk() } }), media()],
+    providers: [MediaPolicy],
+  })
   class AppModule {}
   const app = await NestFactory.createApplicationContext(AppModule, { logger: false });
   // The providers still work whatever is mounted.
@@ -93,9 +95,7 @@ describe('in production', () => {
     await boots(() =>
       MediaModule.forRoot({ ...options(), mount: { tus: false, multipart: false, direct: false } }),
     );
-    await boots(() =>
-      MediaModule.forRoot({ default: 'local', disks: { local: new InMemoryDriver() } }),
-    );
+    await boots(() => MediaModule.forRoot({}));
   });
 });
 

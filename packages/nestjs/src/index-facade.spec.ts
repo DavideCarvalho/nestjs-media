@@ -5,13 +5,12 @@ import { describe, expect, it } from 'vitest';
 // removed or renamed upstream in `-core`, this file fails to typecheck.
 import {
   ConversionNotDefinedError,
-  FileNotFoundError,
   ImageProcessorMissingError,
+  InvalidMediaKeyError,
   InvalidPartNumberError,
   MediaNotFoundError,
   MimeNotAllowedError,
   ResumableUploadManager,
-  UnknownDiskError,
   UnsupportedOperationError,
   UploadOffsetConflictError,
   UploadSessionNotFoundError,
@@ -20,13 +19,9 @@ import {
 } from './index';
 import type {
   CreateUploadInput,
-  ListEntry,
-  ListOptions,
-  ListResult,
+  FolderListing,
   MediaDiagnosticEvent,
   MultipartPart,
-  StatResult,
-  TemporaryUrlOptions,
   UploadSession,
   UploadSessionListFilter,
   UploadSessionStore,
@@ -34,8 +29,7 @@ import type {
 
 describe('facade re-exports from index.ts', () => {
   it('error classes are re-exported as values with stable `code`s', () => {
-    expect(new FileNotFoundError('p').code).toBe('MEDIA_FILE_NOT_FOUND');
-    expect(new UnknownDiskError('d').code).toBe('MEDIA_UNKNOWN_DISK');
+    expect(new InvalidMediaKeyError('empty').code).toBe('MEDIA_INVALID_KEY');
     expect(new UnsupportedOperationError('drv', 'op').code).toBe('MEDIA_UNSUPPORTED_OP');
     expect(new MimeNotAllowedError('c', 'm').code).toBe('MEDIA_MIME_NOT_ALLOWED');
     expect(new MediaNotFoundError('id').code).toBe('MEDIA_RECORD_NOT_FOUND');
@@ -56,11 +50,10 @@ describe('facade re-exports from index.ts', () => {
   });
 
   it('storage-consumer + upload-session types are re-exported (type-only compile check)', () => {
-    const stat: StatResult = { size: 1, contentType: 'text/plain', lastModified: new Date() };
-    const listEntry: ListEntry = { key: 'a', name: 'a', sizeBytes: 1, lastModified: null };
-    const listResult: ListResult = { folders: [], files: [listEntry] };
-    const listOptions: ListOptions = { delimiter: '/' };
-    const temporaryUrlOptions: TemporaryUrlOptions = { responseContentType: 'text/plain' };
+    const listing: FolderListing = {
+      folders: ['a/'],
+      files: [{ key: 'b', size: 1, lastModified: new Date() }],
+    };
     const multipartPart: MultipartPart = { partNumber: 1, etag: 'x' };
     const uploadSession: UploadSession = {
       id: 'u1',
@@ -77,10 +70,7 @@ describe('facade re-exports from index.ts', () => {
     const store: UploadSessionStore | null = null;
     const event: MediaDiagnosticEvent = 'upload.start';
 
-    expect(stat.size).toBe(1);
-    expect(listResult.files).toHaveLength(1);
-    expect(listOptions.delimiter).toBe('/');
-    expect(temporaryUrlOptions.responseContentType).toBe('text/plain');
+    expect(listing.files).toHaveLength(1);
     expect(multipartPart.partNumber).toBe(1);
     expect(uploadSession.id).toBe('u1');
     expect(createUploadInput.key).toBe('k');

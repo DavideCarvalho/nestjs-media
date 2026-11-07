@@ -2,7 +2,7 @@
 // registers a deny-by-default global `AuthorizationGuard`, so every controller this package mounts
 // is marked `can-anyone`-open, and hosts gate it with `decorators: [Can(...)]` instead.
 import type { AddressInfo } from 'node:net';
-import { InMemoryDriver, InMemoryUploadSessionStore } from '@dudousxd/nestjs-media-testing';
+import { InMemoryUploadSessionStore } from '@dudousxd/nestjs-media-testing';
 import { AuthorizationModule, Can, Policy } from '@nestjs/authorization';
 import {
   type CanActivate,
@@ -16,6 +16,7 @@ import {
 import { GUARDS_METADATA } from '@nestjs/common/constants';
 import { NestFactory } from '@nestjs/core';
 import type { NestExpressApplication } from '@nestjs/platform-express';
+import { InMemoryDisk, StorageModule } from '@nestjs/storage';
 import { afterEach, describe, expect, it } from 'vitest';
 import { CAN_ANYONE_METADATA } from './controller-decorators';
 import { MediaDirectUploadController } from './media-direct-upload.controller';
@@ -53,7 +54,11 @@ afterEach(closeApp);
 
 async function boot(media: DynamicModule): Promise<string> {
   @Module({
-    imports: [AuthorizationModule.forRoot(), media],
+    imports: [
+      StorageModule.forRoot({ disks: { local: new InMemoryDisk() } }),
+      AuthorizationModule.forRoot(),
+      media,
+    ],
     providers: [MediaPolicy],
   })
   class AppModule {}
@@ -73,8 +78,6 @@ async function boot(media: DynamicModule): Promise<string> {
 
 function options(): MediaModuleOptions {
   return {
-    default: 'local',
-    disks: { local: new InMemoryDriver() },
     uploadSessions: new InMemoryUploadSessionStore(),
     tus: { disk: 'local', basePath: '/media/uploads' },
     direct: { disk: 'local' },

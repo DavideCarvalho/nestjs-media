@@ -1,4 +1,5 @@
-import { InMemoryDriver, InMemoryUploadSessionStore } from '@dudousxd/nestjs-media-testing';
+import { InMemoryUploadSessionStore } from '@dudousxd/nestjs-media-testing';
+import { InMemoryDisk, StorageModule } from '@nestjs/storage';
 import { Test } from '@nestjs/testing';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { MediaUploadController } from './media-upload.controller';
@@ -28,15 +29,14 @@ function mockRes() {
 }
 
 let controller: MediaUploadController;
-let disk: InMemoryDriver;
+let disk: InMemoryDisk;
 
 beforeEach(async () => {
-  disk = new InMemoryDriver();
+  disk = new InMemoryDisk();
   const mod = await Test.createTestingModule({
     imports: [
+      StorageModule.forRoot({ disks: { local: disk } }),
       MediaModule.forRoot({
-        default: 'local',
-        disks: { local: disk },
         uploadSessions: new InMemoryUploadSessionStore(),
         tus: {
           disk: 'local',
@@ -80,12 +80,15 @@ describe('MediaUploadController', () => {
     });
     expect(patch.statusCode).toBe(204);
     expect(patch.headers['Upload-Offset']).toBe('5');
-    expect((await disk.get('uploads/a.txt')).toString()).toBe('hello');
+    expect(await disk.getText('uploads/a.txt')).toBe('hello');
   });
 
   it('is absent when tus is not configured', async () => {
     const mod = await Test.createTestingModule({
-      imports: [MediaModule.forRoot({ default: 'local', disks: { local: new InMemoryDriver() } })],
+      imports: [
+        StorageModule.forRoot({ disks: { local: new InMemoryDisk() } }),
+        MediaModule.forRoot({}),
+      ],
     }).compile();
     expect(() => mod.get(MediaUploadController)).toThrow();
   });

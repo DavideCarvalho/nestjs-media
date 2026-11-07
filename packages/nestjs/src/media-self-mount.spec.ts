@@ -4,11 +4,12 @@
 // exported controller classes — protected with ordinary `@Can(...)` decorators under the official
 // deny-by-default global `AuthorizationGuard`.
 import type { AddressInfo } from 'node:net';
-import { InMemoryDriver, InMemoryUploadSessionStore } from '@dudousxd/nestjs-media-testing';
+import { InMemoryUploadSessionStore } from '@dudousxd/nestjs-media-testing';
 import { AuthorizationModule, Can, Policy } from '@nestjs/authorization';
 import { Controller, type DynamicModule, Module } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import type { NestExpressApplication } from '@nestjs/platform-express';
+import { InMemoryDisk, Storage, StorageModule } from '@nestjs/storage';
 import express from 'express';
 import { afterEach, describe, expect, it } from 'vitest';
 import { MediaDirectUploadController } from './media-direct-upload.controller';
@@ -53,8 +54,6 @@ afterEach(async () => {
 
 function options(): MediaModuleOptions {
   return {
-    default: 'local',
-    disks: { local: new InMemoryDriver() },
     uploadSessions: new InMemoryUploadSessionStore(),
     // `basePath` is what the tus Location header points at: the developer's own mount.
     tus: { disk: 'local', basePath: '/api/uploads', keyFor: (filename) => `uploads/${filename}` },
@@ -65,7 +64,11 @@ function options(): MediaModuleOptions {
 
 async function boot(media: DynamicModule, controllers: Array<new (...args: never[]) => unknown>) {
   @Module({
-    imports: [AuthorizationModule.forRoot(), media],
+    imports: [
+      StorageModule.forRoot({ disks: { local: new InMemoryDisk() } }),
+      AuthorizationModule.forRoot(),
+      media,
+    ],
     controllers,
     providers: [MediaPolicy],
   })
@@ -112,8 +115,7 @@ describe('routes: false', () => {
       expect(direct.status).toBe(404);
 
       const media = running().get(MediaService);
-      await media.disk().put('hello.txt', Buffer.from('hi'));
-      expect((await media.disk().get('hello.txt')).toString()).toBe('hi');
+      expect(media.attachments).toBeDefined();
       expect(media.uploads).toBeDefined();
       expect(media.directUploads).toBeDefined();
     });
@@ -170,8 +172,8 @@ describe('upload routes mounted by the developer, protected with @Can(...)', () 
     expect(patched.headers.get('upload-offset')).toBe('5');
 
     // The last byte completes the upload: the file is on the disk.
-    const media = running().get(MediaService);
-    expect((await media.disk().get('uploads/a.txt')).toString()).toBe('hello');
+    const storage = running().get(Storage);
+    expect(await storage.disk('local').getText('uploads/a.txt')).toBe('hello');
 
     // The multipart and direct subclasses are protected the same way.
     const part = await fetch(`${baseUrl}/api/uploads/missing/parts/1`, {
