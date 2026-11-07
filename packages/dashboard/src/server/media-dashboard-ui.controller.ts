@@ -20,6 +20,7 @@ import { readCookieHeader } from './auth/request.js';
 import { responseAlreadyWritten, sendHtml } from './auth/response.js';
 import { SESSION_COOKIE_NAME } from './auth/session-cookie-io.js';
 import { verifySessionCookie } from './auth/session-cookie.js';
+import { OpenToAuthorization } from './controller-decorators.js';
 import {
   MEDIA_CONSOLE_AUTH,
   MEDIA_DASHBOARD_API_PATH,
@@ -49,6 +50,9 @@ const CONTENT_TYPES: Record<string, string> = {
  * The path comes from `RouterModule` (set by `MediaDashboardModule.forRoot({ basePath })`), so the
  * controller routes are relative.
  */
+// Open to `@nestjs/authorization`'s deny-by-default guard; the console's own auth/guards and the
+// host's `decorators` decide access.
+@OpenToAuthorization()
 @Controller()
 export class MediaDashboardUiController {
   private readonly dir = spaDir();

@@ -11,6 +11,7 @@ import {
   Req,
   UseGuards,
 } from '@nestjs/common';
+import { OpenToAuthorization } from './controller-decorators.js';
 import { MediaConsoleGuard } from './media-console.guard.js';
 import { MediaConsoleService } from './media-console.service.js';
 
@@ -31,6 +32,9 @@ interface CreateFolderBody {
  * prefix comes from `RouterModule`, sharing the API base with the read controller. Gated by
  * `MediaConsoleGuard` (session cookie) when the host configured `auth`.
  */
+// Open to `@nestjs/authorization`'s deny-by-default guard; the console's own auth/guards and the
+// host's `decorators` decide access.
+@OpenToAuthorization()
 @UseGuards(MediaConsoleGuard)
 @Controller()
 export class MediaConsoleActionsController {

@@ -22,6 +22,7 @@ import {
   issueSessionCookie,
 } from './auth/session-cookie-io.js';
 import { type ConsoleSessionUser, verifySessionCookie } from './auth/session-cookie.js';
+import { OpenToAuthorization } from './controller-decorators.js';
 import { MEDIA_CONSOLE_AUTH, MEDIA_CONSOLE_COOKIE_PATH } from './tokens.js';
 
 interface LoginBody {
@@ -39,6 +40,9 @@ type MeResponse =
  * these endpoints CREATE the session the gate checks for. When the host didn't configure `auth`,
  * `GET /me` reports `authRequired: false` (the SPA shows the console) and login/logout 404.
  */
+// Open to `@nestjs/authorization`'s deny-by-default guard; the console's own auth/guards and the
+// host's `decorators` decide access.
+@OpenToAuthorization()
 @Controller()
 export class MediaConsoleAuthController {
   private readonly logger = new Logger(MediaConsoleAuthController.name);

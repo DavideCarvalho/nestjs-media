@@ -10,7 +10,8 @@ import {
 import type { InjectionToken } from '@nestjs/common';
 import { RouterModule } from '@nestjs/core';
 import { type ConsoleAuthOptions, resolveConsoleAuth } from './auth/config.js';
-import { isGuardClass, stampGuards } from './guards.js';
+import { decoratedController } from './controller-decorators.js';
+import { GUARDS_METADATA, isGuardClass, stampGuards } from './guards.js';
 import { MediaConsoleApiModule } from './media-console-api.module.js';
 import { MediaDashboardUiController } from './media-dashboard-ui.controller.js';
 import type { ObjectInsightProvider } from './object-insights.js';
@@ -94,6 +95,21 @@ export interface MediaDashboardOptions {
    * Use `forRootAsync`'s `useObjectInsights` when a provider needs injected services.
    */
   objectInsights?: ObjectInsightProvider[];
+  /**
+   * Class decorators applied to EVERY controller the console mounts — the page/asset controller,
+   * the read and action APIs, and (unlike `guards`) the auth controller too — e.g.
+   * `[UseGuards(AuthenticationGuard), Can(MediaPolicy, 'console')]` with the first-party
+   * `@nestjs/authentication` / `@nestjs/authorization`. Default: none.
+   *
+   * Every console controller is marked `@Can.Anyone()`-open (`'authorization:can-anyone'`) so
+   * `@nestjs/authorization`'s deny-by-default global guard doesn't refuse the console; a `Can(...)`
+   * passed here is still checked (the guard treats `can-anyone` as open only when no requirement is
+   * declared). `auth` and `guards` keep working alongside it.
+   *
+   * Each registration decorates fresh subclasses of the controllers, so one registration's
+   * decorators never reach another.
+   */
+  decorators?: ClassDecorator[];
 }
 
 /**
@@ -138,6 +154,11 @@ export interface MediaDashboardAsyncOptions {
    * sharing one list would force every host to inject the union of both.
    */
   injectObjectInsights?: Array<InjectionToken | OptionalFactoryDependency>;
+  /**
+   * See {@link MediaDashboardOptions.decorators}. Static (not built by a factory), like `guards`:
+   * the decorators shape the routes when the module is built.
+   */
+  decorators?: ClassDecorator[];
 }
 
 /** Leading slash, no trailing slash. */
@@ -201,6 +222,7 @@ export class MediaDashboardModule {
       actions?: boolean;
       objectUrls?: ObjectUrlStrategy;
       guards?: Array<Type<CanActivate> | CanActivate>;
+      decorators?: ClassDecorator[];
     },
     apiBasePath: string,
     authProvider: Provider,
@@ -213,6 +235,11 @@ export class MediaDashboardModule {
     // `[]`) — matches `MediaConsoleApiModule`'s own `stampGuards` call for the read/action
     // controllers, which DOES have a built-in base to append onto.
     stampGuards(options.guards, [[MediaDashboardUiController, []]]);
+    const uiController = decoratedController(
+      MediaDashboardUiController,
+      options.decorators,
+      (target) => Reflect.defineMetadata(GUARDS_METADATA, [...(options.guards ?? [])], target),
+    );
     return {
       module: MediaDashboardModule,
       imports: [
@@ -235,13 +262,14 @@ export class MediaDashboardModule {
           insightsProvider,
           imports,
           ...(options.guards ? { guards: options.guards } : {}),
+          ...(options.decorators ? { decorators: options.decorators } : {}),
         }),
         RouterModule.register([
           { path: basePath, module: MediaDashboardModule }, // the UI controller below
           { path: apiBasePath, module: MediaConsoleApiModule },
         ]),
       ],
-      controllers: [MediaDashboardUiController],
+      controllers: [uiController],
       providers: [
         { provide: MEDIA_DASHBOARD_BASE_PATH, useValue: basePath },
         { provide: MEDIA_DASHBOARD_API_PATH, useValue: apiBasePath },

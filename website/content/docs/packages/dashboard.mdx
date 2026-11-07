@@ -35,6 +35,7 @@ interface MediaDashboardOptions {
   auth?: ConsoleAuthOptions;                 // built-in session-cookie login
   guards?: Array<Type<CanActivate> | CanActivate>; // bring-your-own guard(s)
   imports?: DynamicModule['imports'];        // DI resolution path for `guards`
+  decorators?: ClassDecorator[];             // applied to every console controller, e.g. Can(...)
   objectInsights?: ObjectInsightProvider[];  // host context shown in the preview
   objectUrls?: 'auto' | 'proxy';             // presigned store URLs, or same-origin — default 'auto'
 }
@@ -47,10 +48,11 @@ interface MediaDashboardOptions {
 | `actions` | Enables the destructive endpoints (delete object/record, copy/move, abort upload). The read API is always available. |
 | `auth` | Telescope-style built-in session-cookie login — see below. |
 | `guards` / `imports` | Front the console with your own `CanActivate`(s) instead of, or alongside, `auth` — see [Securing the console](#securing-the-console-with-your-own-guards). |
+| `decorators` | Class decorators applied to every console controller — see [`@nestjs/authorization`](#gating-with-nestjsauthorization-decorators). |
 | `objectInsights` | Annotate an object in the preview with what *your app* knows about it — see [Object insights](#object-insights). |
 | `objectUrls` | Whether an object's reported `url` is presigned straight to the store or routed through this server — see [Reaching an object's bytes](#reaching-an-objects-bytes). |
 
-`MediaDashboardModule.forRootAsync(options)` mirrors this, resolving `auth` through an injected `useAuth(...deps)` factory (for hooks that need your DB/services). `guards` and the mount paths stay static fields on the async options object — guard stamping happens at module-build time, before any factory runs.
+`MediaDashboardModule.forRootAsync(options)` mirrors this, resolving `auth` through an injected `useAuth(...deps)` factory (for hooks that need your DB/services). `guards`, `decorators` and the mount paths stay static fields on the async options object — guard stamping happens at module-build time, before any factory runs.
 
 ## Built-in auth
 
@@ -238,6 +240,24 @@ MediaDashboardModule.forRoot({
 ```
 
 With both configured, a request needs a valid `ConsoleAuthGuard` pass **and** a valid console session cookie — useful when the console should require your app's own SSO on top of its own separate login.
+
+## Gating with `@nestjs/authorization` (`decorators`)
+
+`@nestjs/authorization`'s `AuthorizationModule.forRoot()` registers a global `AuthorizationGuard` that **denies by default** any route with no `@Can(...)` and no `@Can.Anyone()`. Every console controller — the page/asset controller, the read and action APIs, and the auth controller — is marked `@Can.Anyone()`-open (`'authorization:can-anyone'` metadata, no dependency on that package), so the console keeps working when you adopt it, and `auth`/`guards` keep deciding who gets in.
+
+To gate it with the official tools, pass `decorators` — class decorators applied to **every** controller the console mounts (default: none):
+
+```ts
+import { AuthenticationGuard } from '@nestjs/authentication';
+import { Can } from '@nestjs/authorization';
+import { UseGuards } from '@nestjs/common';
+
+MediaDashboardModule.forRoot({
+  decorators: [UseGuards(AuthenticationGuard), Can(MediaPolicy, 'console')],
+});
+```
+
+A `Can(...)` passed here is still checked by the official guard (it treats `can-anyone` as open only when no requirement is declared): a guest gets 401, a user the policy denies 403. Unlike `guards`, `decorators` also reach the auth controller (`/login`, `/session`, `/logout`, `/me`) — every mounted controller — so if you combine them with the built-in `auth` login, the login endpoints require your policy too. Each registration decorates fresh subclasses of the controllers, so decorators never leak from one registration into another.
 
 ## Programmatic access with `MediaConsoleService`
 

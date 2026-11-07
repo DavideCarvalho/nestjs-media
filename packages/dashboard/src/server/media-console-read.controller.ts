@@ -21,6 +21,7 @@ import type {
   UploadListResponse,
 } from '../client/types.js';
 import { attachmentDisposition, downloadFilename } from './content-disposition.js';
+import { OpenToAuthorization } from './controller-decorators.js';
 import { MediaConsoleGuard } from './media-console.guard.js';
 import {
   MediaConsoleService,
@@ -99,6 +100,9 @@ function setStatus(response: ConsoleHttpResponse, code: number): void {
  * `RouterModule` (set in `MediaDashboardModule.forRoot({ apiBasePath })`). Always mounted.
  * `MediaConsoleGuard` gates it on a session cookie when the host configured `auth` (else a no-op).
  */
+// Open to `@nestjs/authorization`'s deny-by-default guard; the console's own auth/guards and the
+// host's `decorators` decide access.
+@OpenToAuthorization()
 @UseGuards(MediaConsoleGuard)
 @Controller()
 export class MediaConsoleReadController {

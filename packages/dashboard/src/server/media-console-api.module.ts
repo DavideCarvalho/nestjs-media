@@ -6,7 +6,8 @@ import {
   type Provider,
   type Type,
 } from '@nestjs/common';
-import { baseGuards, isGuardClass, stampGuards } from './guards.js';
+import { decoratedController } from './controller-decorators.js';
+import { GUARDS_METADATA, baseGuards, isGuardClass, stampGuards } from './guards.js';
 import { MediaConsoleActionsController } from './media-console-actions.controller.js';
 import { MediaConsoleAuthController } from './media-console-auth.controller.js';
 import { MediaConsoleReadController } from './media-console-read.controller.js';
@@ -28,6 +29,18 @@ import {
  */
 const READ_BASE_GUARDS = baseGuards(MediaConsoleReadController);
 const ACTIONS_BASE_GUARDS = baseGuards(MediaConsoleActionsController);
+
+/**
+ * Give a decorated subclass its OWN copy of this registration's guard list, so a later
+ * registration re-stamping the shared base class (`stampGuards`) can't change it.
+ */
+function ownGuards(
+  target: Type,
+  base: Array<Type<CanActivate> | CanActivate>,
+  guards: Array<Type<CanActivate> | CanActivate> | undefined,
+): void {
+  Reflect.defineMetadata(GUARDS_METADATA, [...base, ...(guards ?? [])], target);
+}
 
 interface ApiModuleOptions {
   actions: boolean;
@@ -51,6 +64,12 @@ interface ApiModuleOptions {
    * `stampGuards` call.
    */
   guards?: Array<Type<CanActivate> | CanActivate>;
+  /**
+   * Class decorators applied to EVERY controller this module mounts (read, auth, actions) — see
+   * `MediaDashboardOptions.decorators`. Each call decorates fresh subclasses, never the shared
+   * classes, so decorators never leak from one registration into the next.
+   */
+  decorators?: ClassDecorator[];
 }
 
 /**
@@ -71,9 +90,17 @@ export class MediaConsoleApiModule {
       module: MediaConsoleApiModule,
       imports: options.imports ?? [],
       controllers: [
-        MediaConsoleReadController,
-        MediaConsoleAuthController,
-        ...(options.actions ? [MediaConsoleActionsController] : []),
+        decoratedController(MediaConsoleReadController, options.decorators, (target) =>
+          ownGuards(target, READ_BASE_GUARDS, options.guards),
+        ),
+        decoratedController(MediaConsoleAuthController, options.decorators),
+        ...(options.actions
+          ? [
+              decoratedController(MediaConsoleActionsController, options.decorators, (target) =>
+                ownGuards(target, ACTIONS_BASE_GUARDS, options.guards),
+              ),
+            ]
+          : []),
       ],
       providers: [
         MediaConsoleService,
