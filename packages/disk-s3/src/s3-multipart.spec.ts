@@ -163,4 +163,19 @@ describe('s3Multipart', () => {
     expect(listing.files.map((f) => [f.key, f.size, f.etag])).toEqual([['docs/a&b.txt', 3, '"x"']]);
     expect(listing.cursor).toBe('n&1');
   });
+  it('asks S3 for the same page size as the folded listing: 50 by default, `limit`, 1000 at most', async () => {
+    const s3 = fakeS3(
+      () => new Response('<ListBucketResult><IsTruncated>false</IsTruncated></ListBucketResult>'),
+    );
+    const sidecar = s3Multipart({ ...base, prefix: 'p/', fetch: s3.fetch });
+    await sidecar.listFolders('docs');
+    await sidecar.listFolders('docs', { limit: 7 });
+    await sidecar.listFolders('docs', { limit: 5000 });
+    expect(s3.calls.map((call) => call.url.searchParams.get('max-keys'))).toEqual([
+      '50',
+      '7',
+      '1000',
+    ]);
+    await expect(sidecar.listFolders('docs', { limit: 0 })).rejects.toThrow(RangeError);
+  });
 });

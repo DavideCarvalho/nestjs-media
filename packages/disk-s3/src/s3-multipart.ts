@@ -5,6 +5,7 @@ import {
   type MultipartPart,
   type MultipartUploadDriver,
   assertMediaKey,
+  folderListingLimit,
   folderPrefix,
 } from '@dudousxd/nestjs-media-core';
 import type { S3DiskOptions, StorageListEntry } from '@nestjs/storage';
@@ -228,7 +229,8 @@ class S3MultipartDriver implements S3Multipart {
     const query: Array<[string, string]> = [
       ['list-type', '2'],
       ['delimiter', '/'],
-      ['max-keys', String(options.limit ?? 1000)],
+      // Same page size as the folded listing: default 50, at most 1000 (S3's own cap).
+      ['max-keys', String(folderListingLimit(options.limit))],
       ...(full ? ([['prefix', full]] as Array<[string, string]>) : []),
       ...(options.cursor
         ? ([['continuation-token', options.cursor]] as Array<[string, string]>)

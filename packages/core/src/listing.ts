@@ -1,10 +1,37 @@
 import type { StorageDisk } from '@nestjs/storage';
 import type { FolderListing, MultipartUploadDriver } from './types';
 
+/**
+ * Entries (folders + files) one folder-level page holds when the caller passes no `limit`, on every
+ * path: {@link foldListing}, {@link listFolderLevel}, and a side-car's `listFolders` (the S3 one).
+ */
+export const DEFAULT_FOLDER_LISTING_LIMIT = 50;
+
+/**
+ * The largest folder-level page. S3's `ListObjectsV2` returns at most 1000 keys and prefixes per
+ * call, so a larger `limit` is capped here on every path: both return the same page size.
+ */
+export const MAX_FOLDER_LISTING_LIMIT = 1000;
+
+/**
+ * The page size of a folder listing: `limit`, or {@link DEFAULT_FOLDER_LISTING_LIMIT} when absent,
+ * capped at {@link MAX_FOLDER_LISTING_LIMIT}. Throws a `RangeError` unless it is a positive integer.
+ */
+export function folderListingLimit(limit: number | undefined): number {
+  if (limit === undefined) return DEFAULT_FOLDER_LISTING_LIMIT;
+  if (!Number.isInteger(limit) || limit < 1) {
+    throw new RangeError(`folder listing: \`limit\` must be a positive integer, got ${limit}`);
+  }
+  return Math.min(limit, MAX_FOLDER_LISTING_LIMIT);
+}
+
 export interface FoldListingOptions {
   /** The `cursor` of the previous page. */
   cursor?: string;
-  /** Entries (folders + files) per page. Default 50. */
+  /**
+   * Entries (folders + files) per page: at most this many. Default
+   * {@link DEFAULT_FOLDER_LISTING_LIMIT} (50), capped at {@link MAX_FOLDER_LISTING_LIMIT} (1000).
+   */
   limit?: number;
   /** Keys asked of the disk per `list()` call. Default 1000. */
   pageSize?: number;
@@ -51,7 +78,7 @@ export async function foldListing(
   prefix: string,
   options: FoldListingOptions = {},
 ): Promise<FolderListing> {
-  const limit = options.limit ?? 50;
+  const limit = folderListingLimit(options.limit);
   const pageSize = options.pageSize ?? 1000;
   const maxPages = options.maxPages ?? 20;
   const state = decode(options.cursor);
@@ -111,13 +138,21 @@ export async function foldListing(
 /**
  * One folder level: the side-car's native delimiter listing when it has one (S3
  * `ListObjectsV2` with `Delimiter`), else {@link foldListing}.
+ *
+ * Both paths get the same page size: `limit`, or {@link DEFAULT_FOLDER_LISTING_LIMIT} (50) when
+ * absent, capped at {@link MAX_FOLDER_LISTING_LIMIT} (1000). A page holds at most that many
+ * entries; one with a `cursor` may hold fewer (S3 drops the marker object and `a//` prefixes).
  */
-export function listFolderLevel(
+export async function listFolderLevel(
   disk: StorageDisk,
   prefix: string,
-  options: { cursor?: string; limit?: number },
+  options: { cursor?: string; limit?: number } = {},
   multipart?: MultipartUploadDriver,
 ): Promise<FolderListing> {
-  if (multipart?.listFolders) return multipart.listFolders(prefix, options);
-  return foldListing(disk, prefix, options);
+  const resolved = {
+    ...(options.cursor ? { cursor: options.cursor } : {}),
+    limit: folderListingLimit(options.limit),
+  };
+  if (multipart?.listFolders) return multipart.listFolders(prefix, resolved);
+  return foldListing(disk, prefix, resolved);
 }

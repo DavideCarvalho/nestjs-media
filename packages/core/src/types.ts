@@ -51,7 +51,11 @@ export interface MultipartUploadDriver {
   ): Promise<string>;
   completeMultipartUpload(key: string, uploadId: string, parts: MultipartPart[]): Promise<void>;
   abortMultipartUpload(key: string, uploadId: string): Promise<void>;
-  /** Optional: delimiter listing (see {@link FolderListing}). */
+  /**
+   * Optional: delimiter listing (see {@link FolderListing}). `limit` is the most entries
+   * (folders + files) a page holds; when absent, `DEFAULT_FOLDER_LISTING_LIMIT` (50), like the
+   * folded listing. `listFolderLevel()` always passes it.
+   */
   listFolders?(
     prefix: string,
     options?: { cursor?: string; limit?: number },

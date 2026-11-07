@@ -119,6 +119,16 @@ MediaModule.forRoot({ uploadSessions, multipart: { s3: s3Multipart(s3) }, direct
 The proxy path works on any disk: `ResumableUploadManager` engine → framework-agnostic
 `TusUploadHandler` → NestJS `MediaUploadController` → React `useMediaUpload`/`MediaUploader`.
 
+## Folder listing
+
+`listFolderLevel(disk, prefix, { limit, cursor }, sidecar)` returns one folder level (sub-folders
+and files) a page at a time. With a side-car that has `listFolders` (the S3 one), S3 lists the
+folder with a delimiter. On any other disk the flat listing is folded. Both paths use the same page
+size: `limit`, or `DEFAULT_FOLDER_LISTING_LIMIT` (50) when you pass none, at most
+`MAX_FOLDER_LISTING_LIMIT` (1000, S3's own cap per request). A `limit` that is not a positive integer
+is a `RangeError`. A page holds at most `limit` entries. While it has a `cursor` it can hold fewer
+(S3 leaves out a folder's marker object), so page on the `cursor`, not on the count.
+
 ## Protecting the routes
 
 The upload controllers and the `/media` console ship with **no auth of their own**: you protect them
