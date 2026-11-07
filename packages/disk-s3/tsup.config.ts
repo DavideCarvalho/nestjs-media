@@ -1,10 +1,6 @@
 import { defineConfig } from 'tsup';
 
-const external = [
-  '@aws-sdk/client-s3',
-  '@aws-sdk/s3-request-presigner',
-  '@dudousxd/nestjs-media-core',
-];
+const external = ['@dudousxd/nestjs-media-core', '@nestjs/storage'];
 
 export default defineConfig([
   {
