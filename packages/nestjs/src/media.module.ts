@@ -19,6 +19,7 @@ import {
   type Provider,
   type Type,
 } from '@nestjs/common';
+import { decoratedController } from './controller-decorators';
 import { MediaDirectUploadController } from './media-direct-upload.controller';
 import { MediaMultipartUploadController } from './media-multipart-upload.controller';
 import { MediaUploadController } from './media-upload.controller';
@@ -82,6 +83,22 @@ export interface MediaModuleOptions extends StorageManagerOptions {
    * an `imports` passthrough for guard wiring.
    */
   imports?: DynamicModule['imports'];
+  /**
+   * Class decorators applied to EVERY upload controller this module mounts (tus, multipart,
+   * direct), e.g. `[UseGuards(AuthenticationGuard), Can(MediaPolicy, 'upload')]` with the
+   * first-party `@nestjs/authentication` / `@nestjs/authorization`. Each registration builds fresh
+   * subclasses of the controllers to decorate, so one registration's decorators never reach
+   * another. Default: none.
+   *
+   * Every upload controller is marked `@Can.Anyone()`-open (`'authorization:can-anyone'`) so
+   * `@nestjs/authorization`'s deny-by-default global guard doesn't refuse it; a `Can(...)` passed
+   * here still applies (the guard only treats `can-anyone` as open when no requirement is
+   * declared). `guards` keeps working alongside this and runs first.
+   *
+   * With `decorators` set, the mounted controllers are subclasses: resolve them by route, not with
+   * `app.get(MediaUploadController)`.
+   */
+  decorators?: ClassDecorator[];
 }
 
 export interface MediaModuleAsyncOptions {
@@ -117,6 +134,12 @@ export interface MediaModuleAsyncOptions {
     multipart?: boolean;
     direct?: boolean;
   };
+  /**
+   * Class decorators applied to every mounted upload controller — see
+   * `MediaModuleOptions.decorators`. Static (not resolved by `useFactory`) for the same reason as
+   * `guards`/`mount`: they shape the routes when the module is built, before any factory runs.
+   */
+  decorators?: ClassDecorator[];
 }
 
 /**
@@ -195,6 +218,29 @@ function applyGuards(guards: Type<CanActivate>[] | MediaUploadGuards | undefined
   Reflect.defineMetadata(GUARDS_METADATA, bySurface.direct, MediaDirectUploadController);
 }
 
+/**
+ * The three upload controller classes to mount for one registration (see `decoratedController`).
+ * With `decorators`, each is a fresh subclass that carries its surface's `guards` as its OWN
+ * metadata (so a later registration re-stamping the shared base class can't change it), and a
+ * `UseGuards(...)` among the decorators appends after them.
+ */
+function uploadControllers(
+  guards: Type<CanActivate>[] | MediaUploadGuards | undefined,
+  decorators: ClassDecorator[] | undefined,
+): { tus: Type; multipart: Type; direct: Type } {
+  applyGuards(guards);
+  const bySurface = perSurfaceGuards(guards);
+  const build = (controller: Type, surfaceGuards: Type<CanActivate>[]) =>
+    decoratedController(controller, decorators, (target) =>
+      Reflect.defineMetadata(GUARDS_METADATA, surfaceGuards, target),
+    );
+  return {
+    tus: build(MediaUploadController, bySurface.tus),
+    multipart: build(MediaMultipartUploadController, bySurface.multipart),
+    direct: build(MediaDirectUploadController, bySurface.direct),
+  };
+}
+
 function buildLibrary(manager: StorageManager, options: MediaModuleOptions): MediaLibrary | null {
   if (!options.store) return null;
   return new MediaLibrary({
@@ -257,7 +303,7 @@ export class MediaModule {
     const uploads = buildUploads(manager, options);
     const tus = buildTus(uploads, options);
     const direct = buildDirect(manager, options);
-    applyGuards(options.guards);
+    const controllers = uploadControllers(options.guards, options.decorators);
     return {
       module: MediaModule,
       imports: options.imports ?? [],
@@ -275,9 +321,9 @@ export class MediaModule {
         MediaService,
       ],
       controllers: [
-        ...(tus ? [MediaUploadController] : []),
-        ...(uploads ? [MediaMultipartUploadController] : []),
-        ...(direct ? [MediaDirectUploadController] : []),
+        ...(tus ? [controllers.tus] : []),
+        ...(uploads ? [controllers.multipart] : []),
+        ...(direct ? [controllers.direct] : []),
       ],
       exports: [
         MediaService,
@@ -346,7 +392,7 @@ export class MediaModule {
       ...guardProviders(options.guards),
       MediaService,
     ];
-    applyGuards(options.guards);
+    const controllers = uploadControllers(options.guards, options.decorators);
     return {
       module: MediaModule,
       imports: options.imports ?? [],
@@ -360,9 +406,9 @@ export class MediaModule {
       // hatch (see its JSDoc on `MediaModuleAsyncOptions`) for dropping a
       // controller's route surface entirely instead of leaving it mounted-but-501.
       controllers: [
-        ...(options.mount?.tus === false ? [] : [MediaUploadController]),
-        ...(options.mount?.multipart === false ? [] : [MediaMultipartUploadController]),
-        ...(options.mount?.direct === false ? [] : [MediaDirectUploadController]),
+        ...(options.mount?.tus === false ? [] : [controllers.tus]),
+        ...(options.mount?.multipart === false ? [] : [controllers.multipart]),
+        ...(options.mount?.direct === false ? [] : [controllers.direct]),
       ],
       exports: [
         MediaService,

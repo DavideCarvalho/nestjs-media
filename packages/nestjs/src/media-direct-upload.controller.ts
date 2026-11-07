@@ -9,6 +9,7 @@ import {
   Post,
   Query,
 } from '@nestjs/common';
+import { OpenToAuthorization } from './controller-decorators';
 import { MEDIA_DIRECT } from './tokens';
 
 interface InitiateBody {
@@ -25,6 +26,8 @@ interface CompleteBody {
   disk?: string;
 }
 
+// Open to `@nestjs/authorization`'s deny-by-default guard; `guards`/`decorators` decide access.
+@OpenToAuthorization()
 @Controller('media/uploads/direct')
 export class MediaDirectUploadController {
   constructor(@Inject(MEDIA_DIRECT) private readonly manager: DirectUploadManager | null) {}

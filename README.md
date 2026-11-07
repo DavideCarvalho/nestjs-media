@@ -99,7 +99,18 @@ implemented end to end: `ResumableUploadManager` engine → framework-agnostic
 
 > **Security:** `MediaUploadController` (tus) and `MediaDirectUploadController` (direct)
 > ship with **no built-in auth guard** — protect `media/uploads` / `media/uploads/direct`
-> with your own NestJS guard (e.g. a global `APP_GUARD` or a route-scoped guard/middleware).
+> with your own NestJS guard (e.g. a global `APP_GUARD` or a route-scoped guard/middleware),
+> the module's `guards` option, or `decorators`.
+>
+> **`@nestjs/authorization`:** every controller this library mounts (uploads and the `/media`
+> console) is marked `@Can.Anyone()`-open, so the official deny-by-default global
+> `AuthorizationGuard` doesn't refuse it. To decide who reaches them with the official tools,
+> pass `decorators` (applied to every mounted controller; default none):
+>
+> ```ts
+> MediaModule.forRoot({ /* … */, decorators: [UseGuards(AuthenticationGuard), Can(MediaPolicy, 'upload')] });
+> MediaDashboardModule.forRoot({ decorators: [Can(MediaPolicy, 'console')] });
+> ```
 
 ## Status
 

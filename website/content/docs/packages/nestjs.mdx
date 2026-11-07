@@ -68,6 +68,27 @@ MediaModule.forRoot({
 An omitted key (or the whole option) leaves that surface unguarded — **uploads remain unauthenticated by default**. On `forRootAsync`, `guards` is a *static* field on the config object, not resolved via `useFactory`, since controllers are wired at module-build time; a guard that needs async-resolved config (e.g. a `ConfigService` secret) should inject it itself via DI, with its providing module passed through `imports`.
 </Callout>
 
+## Gating with `@nestjs/authorization` (`decorators`)
+
+`@nestjs/authorization`'s `AuthorizationModule.forRoot()` registers a global `AuthorizationGuard` that **denies by default**: a route with no `@Can(...)` and no `@Can.Anyone()` is refused. Every upload controller this package mounts is therefore marked `@Can.Anyone()`-open (it defines `'authorization:can-anyone'` metadata, with no dependency on that package), so adopting `@nestjs/authorization` doesn't break your uploads — and `guards` (above) keeps deciding who gets in.
+
+To use the official tools instead, pass `decorators` — class decorators applied to **every** upload controller the module mounts (tus, multipart, direct). Default: none.
+
+```ts
+import { AuthenticationGuard } from '@nestjs/authentication';
+import { Can } from '@nestjs/authorization';
+import { UseGuards } from '@nestjs/common';
+
+MediaModule.forRoot({
+  // …
+  decorators: [UseGuards(AuthenticationGuard), Can(MediaPolicy, 'upload')],
+});
+```
+
+The `can-anyone` mark only opens routes that declare no requirement: a `Can(...)` passed through `decorators` is still checked (401 for a guest, 403 for a user the policy denies). `decorators` composes with `guards` (both must pass; `guards` runs first). On `forRootAsync` it is a static field on the config object, like `guards` and `mount`, since it shapes the routes before any factory runs.
+
+Each registration decorates a fresh subclass of each controller, so one registration's decorators never leak into another. With `decorators` set, resolve the controllers by route, not with `app.get(MediaUploadController)`.
+
 ## Mounting only what you use
 
 `forRootAsync` mounts all three upload controllers unconditionally by default — each one 501s if you never configure its feature in the factory — since Nest wires controllers at module-build time, before the async factory runs. Pass a static `mount` object to drop the ones you never use entirely, so they 404 instead of existing as dead, always-501 surface:
