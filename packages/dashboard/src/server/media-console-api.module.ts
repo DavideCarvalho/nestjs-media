@@ -70,6 +70,11 @@ interface ApiModuleOptions {
    * classes, so decorators never leak from one registration into the next.
    */
   decorators?: ClassDecorator[];
+  /**
+   * `false` registers no controller, only the providers (exported), for a host that mounts the
+   * controllers itself — see `MediaDashboardOptions.mount`. Default `true`.
+   */
+  mount?: boolean;
 }
 
 /**
@@ -89,19 +94,24 @@ export class MediaConsoleApiModule {
     return {
       module: MediaConsoleApiModule,
       imports: options.imports ?? [],
-      controllers: [
-        decoratedController(MediaConsoleReadController, options.decorators, (target) =>
-          ownGuards(target, READ_BASE_GUARDS, options.guards),
-        ),
-        decoratedController(MediaConsoleAuthController, options.decorators),
-        ...(options.actions
-          ? [
-              decoratedController(MediaConsoleActionsController, options.decorators, (target) =>
-                ownGuards(target, ACTIONS_BASE_GUARDS, options.guards),
+      controllers:
+        options.mount === false
+          ? []
+          : [
+              decoratedController(MediaConsoleReadController, options.decorators, (target) =>
+                ownGuards(target, READ_BASE_GUARDS, options.guards),
               ),
-            ]
-          : []),
-      ],
+              decoratedController(MediaConsoleAuthController, options.decorators),
+              ...(options.actions
+                ? [
+                    decoratedController(
+                      MediaConsoleActionsController,
+                      options.decorators,
+                      (target) => ownGuards(target, ACTIONS_BASE_GUARDS, options.guards),
+                    ),
+                  ]
+                : []),
+            ],
       providers: [
         MediaConsoleService,
         MediaConsoleGuard,
@@ -123,7 +133,16 @@ export class MediaConsoleApiModule {
       // hand an unauthenticated navigation to the host's `unauthenticatedPage`. Exporting keeps the
       // single `authProvider` instance shared; re-providing the same factory in both modules would
       // run a `forRootAsync` host's `useAuth` twice.
-      exports: [MediaConsoleService, MEDIA_CONSOLE_AUTH],
+      // The rest is exported for a host mounting the controllers itself (`mount: false`): a subclass of
+      // the auth controller, or `MediaConsoleGuard` on the read/action ones, injects them in the
+      // host's module.
+      exports: [
+        MediaConsoleService,
+        MediaConsoleGuard,
+        MEDIA_CONSOLE_AUTH,
+        MEDIA_CONSOLE_COOKIE_PATH,
+        MEDIA_DASHBOARD_ACTIONS,
+      ],
     };
   }
 }

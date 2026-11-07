@@ -97,20 +97,27 @@ proxied (resumable **tus**) vs direct (presigned S3 multipart). The proxy path i
 implemented end to end: `ResumableUploadManager` engine → framework-agnostic
 `TusUploadHandler` → NestJS `MediaUploadController` → React `useMediaUpload`/`MediaUploader`.
 
-> **Security:** `MediaUploadController` (tus) and `MediaDirectUploadController` (direct)
-> ship with **no built-in auth guard** — protect `media/uploads` / `media/uploads/direct`
-> with your own NestJS guard (e.g. a global `APP_GUARD` or a route-scoped guard/middleware),
-> the module's `guards` option, or `decorators`.
->
-> **`@nestjs/authorization`:** every controller this library mounts (uploads and the `/media`
-> console) is marked `@Can.Anyone()`-open, so the official deny-by-default global
-> `AuthorizationGuard` doesn't refuse it. To decide who reaches them with the official tools,
-> pass `decorators` (applied to every mounted controller; default none):
+> **Protecting the routes:** the upload controllers ship with **no built-in auth**. In order of
+> preference: (1) **mount them yourself**, as NestJS's first-party packages have you do: pass
+> `mount: false` (every provider keeps working) and extend the exported controller classes in your
+> own module, protected with ordinary decorators; (2) pass `decorators`, applied to every mounted
+> controller; (3) `guards` (and the console's built-in `auth`), kept for compatibility.
 >
 > ```ts
+> MediaModule.forRoot({ /* … */, tus: { disk: 'local', basePath: '/api/uploads' }, mount: false });
+>
+> @Can(MediaPolicy, 'upload')
+> @Controller('api/uploads')
+> export class UploadsController extends MediaUploadController {}
+>
+> // or, keeping the library's routes:
 > MediaModule.forRoot({ /* … */, decorators: [UseGuards(AuthenticationGuard), Can(MediaPolicy, 'upload')] });
 > MediaDashboardModule.forRoot({ decorators: [Can(MediaPolicy, 'console')] });
 > ```
+>
+> Every controller this library mounts (uploads and the `/media` console) is marked
+> `@Can.Anyone()`-open, so `@nestjs/authorization`'s deny-by-default global guard doesn't refuse it;
+> a `@Can(...)` you add is still checked. `MediaDashboardModule` takes the same `mount: false`.
 
 ## Status
 

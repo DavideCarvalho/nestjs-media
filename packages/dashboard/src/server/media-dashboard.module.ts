@@ -110,6 +110,22 @@ export interface MediaDashboardOptions {
    * decorators never reach another.
    */
   decorators?: ClassDecorator[];
+  /**
+   * `false` mounts NO controller — no page, no JSON API, no auth routes — while every provider
+   * still works and is exported (`MediaConsoleService`, the resolved paths, `auth`), so you serve
+   * the console from controllers of your own, protected with ordinary Nest decorators, by extending
+   * the exported controller classes. Keep `basePath`/`apiBasePath` equal to where you mount them:
+   * the SPA reads both.
+   *
+   * ```ts
+   * @Can(MediaPolicy, 'console')
+   * @Controller('media/api')
+   * export class ConsoleApiController extends MediaConsoleReadController {}
+   * ```
+   *
+   * Default `true`.
+   */
+  mount?: boolean;
 }
 
 /**
@@ -159,6 +175,8 @@ export interface MediaDashboardAsyncOptions {
    * the decorators shape the routes when the module is built.
    */
   decorators?: ClassDecorator[];
+  /** See {@link MediaDashboardOptions.mount}. Static, like `guards`/`decorators`. */
+  mount?: boolean;
 }
 
 /** Leading slash, no trailing slash. */
@@ -223,6 +241,7 @@ export class MediaDashboardModule {
       objectUrls?: ObjectUrlStrategy;
       guards?: Array<Type<CanActivate> | CanActivate>;
       decorators?: ClassDecorator[];
+      mount?: boolean;
     },
     apiBasePath: string,
     authProvider: Provider,
@@ -231,6 +250,7 @@ export class MediaDashboardModule {
   ): DynamicModule {
     const basePath = normalize(options.basePath ?? '/media');
     const actions = options.actions === true;
+    const mount = options.mount !== false;
     // MediaDashboardUiController ships with no guard of its own, so this is a plain REPLACE (base
     // `[]`) — matches `MediaConsoleApiModule`'s own `stampGuards` call for the read/action
     // controllers, which DOES have a built-in base to append onto.
@@ -263,13 +283,18 @@ export class MediaDashboardModule {
           imports,
           ...(options.guards ? { guards: options.guards } : {}),
           ...(options.decorators ? { decorators: options.decorators } : {}),
+          mount,
         }),
-        RouterModule.register([
-          { path: basePath, module: MediaDashboardModule }, // the UI controller below
-          { path: apiBasePath, module: MediaConsoleApiModule },
-        ]),
+        ...(mount
+          ? [
+              RouterModule.register([
+                { path: basePath, module: MediaDashboardModule }, // the UI controller below
+                { path: apiBasePath, module: MediaConsoleApiModule },
+              ]),
+            ]
+          : []),
       ],
-      controllers: [uiController],
+      controllers: mount ? [uiController] : [],
       providers: [
         { provide: MEDIA_DASHBOARD_BASE_PATH, useValue: basePath },
         { provide: MEDIA_DASHBOARD_API_PATH, useValue: apiBasePath },
@@ -277,8 +302,10 @@ export class MediaDashboardModule {
         // module — class guards need a provider; an already-instantiated guard needs none.
         ...(options.guards ?? []).filter(isGuardClass),
       ],
-      // Re-export the API module so its MediaConsoleService reaches importers if they want it.
-      exports: [MediaConsoleApiModule],
+      // Re-export the API module so its MediaConsoleService reaches importers if they want it; the
+      // resolved paths too, so a host mounting the controllers itself (`mount: false`) can extend
+      // `MediaDashboardUiController` in a module of its own.
+      exports: [MediaConsoleApiModule, MEDIA_DASHBOARD_BASE_PATH, MEDIA_DASHBOARD_API_PATH],
     };
   }
 }

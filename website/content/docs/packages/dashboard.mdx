@@ -36,6 +36,7 @@ interface MediaDashboardOptions {
   guards?: Array<Type<CanActivate> | CanActivate>; // bring-your-own guard(s)
   imports?: DynamicModule['imports'];        // DI resolution path for `guards`
   decorators?: ClassDecorator[];             // applied to every console controller, e.g. Can(...)
+  mount?: boolean;                           // false → mount no controller (mount them yourself)
   objectInsights?: ObjectInsightProvider[];  // host context shown in the preview
   objectUrls?: 'auto' | 'proxy';             // presigned store URLs, or same-origin — default 'auto'
 }
@@ -48,11 +49,83 @@ interface MediaDashboardOptions {
 | `actions` | Enables the destructive endpoints (delete object/record, copy/move, abort upload). The read API is always available. |
 | `auth` | Telescope-style built-in session-cookie login — see below. |
 | `guards` / `imports` | Front the console with your own `CanActivate`(s) instead of, or alongside, `auth` — see [Securing the console](#securing-the-console-with-your-own-guards). |
-| `decorators` | Class decorators applied to every console controller — see [`@nestjs/authorization`](#gating-with-nestjsauthorization-decorators). |
+| `decorators` | Class decorators applied to every console controller — see [Protecting the routes](#protecting-the-routes). |
+| `mount` | `false` mounts no controller, for serving the console from your own — see [Mount it yourself](#1-mount-it-yourself-recommended). Default `true`. |
 | `objectInsights` | Annotate an object in the preview with what *your app* knows about it — see [Object insights](#object-insights). |
 | `objectUrls` | Whether an object's reported `url` is presigned straight to the store or routed through this server — see [Reaching an object's bytes](#reaching-an-objects-bytes). |
 
-`MediaDashboardModule.forRootAsync(options)` mirrors this, resolving `auth` through an injected `useAuth(...deps)` factory (for hooks that need your DB/services). `guards`, `decorators` and the mount paths stay static fields on the async options object — guard stamping happens at module-build time, before any factory runs.
+`MediaDashboardModule.forRootAsync(options)` mirrors this, resolving `auth` through an injected `useAuth(...deps)` factory (for hooks that need your DB/services). `guards`, `decorators`, `mount` and the mount paths stay static fields on the async options object — guard stamping happens at module-build time, before any factory runs.
+
+## Protecting the routes
+
+The console mounts a page/asset controller, the read and action JSON APIs, and an auth controller. In order of preference:
+
+1. **Mount it yourself** with the official tools (recommended).
+2. **`decorators`** on the controllers this module mounts.
+3. The built-in **`auth`** login and **`guards`**, kept for compatibility (see [Built-in auth](#built-in-auth) and [Securing the console with your own guards](#securing-the-console-with-your-own-guards)).
+
+`@nestjs/authorization`'s `AuthorizationModule.forRoot()` registers a global `AuthorizationGuard` that **denies by default** any route with no `@Can(...)` and no `@Can.Anyone()`. Every console controller is marked `@Can.Anyone()`-open (`'authorization:can-anyone'` metadata, no dependency on that package), so the console keeps working when you adopt it. The mark only opens a route that declares no requirement: a `@Can(...)` you add is still checked (a guest gets 401, a user the policy denies 403).
+
+### 1. Mount it yourself (recommended)
+
+`mount: false` registers **no** console controller, while every provider keeps working and is exported (`MediaConsoleService`, `MediaConsoleGuard`, the resolved paths, `auth`). Serve the console by extending the exported controller classes in a module of your own and protect them like any of your routes. Keep `basePath`/`apiBasePath` equal to where you mount them, since the SPA reads both:
+
+```ts
+import { Can } from '@nestjs/authorization';
+import { Controller, Module } from '@nestjs/common';
+import {
+  MediaConsoleActionsController,
+  MediaConsoleAuthController,
+  MediaConsoleReadController,
+  MediaDashboardModule,
+  MediaDashboardUiController,
+} from '@dudousxd/nestjs-media-dashboard';
+
+@Can(MediaPolicy, 'console')
+@Controller('media')
+export class ConsolePageController extends MediaDashboardUiController {}
+
+@Can(MediaPolicy, 'console')
+@Controller('media/api')
+export class ConsoleApiController extends MediaConsoleReadController {}
+
+@Can(MediaPolicy, 'console')
+@Controller('media/api')
+export class ConsoleActionsController extends MediaConsoleActionsController {} // only with `actions: true`
+
+@Can(MediaPolicy, 'console')
+@Controller('media/api')
+export class ConsoleAuthController extends MediaConsoleAuthController {} // the SPA calls `/me`
+
+@Module({
+  imports: [
+    AuthorizationModule.forRoot(),
+    MediaDashboardModule.forRoot({ basePath: '/media', apiBasePath: '/media/api', mount: false }),
+  ],
+  controllers: [ConsolePageController, ConsoleApiController, ConsoleActionsController, ConsoleAuthController],
+  providers: [MediaPolicy],
+})
+export class AppModule {}
+```
+
+The subclasses inherit every route and the constructor's injection, so they need no constructor of their own. The read and action controllers keep their built-in `MediaConsoleGuard` (a no-op unless `auth` is configured), and they inherit any `guards` you pass. `mount` is a static field on `forRootAsync` too.
+
+### 2. `decorators`
+
+To keep the routes this module mounts and gate them with the official tools, pass `decorators` — class decorators applied to **every** controller the console mounts (default: none):
+
+```ts
+import { AuthenticationGuard } from '@nestjs/authentication';
+import { Can } from '@nestjs/authorization';
+import { UseGuards } from '@nestjs/common';
+
+MediaDashboardModule.forRoot({
+  decorators: [UseGuards(AuthenticationGuard), Can(MediaPolicy, 'console')],
+});
+```
+
+A `Can(...)` passed here is still checked by the official guard (it treats `can-anyone` as open only when no requirement is declared): a guest gets 401, a user the policy denies 403. Unlike `guards`, `decorators` also reach the auth controller (`/login`, `/session`, `/logout`, `/me`) — every mounted controller — so if you combine them with the built-in `auth` login, the login endpoints require your policy too. Each registration decorates fresh subclasses of the controllers, so decorators never leak from one registration into another.
+
 
 ## Built-in auth
 
@@ -216,7 +289,7 @@ interpolated user-supplied text into a URL.
 
 ## Securing the console with your own guards
 
-`auth` is the console's own turnkey login. If your app already has an auth guard — a session/cookie check, an `InertiaAuthGuard`, whatever fronts the rest of your app — you don't need a second login system. `guards` (+ `imports` for its dependencies) lets you front the console with THAT guard instead, on a single `forRoot`/`forRootAsync` call:
+A compatibility option: prefer [mounting the console yourself](#1-mount-it-yourself-recommended) or `decorators`. `auth` is the console's own turnkey login. If your app already has an auth guard — a session/cookie check, an `InertiaAuthGuard`, whatever fronts the rest of your app — you don't need a second login system. `guards` (+ `imports` for its dependencies) lets you front the console with THAT guard instead, on a single `forRoot`/`forRootAsync` call:
 
 ```ts
 MediaDashboardModule.forRoot({
@@ -240,24 +313,6 @@ MediaDashboardModule.forRoot({
 ```
 
 With both configured, a request needs a valid `ConsoleAuthGuard` pass **and** a valid console session cookie — useful when the console should require your app's own SSO on top of its own separate login.
-
-## Gating with `@nestjs/authorization` (`decorators`)
-
-`@nestjs/authorization`'s `AuthorizationModule.forRoot()` registers a global `AuthorizationGuard` that **denies by default** any route with no `@Can(...)` and no `@Can.Anyone()`. Every console controller — the page/asset controller, the read and action APIs, and the auth controller — is marked `@Can.Anyone()`-open (`'authorization:can-anyone'` metadata, no dependency on that package), so the console keeps working when you adopt it, and `auth`/`guards` keep deciding who gets in.
-
-To gate it with the official tools, pass `decorators` — class decorators applied to **every** controller the console mounts (default: none):
-
-```ts
-import { AuthenticationGuard } from '@nestjs/authentication';
-import { Can } from '@nestjs/authorization';
-import { UseGuards } from '@nestjs/common';
-
-MediaDashboardModule.forRoot({
-  decorators: [UseGuards(AuthenticationGuard), Can(MediaPolicy, 'console')],
-});
-```
-
-A `Can(...)` passed here is still checked by the official guard (it treats `can-anyone` as open only when no requirement is declared): a guest gets 401, a user the policy denies 403. Unlike `guards`, `decorators` also reach the auth controller (`/login`, `/session`, `/logout`, `/me`) — every mounted controller — so if you combine them with the built-in `auth` login, the login endpoints require your policy too. Each registration decorates fresh subclasses of the controllers, so decorators never leak from one registration into another.
 
 ## Programmatic access with `MediaConsoleService`
 
