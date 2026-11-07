@@ -1,26 +1,25 @@
 import { Global, Module } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
+import { InMemoryDisk, StorageModule } from '@nestjs/storage';
 import { describe, expect, it } from 'vitest';
 import { MediaDashboardModule } from './index.js';
 
-const STORAGE = Symbol.for('nestjs-media:storage');
 const STORE = Symbol.for('nestjs-media:store');
 const UPLOADS = Symbol.for('nestjs-media:upload-sessions');
 
-const fakeStorage = {
-  defaultDisk: 'primary',
-  diskNames: () => ['primary', 'secondary'],
-  disk: () => ({ capabilities: { presign: true, multipart: true, publicUrls: false, list: true } }),
-};
-
 @Global()
 @Module({
+  imports: [
+    StorageModule.forRoot({
+      default: 'primary',
+      disks: { primary: new InMemoryDisk(), secondary: new InMemoryDisk() },
+    }),
+  ],
   providers: [
-    { provide: STORAGE, useValue: fakeStorage },
     { provide: STORE, useValue: null },
     { provide: UPLOADS, useValue: null },
   ],
-  exports: [STORAGE, STORE, UPLOADS],
+  exports: [STORE, UPLOADS],
 })
 class MockMediaModule {}
 
@@ -38,7 +37,7 @@ class AppModule {}
 
 describe('MediaDashboardModule mount (bootstrap smoke)', () => {
   it('boots, serves the read API, and 404s a gated action route', async () => {
-    const app = await NestFactory.create(AppModule, { logger: false });
+    const app = await NestFactory.create(AppModule, { logger: false, abortOnError: false });
     app.setGlobalPrefix('api', {
       exclude: ['media', 'media/(.*)', 'api/media/console', 'api/media/console/(.*)'],
     });

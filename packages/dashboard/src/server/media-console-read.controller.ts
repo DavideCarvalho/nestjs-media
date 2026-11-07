@@ -1,12 +1,12 @@
 import {
   Controller,
   Get,
-  Headers,
   Inject,
   Param,
   Query,
+  Req,
   Res,
-  StreamableFile,
+  type StreamableFile,
 } from '@nestjs/common';
 import type {
   CollectionsResponse,
@@ -19,13 +19,9 @@ import type {
   UploadDetailResponse,
   UploadListResponse,
 } from '../client/types.js';
-import { attachmentDisposition, downloadFilename } from './content-disposition.js';
+import { downloadFilename } from './content-disposition.js';
 import { OpenToAuthorization } from './controller-decorators.js';
-import {
-  MediaConsoleService,
-  RangeNotSatisfiableException,
-  type RequestedReadRange,
-} from './media-console.service.js';
+import { MediaConsoleService } from './media-console.service.js';
 import type { ObjectInsightsResponse } from './object-insights.js';
 
 /** Parse an optional numeric query param; undefined when absent or not a finite number. */
@@ -33,64 +29,6 @@ function toLimit(value: string | undefined): number | undefined {
   if (value === undefined) return undefined;
   const parsed = Number(value);
   return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : undefined;
-}
-
-/** `bytes=<start>-<end>`, `bytes=<start>-`, or the suffix `bytes=-<n>`. Nothing else: a multi-range
- *  request, a non-`bytes` unit, or junk fails to match and is treated as absent. */
-const SINGLE_BYTE_RANGE = /^bytes=(\d*)-(\d*)$/;
-
-/**
- * Parse a `Range` request header into something the service can resolve against the object's size.
- *
- * Returns `null` for "no usable range", which the caller treats as no range at all — a full 200
- * body. That is deliberate and RFC 9110-sanctioned: "An origin server MUST ignore a Range header
- * field that contains a range unit it does not understand", and a server may likewise ignore one it
- * cannot parse. Ignoring is safe (the client gets everything it asked for and more); guessing is
- * not, which is why anything outside the single-range grammar above is rejected wholesale rather
- * than partially interpreted.
- */
-export function parseRangeHeader(header: string | undefined): RequestedReadRange | null {
-  if (header === undefined) return null;
-  const match = SINGLE_BYTE_RANGE.exec(header.trim());
-  if (!match) return null;
-  const startText = match[1] ?? '';
-  const endText = match[2] ?? '';
-  // `bytes=-` names neither bound — meaningless, not a range.
-  if (startText === '' && endText === '') return null;
-  // `bytes=-N` — the LAST n bytes. Only the size tells us where that starts, so it travels as a
-  // suffix and the service (which has the stat) makes it absolute.
-  if (startText === '') return { suffixLength: Number(endText) };
-  const start = Number(startText);
-  return endText === '' ? { start } : { start, end: Number(endText) };
-}
-
-/** The response surface this controller drives, structurally typed: Express' response and Fastify's
- *  reply both expose `status()`, and both reach the Node response for `setHeader` (Fastify via
- *  `.raw`). Keeps the package free of a platform-specific type dependency. */
-interface ConsoleHttpResponse {
-  status?(code: number): unknown;
-  statusCode?: number;
-  setHeader?(name: string, value: string): unknown;
-  raw?: { statusCode?: number; setHeader?(name: string, value: string): unknown };
-}
-
-function setHeader(response: ConsoleHttpResponse, name: string, value: string): void {
-  if (typeof response.setHeader === 'function') {
-    response.setHeader(name, value);
-    return;
-  }
-  if (typeof response.raw?.setHeader === 'function') response.raw.setHeader(name, value);
-}
-
-/** Set the response status without ending the response — Nest still pipes the `StreamableFile`
- *  afterwards, and (with `passthrough`) does not re-apply the route's default 200 over this. */
-function setStatus(response: ConsoleHttpResponse, code: number): void {
-  if (typeof response.status === 'function') {
-    response.status(code);
-    return;
-  }
-  if (response.raw) response.raw.statusCode = code;
-  else response.statusCode = code;
 }
 
 /**
@@ -105,7 +43,7 @@ export class MediaConsoleReadController {
   constructor(@Inject(MediaConsoleService) private readonly service: MediaConsoleService) {}
 
   @Get('disks')
-  disks(): DiskListResponse {
+  disks(): Promise<DiskListResponse> {
     return this.service.listDisks();
   }
 
@@ -140,95 +78,38 @@ export class MediaConsoleReadController {
   }
 
   /**
-   * Streams the object's bytes inline (Content-Disposition: inline) from the same origin, so the SPA
-   * can render text/PDF previews the browser would otherwise download, and read text past CORS.
+   * Streams the object's bytes from the same origin (`serveFile()`), so the SPA can render previews
+   * past CORS: `inline` for types that can't run script here (images, PDF, audio, video, plain
+   * text), `attachment` for the rest — the text previews read the body with `fetch`, which doesn't
+   * care. A single `Range` gets a 206, which is how SQLite/ZIP/Parquet previews read a few KB out
+   * of a multi-hundred-MB object.
    */
   @Get('disks/:disk/object/raw')
   objectRaw(
     @Param('disk') disk: string,
     @Query('key') key: string,
-    @Headers('range') rangeHeader: string | undefined,
-    @Res({ passthrough: true }) response: ConsoleHttpResponse,
-  ): Promise<StreamableFile> {
-    return this.streamObject(disk, key, rangeHeader, response, 'inline');
+    @Req() req: unknown,
+    @Res({ passthrough: true }) res: unknown,
+  ): Promise<StreamableFile | undefined> {
+    return this.service.serveObject(disk, key, { req, res, disposition: 'inline' });
   }
 
   /**
-   * The same bytes as `/raw`, but as a SAVE rather than a render: `Content-Disposition: attachment`
-   * with the object's own name on it.
-   *
-   * Its own route rather than a flag on `/raw` because `/raw` is load-bearing for every preview —
-   * they depend on `inline`, and a disposition that varied by query param would be one wrong link
-   * away from a PDF preview turning into a download.
-   *
-   * Same-origin and unconditional, deliberately: this is the console's own action, so it must work
-   * on a host whose browser cannot reach the object store at all (no route to S3, no CORS grant).
-   * That is exactly where `objectDetail`'s presigned `url` — a link to share, not a way to fetch —
-   * is useless. See the `objectUrls` option.
+   * The same bytes as `/raw`, but as a SAVE: `Content-Disposition: attachment` with the object's
+   * own name. Same-origin and unconditional, so it works where the browser can't reach the store.
    */
   @Get('disks/:disk/object/download')
   objectDownload(
     @Param('disk') disk: string,
     @Query('key') key: string,
-    @Headers('range') rangeHeader: string | undefined,
-    @Res({ passthrough: true }) response: ConsoleHttpResponse,
-  ): Promise<StreamableFile> {
-    return this.streamObject(
-      disk,
-      key,
-      rangeHeader,
-      response,
-      attachmentDisposition(downloadFilename(key ?? '')),
-    );
-  }
-
-  /**
-   * Stream an object under the given `Content-Disposition`, honouring a single-range `Range` header
-   * — which is what lets a reader pull a few KB out of a multi-hundred-MB object (a SQLite page, a
-   * ZIP's central directory) instead of the whole file, and what lets a browser resume an
-   * interrupted download of one. With no `Range` the response is a plain 200 full body, which the
-   * PDF/text/spreadsheet previews depend on.
-   */
-  private async streamObject(
-    disk: string,
-    key: string,
-    rangeHeader: string | undefined,
-    response: ConsoleHttpResponse,
-    disposition: string,
-  ): Promise<StreamableFile> {
-    const requested = parseRangeHeader(rangeHeader);
-    // On EVERY response, 200 included: `Accept-Ranges` is how a client discovers that ranged reads
-    // work here at all. A client that can't tell will either not try, or try and mis-handle a 200.
-    setHeader(response, 'Accept-Ranges', 'bytes');
-
-    let result: Awaited<ReturnType<MediaConsoleService['objectStream']>>;
-    try {
-      result = await this.service.objectStream(disk, key, requested ?? undefined);
-    } catch (error) {
-      // RFC 9110 requires the 416 to name the object's real size so the client can re-ask. Nest's
-      // exception filter serializes the body but cannot know the size, so the header goes on here,
-      // before the rethrow — headers already on the response survive the filter's `status().json()`.
-      if (error instanceof RangeNotSatisfiableException) {
-        setHeader(response, 'Content-Range', `bytes */${error.size}`);
-      }
-      throw error;
-    }
-
-    const { stream, contentType, size, range } = result;
-    if (!range) {
-      return new StreamableFile(stream, {
-        type: contentType,
-        disposition,
-        ...(Number.isFinite(size) ? { length: size } : {}),
-      });
-    }
-    setStatus(response, 206);
-    setHeader(response, 'Content-Range', `bytes ${range.start}-${range.end}/${size}`);
-    // Content-Length is the SLICE's length, not the object's — inclusive bounds, hence the +1.
-    return new StreamableFile(stream, {
-      type: contentType,
-      disposition,
-      length: range.end - range.start + 1,
+    @Req() req: unknown,
+    @Res({ passthrough: true }) res: unknown,
+  ): Promise<StreamableFile | undefined> {
+    return this.service.serveObject(disk, key, {
+      req,
+      res,
+      disposition: 'attachment',
+      filename: downloadFilename(key ?? ''),
     });
   }
 

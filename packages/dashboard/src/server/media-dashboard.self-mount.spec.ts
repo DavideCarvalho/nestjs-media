@@ -1,3 +1,4 @@
+import { InMemoryDisk, StorageModule } from '@nestjs/storage';
 // "Mount it yourself" for the console, against the REAL first-party `@nestjs/authorization`:
 // `routes: false` registers no console controller, the providers stay exported, and the host serves
 // the console from subclasses of the exported controllers, protected with `@Can(...)`.
@@ -14,27 +15,21 @@ import {
   MediaDashboardUiController,
 } from './index.js';
 
-const STORAGE = Symbol.for('nestjs-media:storage');
 const STORE = Symbol.for('nestjs-media:store');
 const UPLOADS = Symbol.for('nestjs-media:upload-sessions');
 
 @Global()
 @Module({
+  imports: [
+    StorageModule.forRoot({
+      disks: { primary: new InMemoryDisk() },
+    }),
+  ],
   providers: [
-    {
-      provide: STORAGE,
-      useValue: {
-        defaultDisk: 'primary',
-        diskNames: () => ['primary'],
-        disk: () => ({
-          capabilities: { presign: true, multipart: true, publicUrls: false, list: true },
-        }),
-      },
-    },
     { provide: STORE, useValue: null },
     { provide: UPLOADS, useValue: null },
   ],
-  exports: [STORAGE, STORE, UPLOADS],
+  exports: [STORE, UPLOADS],
 })
 class MockMediaModule {}
 
@@ -83,7 +78,7 @@ async function boot(
   })
   class AppModule {}
 
-  app = await NestFactory.create(AppModule, { logger: false });
+  app = await NestFactory.create(AppModule, { logger: false, abortOnError: false });
   app.use(
     (req: { headers: Record<string, string>; user?: User }, _res: unknown, next: () => void) => {
       const role = req.headers['x-role'];

@@ -11,7 +11,7 @@ export { MediaDashboardUiController } from './media-dashboard-ui.controller.js';
 export { MediaConsoleReadController } from './media-console-read.controller.js';
 export { MediaConsoleActionsController } from './media-console-actions.controller.js';
 export {
-  MEDIA_STORAGE_SHARED,
+  MEDIA_MULTIPART,
   MEDIA_STORE,
   MEDIA_UPLOAD_SESSIONS,
 } from './tokens.js';

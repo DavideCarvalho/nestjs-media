@@ -38,15 +38,11 @@ describe('media extension integrates with the real Telescope ExtensionRegistry',
     }
   });
 
-  it('resolves media.disks against a real StorageManager reached via MEDIA_STORAGE_SHARED', async () => {
-    const { StorageManager } = await import('@dudousxd/nestjs-media-core');
-    const { InMemoryDriver } = await import('@dudousxd/nestjs-media-testing');
-    const { MEDIA_STORAGE_SHARED } = await import('./media-tokens');
-    const manager = new StorageManager({
-      default: 'local',
-      disks: { local: new InMemoryDriver() },
-    });
-    const ctx = ctxResolving(new Map<unknown, unknown>([[MEDIA_STORAGE_SHARED, manager]]));
+  it('resolves media.disks against a real @nestjs/storage Storage', async () => {
+    const { InMemoryDisk, Storage } = await import('@nestjs/storage');
+    const { storageOf } = await import('@dudousxd/nestjs-media-testing');
+    const storage = storageOf({ local: new InMemoryDisk() });
+    const ctx = ctxResolving(new Map<unknown, unknown>([[Storage, storage]]));
     const registry = new ExtensionRegistry([mediaTelescopeExtension()], ctx);
 
     const provider = registry.findProvider('media.disks');

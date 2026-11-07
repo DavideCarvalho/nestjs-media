@@ -1,3 +1,4 @@
+import { InMemoryDisk, StorageModule } from '@nestjs/storage';
 // End-to-end against the REAL first-party `@nestjs/authorization`, whose `AuthorizationModule.forRoot()`
 // registers a deny-by-default global `AuthorizationGuard`. Every console controller is marked
 // `can-anyone`-open; hosts decide who reaches it with `decorators: [Can(...)]`.
@@ -13,27 +14,17 @@ import { MediaConsoleReadController } from './media-console-read.controller.js';
 import { MediaDashboardUiController } from './media-dashboard-ui.controller.js';
 import { MediaDashboardModule } from './media-dashboard.module.js';
 
-const STORAGE = Symbol.for('nestjs-media:storage');
 const STORE = Symbol.for('nestjs-media:store');
 const UPLOADS = Symbol.for('nestjs-media:upload-sessions');
 
 @Global()
 @Module({
+  imports: [StorageModule.forRoot({ disks: { primary: new InMemoryDisk() } })],
   providers: [
-    {
-      provide: STORAGE,
-      useValue: {
-        defaultDisk: 'primary',
-        diskNames: () => ['primary'],
-        disk: () => ({
-          capabilities: { presign: true, multipart: true, publicUrls: false, list: true },
-        }),
-      },
-    },
     { provide: STORE, useValue: null },
     { provide: UPLOADS, useValue: null },
   ],
-  exports: [STORAGE, STORE, UPLOADS],
+  exports: [STORE, UPLOADS],
 })
 class MockMediaModule {}
 

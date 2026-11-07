@@ -1,7 +1,7 @@
 {
   "name": "@dudousxd/nestjs-media-dashboard",
   "version": "0.16.2",
-  "description": "Standalone navigable /media console (disks, live uploads, media library) for nestjs-media — a bundled React SPA served by NestJS",
+  "description": "Standalone navigable /media console (disks, live uploads, media library) for nestjs-media \u2014 a bundled React SPA served by NestJS",
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -48,9 +48,10 @@
   },
   "peerDependencies": {
     "@dudousxd/nestjs-media-core": ">=0.8.0 <1.0.0",
-    "@nestjs/common": "^10.0.0 || ^11.0.0 || ^12.0.0",
-    "@nestjs/core": "^10.0.0 || ^11.0.0 || ^12.0.0",
-    "rxjs": "^7.0.0"
+    "@nestjs/common": "^12.1.0",
+    "@nestjs/core": "^12.1.0",
+    "rxjs": "^7.0.0",
+    "@nestjs/storage": ">=0.0.5 <0.1.0"
   },
   "devDependencies": {
     "@base-ui/react": "1.9.0",
@@ -88,6 +89,8 @@
     "typescript": "5.9.3",
     "vite": "5.4.21",
     "vitest": "2.1.9",
-    "xlsx": "0.18.5"
+    "xlsx": "0.18.5",
+    "@nestjs/storage": "0.0.5",
+    "@dudousxd/nestjs-media-testing": "workspace:*"
   }
 }

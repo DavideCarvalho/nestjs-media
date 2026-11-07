@@ -1,4 +1,6 @@
+import { storageOf } from '@dudousxd/nestjs-media-testing';
 import type { ExtensionContext } from '@dudousxd/nestjs-telescope';
+import { InMemoryDisk, S3Disk, Storage } from '@nestjs/storage';
 import { describe, expect, it } from 'vitest';
 import {
   mediaActiveUploadCountProvider,
@@ -14,7 +16,7 @@ import {
   mediaUploadThroughputProvider,
   mediaUploadsOverTimeProvider,
 } from './media-data-providers';
-import { MEDIA_STORAGE_SHARED, MEDIA_STORE, MEDIA_UPLOAD_SESSIONS } from './media-tokens';
+import { MEDIA_MULTIPART, MEDIA_STORE, MEDIA_UPLOAD_SESSIONS } from './media-tokens';
 
 // Resolve different host services by token identity.
 function ctxWith(map: Map<unknown, unknown>): ExtensionContext {
@@ -195,31 +197,50 @@ describe('mediaByCollectionProvider / mediaStorageByDiskProvider', () => {
 
 describe('mediaDisksProvider', () => {
   it('lists disk names with capability badges + default flag', async () => {
-    const manager = {
-      defaultDisk: 'local',
-      diskNames: () => ['local', 's3'],
-      disk: (name: string) => ({
-        capabilities: {
-          presign: name === 's3',
-          multipart: name === 's3',
-          publicUrls: true,
-          list: true,
-        },
-      }),
-    };
+    const storage = storageOf(
+      {
+        local: new InMemoryDisk({ publicUrl: 'https://cdn.example' }),
+        s3: new S3Disk({
+          bucket: 'media-bucket',
+          region: 'us-east-1',
+          credentials: { accessKeyId: 'a', secretAccessKey: 's' },
+        }),
+      },
+      'local',
+    );
     const result = (await mediaDisksProvider().resolve(
       undefined,
-      ctxWith(new Map([[MEDIA_STORAGE_SHARED, manager]])),
-    )) as { rows: Array<{ name: string; default: string; multipart: string }> };
-    expect(result.rows.map((row) => row.name)).toEqual(['local', 's3']);
-    expect(result.rows[0]?.default).toBe('yes');
-    expect(result.rows[1]?.multipart).toBe('yes');
+      ctxWith(
+        new Map<unknown, unknown>([
+          [Storage, storage],
+          [MEDIA_MULTIPART, { s3: {} }],
+        ]),
+      ),
+    )) as { rows: Array<Record<string, string>> };
+    expect(result.rows).toEqual([
+      {
+        name: 'local',
+        default: 'yes',
+        presign: 'no',
+        multipart: 'no',
+        publicUrls: 'yes',
+        list: 'yes',
+      },
+      {
+        name: 's3',
+        default: 'no',
+        presign: 'yes',
+        multipart: 'yes',
+        publicUrls: 'no',
+        list: 'yes',
+      },
+    ]);
   });
 
-  it('degrades to empty rows when the StorageManager is not reachable', async () => {
+  it('degrades to empty rows when Storage is not reachable', async () => {
     const result = (await mediaDisksProvider().resolve(
       undefined,
-      ctxWith(new Map([[MEDIA_STORAGE_SHARED, null]])),
+      ctxWith(new Map<unknown, unknown>([[Storage, null]])),
     )) as { rows: unknown[] };
     expect(result.rows).toEqual([]);
   });

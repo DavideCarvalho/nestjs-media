@@ -1,3 +1,4 @@
+import { InMemoryDisk, StorageModule } from '@nestjs/storage';
 // The safe default: in production, a console that mounts routes with no `decorators` refuses to
 // boot. Outside production it mounts them open, as before.
 import 'reflect-metadata';
@@ -7,21 +8,17 @@ import { NestFactory } from '@nestjs/core';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { MediaConsoleApiModule, MediaConsoleService, MediaDashboardModule } from './index.js';
 
-const STORAGE = Symbol.for('nestjs-media:storage');
 const STORE = Symbol.for('nestjs-media:store');
 const UPLOADS = Symbol.for('nestjs-media:upload-sessions');
 
 @Global()
 @Module({
+  imports: [StorageModule.forRoot({ disks: { primary: new InMemoryDisk() } })],
   providers: [
-    {
-      provide: STORAGE,
-      useValue: { defaultDisk: 'primary', diskNames: () => ['primary'], disk: () => ({}) },
-    },
     { provide: STORE, useValue: null },
     { provide: UPLOADS, useValue: null },
   ],
-  exports: [STORAGE, STORE, UPLOADS],
+  exports: [STORE, UPLOADS],
 })
 class MockMediaModule {}
 

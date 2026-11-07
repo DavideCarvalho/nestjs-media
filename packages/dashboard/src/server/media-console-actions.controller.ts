@@ -69,17 +69,25 @@ export class MediaConsoleActionsController {
   /**
    * Uploads a file to `key` on the disk. The body is the raw bytes sent as `application/octet-stream`
    * so the host's JSON/urlencoded body parsers never consume the stream; the real MIME rides as the
-   * `type` query param and becomes the stored object's Content-Type. `@Req()` is the request stream.
+   * `type` query param and becomes the stored object's Content-Type. `@Req()` is the request stream,
+   * streamed onto the disk (no size cap, nothing buffered).
    */
   @Post('disks/:disk/upload')
   @HttpCode(204)
   uploadObject(
     @Param('disk') disk: string,
     @Query('key') key: string,
-    @Req() request: Readable,
+    @Req() request: Readable & { headers?: Record<string, string | string[] | undefined> },
     @Query('type') type?: string,
   ): Promise<void> {
-    return this.service.putObject(disk, key, request, type);
+    const declared = Number(request.headers?.['content-length']);
+    return this.service.putObject(
+      disk,
+      key,
+      request,
+      type,
+      Number.isSafeInteger(declared) && declared >= 0 ? declared : undefined,
+    );
   }
 
   @Post('disks/:disk/folder')

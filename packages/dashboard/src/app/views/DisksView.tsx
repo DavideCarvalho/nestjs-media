@@ -244,7 +244,7 @@ function UploadDialog({
   );
 }
 
-/** Modal folder creator: a name input that writes a `<prefix>/name/` marker. */
+/** Modal folder creator: a name input that creates `<prefix>/name/` (the server writes a hidden `.keep`). */
 function FolderDialog({
   disk,
   prefix,

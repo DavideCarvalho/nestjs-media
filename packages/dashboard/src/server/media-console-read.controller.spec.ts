@@ -1,76 +1,44 @@
-import { Readable } from 'node:stream';
 import { Global, Module } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
+import { InMemoryDisk, StorageModule } from '@nestjs/storage';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { MediaDashboardModule } from './index.js';
-import { parseRangeHeader } from './media-console-read.controller.js';
 
-const STORAGE = Symbol.for('nestjs-media:storage');
 const STORE = Symbol.for('nestjs-media:store');
 const UPLOADS = Symbol.for('nestjs-media:upload-sessions');
 
 const CONTENT = 'abcdefghij';
-
-const driver = {
-  capabilities: { presign: true, multipart: true, publicUrls: false, list: true, ranged: true },
-  stat: async () => ({ size: CONTENT.length, contentType: 'text/plain' }),
-  stream: async (_key: string, range?: { start: number; end?: number }) => {
-    const slice = range
-      ? CONTENT.slice(range.start, range.end === undefined ? undefined : range.end + 1)
-      : CONTENT;
-    return Readable.from(Buffer.from(slice));
-  },
-};
-
-const fakeStorage = {
-  defaultDisk: 'primary',
-  diskNames: () => ['primary'],
-  disk: () => driver,
-};
+const disk = new InMemoryDisk();
 
 @Global()
 @Module({
   providers: [
-    { provide: STORAGE, useValue: fakeStorage },
     { provide: STORE, useValue: null },
     { provide: UPLOADS, useValue: null },
   ],
-  exports: [STORAGE, STORE, UPLOADS],
+  exports: [STORE, UPLOADS],
 })
 class MockMediaModule {}
 
 @Module({
   imports: [
+    StorageModule.forRoot({ disks: { primary: disk } }),
     MockMediaModule,
     MediaDashboardModule.forRoot({ basePath: '/media', apiBasePath: '/api/media', actions: false }),
   ],
 })
 class AppModule {}
 
-describe('parseRangeHeader', () => {
-  it('parses the three forms we serve', () => {
-    expect(parseRangeHeader('bytes=0-99')).toEqual({ start: 0, end: 99 });
-    expect(parseRangeHeader('bytes=1024-')).toEqual({ start: 1024 });
-    expect(parseRangeHeader('bytes=-500')).toEqual({ suffixLength: 500 });
-    // Header values arrive with whatever whitespace a client felt like sending.
-    expect(parseRangeHeader('  bytes=4-8  ')).toEqual({ start: 4, end: 8 });
-  });
-
-  it('returns null — "no range" — for anything it cannot read exactly', () => {
-    for (const header of [
-      undefined,
-      '',
-      'bytes=',
-      'bytes=-', // names neither bound
-      'bytes=0-1,5-6', // multi-range: we serve one range or none, never a guess at the first
-      'items=0-1', // unit we do not understand
-      'bytes=abc-def',
-      'bytes=0-1 ,', // trailing junk
-      '0-99', // no unit at all
-    ]) {
-      expect(parseRangeHeader(header)).toBeNull();
-    }
-  });
+beforeAll(async () => {
+  for (const key of [
+    'a.txt',
+    'reports/2026/q1.csv',
+    'relatório.csv',
+    'q1.csv',
+    'reports/q1 final.csv',
+  ]) {
+    await disk.put(key, CONTENT);
+  }
 });
 
 describe('GET disks/:disk/object/raw — Range handling (mounted)', () => {
@@ -95,7 +63,8 @@ describe('GET disks/:disk/object/raw — Range handling (mounted)', () => {
     expect(response.status).toBe(200);
     expect(await response.text()).toBe(CONTENT);
     expect(response.headers.get('content-type')).toContain('text/plain');
-    expect(response.headers.get('content-disposition')).toBe('inline');
+    expect(response.headers.get('content-disposition')).toBe('inline; filename="a.txt"');
+    expect(response.headers.get('x-content-type-options')).toBe('nosniff');
     expect(response.headers.get('content-length')).toBe(String(CONTENT.length));
     expect(response.headers.get('content-range')).toBeNull();
     // Present on the 200 path too — it is the only way a client learns ranges are available here.
@@ -137,6 +106,12 @@ describe('GET disks/:disk/object/raw — Range handling (mounted)', () => {
     expect(response.headers.get('content-range')).toBe('bytes */10');
   });
 
+  it('answers If-None-Match with 304', async () => {
+    const etag = (await get()).headers.get('etag') ?? '';
+    const response = await fetch(url, { headers: { 'If-None-Match': etag } });
+    expect(response.status).toBe(304);
+  });
+
   it('ignores a malformed Range and serves the full 200 body (RFC 9110)', async () => {
     for (const header of ['bytes=abc-def', 'items=0-1', 'bytes=0-1,5-6']) {
       const response = await get(header);
@@ -173,23 +148,19 @@ describe('GET disks/:disk/object/download — saving a file (mounted)', () => {
     expect(await response.text()).toBe(CONTENT);
     expect(response.headers.get('content-length')).toBe(String(CONTENT.length));
     // The name is the key's LAST segment — a browser must not be asked to save `reports/2026/q1.csv`.
-    expect(response.headers.get('content-disposition')).toBe(
-      `attachment; filename="q1.csv"; filename*=UTF-8''q1.csv`,
-    );
+    expect(response.headers.get('content-disposition')).toBe('attachment; filename="q1.csv"');
   });
 
   it('carries a non-ASCII name in filename* with an ASCII fallback beside it', async () => {
     const response = await download('relatório.csv');
     expect(response.headers.get('content-disposition')).toBe(
-      `attachment; filename="relatrio.csv"; filename*=UTF-8''relat%C3%B3rio.csv`,
+      `attachment; filename="relat_rio.csv"; filename*=UTF-8''relat%C3%B3rio.csv`,
     );
   });
 
-  it('names the fallback when the key names no file', async () => {
+  it('404s a key no disk can hold (a folder path)', async () => {
     const response = await download('reports/2026/');
-    expect(response.headers.get('content-disposition')).toBe(
-      `attachment; filename="download"; filename*=UTF-8''download`,
-    );
+    expect(response.status).toBe(404);
   });
 
   it('resumes: a Range on a download is answered 206 with the slice', async () => {
@@ -199,9 +170,7 @@ describe('GET disks/:disk/object/download — saving a file (mounted)', () => {
     expect(response.headers.get('content-range')).toBe('bytes 4-6/10');
     expect(response.headers.get('accept-ranges')).toBe('bytes');
     // The disposition survives the partial response — otherwise a resumed download renders inline.
-    expect(response.headers.get('content-disposition')).toBe(
-      `attachment; filename="q1.csv"; filename*=UTF-8''q1.csv`,
-    );
+    expect(response.headers.get('content-disposition')).toBe('attachment; filename="q1.csv"');
   });
 
   it('reads back the form encoding the client actually sends', async () => {
@@ -209,9 +178,7 @@ describe('GET disks/:disk/object/download — saving a file (mounted)', () => {
     // If the server read that literally the saved file would be named `q1+final.csv`.
     const response = await fetch(`${base}?key=reports%2Fq1+final.csv`);
     expect(response.status).toBe(200);
-    expect(response.headers.get('content-disposition')).toBe(
-      `attachment; filename="q1 final.csv"; filename*=UTF-8''q1%20final.csv`,
-    );
+    expect(response.headers.get('content-disposition')).toBe('attachment; filename="q1 final.csv"');
   });
 
   it('404s an unknown disk instead of streaming from nowhere', async () => {
@@ -221,10 +188,12 @@ describe('GET disks/:disk/object/download — saving a file (mounted)', () => {
     expect(response.status).toBe(404);
   });
 
-  it('leaves /raw inline — the previews depend on it', async () => {
-    const response = await fetch(
-      `${await app.getUrl()}/api/media/disks/primary/object/raw?key=q1.csv`,
-    );
-    expect(response.headers.get('content-disposition')).toBe('inline');
+  it('/raw is inline for types that cannot run script here, attachment for the rest', async () => {
+    const text = await fetch(`${await app.getUrl()}/api/media/disks/primary/object/raw?key=a.txt`);
+    expect(text.headers.get('content-disposition')).toBe('inline; filename="a.txt"');
+    // CSV (like HTML or SVG) is not in serveFile's inline-safe list: the previews `fetch` it, which
+    // ignores the disposition; opening it directly downloads it.
+    const csv = await fetch(`${await app.getUrl()}/api/media/disks/primary/object/raw?key=q1.csv`);
+    expect(csv.headers.get('content-disposition')).toBe('attachment; filename="q1.csv"');
   });
 });

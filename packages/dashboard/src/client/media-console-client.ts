@@ -206,10 +206,10 @@ export const mediaConsoleClient = {
       }),
       file,
     ),
-  /** Create a folder (a zero-byte marker at `<prefix>/`) on the disk. */
+  /** Create a folder (a hidden zero-byte `<prefix>/.keep`) on the disk. */
   createFolder: (disk: string, prefix: string): Promise<void> =>
     send('POST', `/disks/${encodeURIComponent(disk)}/folder`, { prefix }),
-  /** Recursively delete a folder (every object under `<prefix>/` plus the marker). */
+  /** Recursively delete a folder (every object under `<prefix>/`, its `.keep` included). */
   deleteFolder: (disk: string, prefix: string): Promise<void> =>
     send('DELETE', withQuery(`/disks/${encodeURIComponent(disk)}/folder`, { prefix })),
 };
