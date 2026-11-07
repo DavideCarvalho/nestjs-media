@@ -6,7 +6,6 @@
     "core",
     "nestjs",
     "client",
-    "disk-local",
     "disk-s3",
     "image-sharp",
     "database-typeorm",

@@ -6,15 +6,22 @@ description: TypeORM media store with non-destructive auto-schema.
 
 import { Callout } from 'fumadocs-ui/components/callout';
 
-A `MediaStore` backed by TypeORM. A POJO that receives your `DataSource` — no `@Injectable`, no internal token — so you plug it into `MediaModule` through `forRootAsync`.
+A `MediaStore` backed by TypeORM. A POJO that receives your `DataSource` — no `@Injectable`, no internal token. With `@nestjs/typeorm`, the `/nest` entry builds it on a `TypeOrmModule` connection:
 
 ```ts
-import { TypeOrmMediaStore, ensureMediaSchema } from '@dudousxd/nestjs-media-database-typeorm';
+import { typeOrmMediaStore } from '@dudousxd/nestjs-media-database-typeorm/nest';
 
-MediaModule.forRootAsync({
-  inject: [getDataSourceToken()],
-  useFactory: (ds) => ({ default: 's3', disks: { s3 }, store: new TypeOrmMediaStore(ds) }),
-});
+MediaModule.forRoot({ store: typeOrmMediaStore() });                            // default connection
+MediaModule.forRoot({ store: typeOrmMediaStore({ connectionName: 'media' }) }); // TypeOrmModule.forRoot({ name: 'media' })
+MediaModule.forRootAsync({ store: typeOrmMediaStore({ connectionName: 'media' }), useFactory: () => ({ /* … */ }) });
+```
+
+`typeOrmMediaStore()` returns `{ inject: [getDataSourceToken(connectionName)], useFactory }`, which `MediaModule` resolves; it takes the store options too (`autoCreateSchema`). `@nestjs/typeorm` is an optional peer, loaded only by the `/nest` entry. Without it, construct the store yourself:
+
+```ts
+import { TypeOrmMediaStore } from '@dudousxd/nestjs-media-database-typeorm';
+
+MediaModule.forRoot({ store: new TypeOrmMediaStore(dataSource) });
 ```
 
 ## Auto-schema
@@ -34,12 +41,7 @@ Timestamps are stored as ISO strings (`varchar`) rather than a dialect-specific 
 
 ## Named connections
 
-Pass any `DataSource` — a secondary/named connection works the same way:
-
-```ts
-inject: [getDataSourceToken('media')],
-useFactory: (ds) => ({ /* … */ store: new TypeOrmMediaStore(ds) }),
-```
+`typeOrmMediaStore({ connectionName: 'media' })` above; or pass any `DataSource` to `new TypeOrmMediaStore(ds)`.
 
 ## Attachment column
 
@@ -74,4 +76,4 @@ The round-trip is verified against real sqlite in the package's test suite.
 
 ## Peer dependencies
 
-`typeorm` (^0.3) and `@dudousxd/nestjs-media-core`. See [Concepts → Persistence](/docs/concepts/persistence) for the shared store contract, and [Concepts → Attachments](/docs/concepts/attachments) for the column model.
+`typeorm` (^0.3) and `@dudousxd/nestjs-media-core`; optionally `@nestjs/typeorm` (^11 or ^12) for `/nest`. See [Concepts → Persistence](/docs/concepts/persistence) for the shared store contract, and [Concepts → Attachments](/docs/concepts/attachments) for the column model.

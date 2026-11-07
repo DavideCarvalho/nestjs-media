@@ -1,59 +1,67 @@
 ---
 title: '@dudousxd/nestjs-media-core'
 icon: Box
-description: The framework-agnostic heart — SPIs, the storage facade, the media-library, the upload engine, and diagnostics. No NestJS dependency.
+description: The framework-agnostic heart — SPIs, the media-library, attachments, the upload engine, folder listing and diagnostics, on @nestjs/storage disks.
 ---
 
-`@dudousxd/nestjs-media-core` is the dependency-light core every other package builds on. It has no NestJS dependency, so the contracts and engines are usable from any TypeScript runtime; the [umbrella package](/docs/packages/nestjs) only adds DI wiring.
+`@dudousxd/nestjs-media-core` is the core every other package builds on. Its engines take the disks of [`@nestjs/storage`](https://docs.nestjs.com/application/file-storage) (a type-only dependency: core never loads it at runtime), so they work with a `Storage` from `StorageModule`, or with disks you build by hand. The [umbrella package](/docs/packages/nestjs) adds DI wiring.
 
 ## What's inside
 
-**The three SPIs** — the contracts disks, stores, and image engines implement:
+**The disks it takes** — `Storage` from `@nestjs/storage` as it is, or anything shaped like it:
 
 ```ts
-interface StorageDriver { /* put/get/stream/url/temporaryUrl/exists/size/delete/copy/move + capabilities */ }
-interface MediaStore { save/find/listByOwner/delete/nextOrder }
-interface ImageProcessor { convert(input, preset): Promise<ConversionResult> }
+interface MediaDisks {
+  readonly defaultDisk: string;
+  disk(name?: string): StorageDisk;
+  names(): string[];
+}
 ```
 
-**`StorageManager`** — the named-disk registry behind `media.disk(name)`.
+**The SPIs** — the contracts stores, image engines and multipart side-cars implement:
 
-**`MediaLibrary`** — the layer-2 *table* orchestrator: `attach / list / delete / url / ensureConversion`, the `for(ownerType, id)` owner binding, collections, MIME validation, conversion generation, and diagnostics emission.
+```ts
+interface MediaStore { save/find/listByOwner/delete/nextOrder (+ count/aggregate/list for the dashboard) }
+interface ImageProcessor { convert(input, preset): Promise<ConversionResult> }
+interface MultipartUploadDriver {   // native multipart for one disk (see -disk-s3)
+  createMultipartUpload / uploadPart / presignUploadPart / completeMultipartUpload / abortMultipartUpload
+  listFolders?(prefix, { cursor, limit }): Promise<FolderListing>
+}
+```
 
-**`Attachment` + `AttachmentManager`** — the layer-2 *column* model ([attachments](/docs/concepts/attachments)): an immutable, JSON-serializable value object plus the manager that uploads it (`createFromFile`), resolves URLs, and deletes it with its variants.
+**`MediaLibrary`** — the *table* orchestrator: `attach / list / delete / url / locate / ensureConversion`, the `for(ownerType, id)` owner binding, collections, MIME validation, conversion generation, and diagnostics.
 
-**The upload engine** — `ResumableUploadManager` plus the framework-agnostic `TusUploadHandler` (request → response, no web framework).
+**`Attachment` + `AttachmentManager`** — the *column* model ([attachments](/docs/concepts/attachments)): `createFromFile`, `url`, `signedUrl`, `delete`.
 
-**`resolveUploadMode`** — the `auto | proxy | direct` decision from a driver's capabilities.
+**The upload engine** — `ResumableUploadManager`, `DirectUploadManager` and the framework-agnostic `TusUploadHandler`.
 
-**Diagnostics** — `publishMedia` + the `nestjs:media:*` envelope.
+**Disk helpers** — what `@nestjs/storage` doesn't cover, used by the dashboard and telescope:
 
-**Errors + helpers** — the typed error classes (with stable `code`s) and `collectStream`.
+| Export | What it does |
+| --- | --- |
+| `diskCapabilities(disk, sidecar?)` | `{ presign, multipart, publicUrls, list, ranged }` |
+| `listFolderLevel(disk, prefix, page, sidecar?)`, `foldListing(disk, prefix, page)` | one folder level ([Folders](/docs/concepts/folders)) |
+| `keySegment(text)`, `assertMediaKey(key)`, `folderPrefix(prefix)` | `@nestjs/storage`'s key rule, for keys built from user input |
+| `fileUrl(disk, key, options?)` | the public URL, else a signed one |
+| `multipartFor(drivers, disk)` | the side-car configured for a disk |
+
+**`resolveUploadMode`** — the `auto | proxy | direct` decision from a disk's capabilities.
+
+**Diagnostics** — `publishMedia` + the `aviary:media:*` events.
+
+**Errors** — `MediaNotFoundError`, `MimeNotAllowedError`, `ConversionNotDefinedError`, `ImageProcessorMissingError`, `UploadSessionNotFoundError`, `UploadOffsetConflictError`, `InvalidPartNumberError`, `UnsupportedOperationError`, `InvalidMediaKeyError` (status 400), each with a stable `code`. Storage errors are `@nestjs/storage`'s.
 
 ## Using it directly
 
-You rarely import core in app code — you use the [umbrella module](/docs/packages/nestjs). But everything is exported for non-Nest hosts or custom wiring:
+You rarely import core in app code — you use the [umbrella module](/docs/packages/nestjs). For non-Nest hosts or custom wiring:
 
 ```ts
-import {
-  StorageManager,
-  MediaLibrary,
-  resolveUploadMode,
-  collectStream,
-  FileNotFoundError,
-} from '@dudousxd/nestjs-media-core';
+import { InMemoryDisk, Storage } from '@nestjs/storage';
+import { MediaLibrary } from '@dudousxd/nestjs-media-core';
 
-const storage = new StorageManager({ default: 'local', disks: { local } });
+const storage = new Storage(new Map([['local', new InMemoryDisk()]]), 'local');
 const library = new MediaLibrary({ storage, store, collections, imageProcessor });
 await library.attach({ ownerType: 'Post', ownerId: '1', collection: 'gallery', fileName, mimeType, contents });
 ```
 
-## Subpath for raw storage
-
-Consumers that only want the filesystem facade import it through the umbrella's subpath (which re-exports core's storage surface) rather than depending on core directly:
-
-```ts
-import { StorageManager, type StorageDriver } from '@dudousxd/nestjs-media/storage';
-```
-
-See [Concepts → The two layers](/docs/concepts/two-layers) for the full storage and media-library APIs.
+See [Concepts → The two layers](/docs/concepts/two-layers) for the media-library API.

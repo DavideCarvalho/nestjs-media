@@ -1,86 +1,82 @@
 ---
 name: media-module-setup
 description: >-
-  Register @dudousxd/nestjs-media's MediaModule in a NestJS app via
-  MediaModule.forRoot or MediaModule.forRootAsync. Wire the storage layer
-  (default + disks with LocalDriver / S3Driver), optionally the media-library
-  layer (store: TypeOrmMediaStore / MikroOrmMediaStore / DrizzleMediaStore /
-  PrismaMediaStore), an imageProcessor (SharpImageProcessor), collections with
-  conversions, and uploads (uploadSessions + tus, direct). MediaModule is
-  @Global; inject MediaService anywhere. Covers MediaModuleOptions, the
-  forRoot-vs-forRootAsync (DI) choice, injection tokens MEDIA_STORAGE /
-  MEDIA_LIBRARY / MEDIA_ATTACHMENTS / MEDIA_UPLOADS / MEDIA_TUS / MEDIA_DIRECT,
-  and the UnknownDiskError when the default disk is missing.
+  Register @dudousxd/nestjs-media's MediaModule in a NestJS app on top of
+  @nestjs/storage. The disks come from StorageModule.forRoot({ default, disks })
+  (LocalDisk / S3Disk / InMemoryDisk from @nestjs/storage); MediaModule.forRoot
+  or forRootAsync adds the media-library layer (store: TypeOrmMediaStore /
+  MikroOrmMediaStore / DrizzleMediaStore / PrismaMediaStore, or a
+  { inject, useFactory } factory such as typeOrmMediaStore({ connectionName })),
+  an imageProcessor (SharpImageProcessor), collections with conversions,
+  uploads (uploadSessions + tus, direct), multipart side-cars
+  (s3Multipart from -disk-s3) and an authorize hook. MediaModule is @Global;
+  inject MediaService anywhere. Covers the missing-StorageModule boot error and
+  the injection tokens MEDIA_LIBRARY / MEDIA_ATTACHMENTS / MEDIA_UPLOADS /
+  MEDIA_TUS / MEDIA_DIRECT / MEDIA_MULTIPART.
 license: MIT
 metadata:
   type: core
   library: "@dudousxd/nestjs-media"
-  library_version: 0.5.0
+  library_version: 0.10.0
   framework: nestjs
 ---
 
 # Registering MediaModule
 
-`MediaModule` is the single NestJS entry point for `@dudousxd/nestjs-media`. It
-has two layers, enabled independently:
+`@dudousxd/nestjs-media` stores files on the disks of NestJS's first-party
+`@nestjs/storage` (https://docs.nestjs.com/application/file-storage). Two
+registrations:
 
-- **Layer 1 — storage** (`default` + `disks`): always on.
-- **Layer 2 — media-library** (`store`, `collections`, `imageProcessor`):
-  on only when you pass a `store`.
-
-Plus optional resumable (`uploadSessions` + `tus`) and direct (`direct`) uploads.
+- **`StorageModule.forRoot({ default, disks })`** (from `@nestjs/storage`): the disks.
+- **`MediaModule.forRoot({ ... })`**: the media library (`store`, `collections`,
+  `imageProcessor`), attachments, uploads (`uploadSessions` + `tus`, `direct`,
+  `multipart`), and `authorize`.
 
 ## Setup
 
-Install the umbrella package plus the à-la-carte disk / store / image packages you
-use:
-
 ```bash
-pnpm add @dudousxd/nestjs-media @dudousxd/nestjs-media-disk-local \
-  @dudousxd/nestjs-media-disk-s3 @dudousxd/nestjs-media-database-typeorm \
-  @dudousxd/nestjs-media-image-sharp
+pnpm add @nestjs/storage @dudousxd/nestjs-media \
+  @dudousxd/nestjs-media-database-typeorm @dudousxd/nestjs-media-image-sharp
 ```
 
-`MediaModule` is `@Global()` — import it **once** (in `AppModule`) and inject
-`MediaService` anywhere.
+Needs NestJS 12.1+ and Node 20.19+. Both modules are global: register them
+**once**, in `AppModule`.
 
 ```ts
 // app.module.ts
 import { Module } from '@nestjs/common';
+import { LocalDisk, S3Disk, StorageModule } from '@nestjs/storage';
+import { TypeOrmModule } from '@nestjs/typeorm';
 import { MediaModule } from '@dudousxd/nestjs-media';
-import { LocalDriver } from '@dudousxd/nestjs-media-disk-local';
-import { S3Driver } from '@dudousxd/nestjs-media-disk-s3';
-import { TypeOrmMediaStore } from '@dudousxd/nestjs-media-database-typeorm';
+import { typeOrmMediaStore } from '@dudousxd/nestjs-media-database-typeorm/nest';
 import { SharpImageProcessor } from '@dudousxd/nestjs-media-image-sharp';
-import { S3Client } from '@aws-sdk/client-s3';
-import { getDataSourceToken } from '@nestjs/typeorm';
 
 @Module({
   imports: [
-    MediaModule.forRootAsync({
-      // No upload routes in this app (forRootAsync would otherwise mount them). Mounting them?
-      // Protect them: see "Protecting the routes" in the nestjs package docs.
+    TypeOrmModule.forRoot({ /* ... */ }),
+    StorageModule.forRoot({
+      default: 's3',
+      disks: {
+        s3: new S3Disk({ bucket: 'app-uploads', region: 'eu-west-1' }),
+        local: new LocalDisk({ root: './storage' }),
+      },
+    }),
+    MediaModule.forRoot({
+      // No upload routes in this app. Mounting them? Protect them: see
+      // "Protecting the routes" in the nestjs package docs.
       routes: false,
-      inject: [getDataSourceToken(), S3Client],
-      useFactory: (ds, s3: S3Client) => ({
-        default: 's3',
-        disks: {
-          s3: new S3Driver({ client: s3, bucket: 'app-uploads' }),
-          local: new LocalDriver({ root: './storage', baseUrl: 'http://localhost:3000/files' }),
+      store: typeOrmMediaStore(), // Nest injects the default TypeORM DataSource
+      imageProcessor: new SharpImageProcessor(),
+      collections: [
+        { name: 'avatar', single: true, acceptsMimeTypes: ['image/png', 'image/jpeg'] },
+        {
+          name: 'gallery',
+          conversions: [
+            { name: 'thumb', width: 200 },
+            { name: 'og', width: 1200, height: 630, eager: true },
+          ],
         },
-        store: new TypeOrmMediaStore(ds),
-        imageProcessor: new SharpImageProcessor(),
-        collections: [
-          { name: 'avatar', single: true, acceptsMimeTypes: ['image/png', 'image/jpeg'] },
-          {
-            name: 'gallery',
-            conversions: [
-              { name: 'thumb', width: 200 },
-              { name: 'og', width: 1200, height: 630, eager: true },
-            ],
-          },
-        ],
-      }),
+      ],
     }),
   ],
 })
@@ -89,118 +85,95 @@ export class AppModule {}
 
 ## Core patterns
 
-### 1. `forRoot` (static) vs `forRootAsync` (DI)
-
-`forRoot` takes a literal `MediaModuleOptions`. Use it when your disks/stores need
-no injected providers:
-
-```ts
-import { LocalDriver } from '@dudousxd/nestjs-media-disk-local';
-
-MediaModule.forRoot({
-  default: 'local',
-  disks: { local: new LocalDriver({ root: './storage', baseUrl: 'http://localhost:3000/files' }) },
-});
-```
-
-Reach for `forRootAsync` when a disk or store needs an injected dependency (an
-`S3Client`, a TypeORM `DataSource`, a MikroORM `EntityManager`, a config service).
-`inject` lists the providers; `useFactory` receives them and returns the same
-`MediaModuleOptions` shape (sync or `Promise`).
-
-### 2. Pick a store for layer 2
-
-Each ORM store is a plain object you construct in the factory with its connection
-(no `@Injectable`, no internal token):
+### 1. Stores: an instance, or a factory Nest resolves
 
 ```ts
 import { MikroOrmMediaStore } from '@dudousxd/nestjs-media-database-mikro-orm'; // new MikroOrmMediaStore(em)
 import { DrizzleMediaStore }  from '@dudousxd/nestjs-media-database-drizzle';   // new DrizzleMediaStore(db) — sqlite/libSQL
 import { DrizzlePgMediaStore } from '@dudousxd/nestjs-media-database-drizzle/pg'; // new DrizzlePgMediaStore(db) — Postgres
 import { PrismaMediaStore }   from '@dudousxd/nestjs-media-database-prisma';    // new PrismaMediaStore(prisma)
+
+// On a named @nestjs/typeorm or @nestjs/drizzle connection:
+import { typeOrmMediaStore } from '@dudousxd/nestjs-media-database-typeorm/nest';
+import { drizzlePgMediaStore, drizzlePgUploadSessions } from '@dudousxd/nestjs-media-database-drizzle/nest';
+
+MediaModule.forRoot({ store: typeOrmMediaStore({ connectionName: 'media' }) });
 ```
 
-TypeORM and MikroORM stores create the `media` table on first use
-(non-destructive). Drizzle is migration-first; Prisma's schema is
-consumer-managed. Omit `store` entirely for a raw-storage-only app — then
-`media.disk(...)` works but `media.library` throws.
+A factory is `{ inject, useFactory }`. On `forRootAsync` it goes at the top level
+(`forRootAsync({ store, useFactory })`), not in the factory's result. Omit `store`
+and `media.library` throws; for files that aren't media, use `@nestjs/storage`
+directly (`Storage`, `@InjectDisk()`).
+
+### 2. `forRoot` vs `forRootAsync`
+
+`forRootAsync({ imports, inject, useFactory })` resolves the options with DI —
+for `ConfigService`, or an `authorize` hook calling an injected
+`AuthorizationService`:
+
+```ts
+MediaModule.forRootAsync({
+  imports: [AuthorizationModule],
+  inject: [AuthorizationService],
+  useFactory: (authorization: AuthorizationService) => ({
+    authorize: (user, action, record) => authorization.authorize(MediaPolicy, action, user, record),
+  }),
+});
+```
+
+`decorators`, `routes`, `mount`, `store` and `uploadSessions` factories are
+static fields next to `useFactory`.
 
 ### 3. Inject `MediaService`, or the tokens directly
 
 ```ts
-import { Injectable } from '@nestjs/common';
-import { MediaService } from '@dudousxd/nestjs-media';
-
 @Injectable()
 export class PhotosService {
   constructor(private readonly media: MediaService) {}
 }
 ```
 
-For advanced wiring the module exports the underlying providers as tokens:
-`MEDIA_STORAGE` (`StorageManager`), `MEDIA_LIBRARY` (`MediaLibrary | null`),
-`MEDIA_ATTACHMENTS` (`AttachmentManager`), `MEDIA_UPLOADS`
-(`ResumableUploadManager | null`), `MEDIA_TUS` (`TusUploadHandler | null`),
-`MEDIA_DIRECT` (`DirectUploadManager | null`).
+`media.library`, `media.attachments`, `media.uploads`, `media.directUploads`,
+plus `media.serve(id, conversion, { req, res })`, `media.url()`,
+`media.attach()`, `media.delete()` (checked by `authorize`). Tokens:
+`MEDIA_LIBRARY`, `MEDIA_ATTACHMENTS`, `MEDIA_UPLOADS`, `MEDIA_TUS`,
+`MEDIA_DIRECT`, `MEDIA_STORE`, `MEDIA_UPLOAD_SESSIONS`, `MEDIA_MULTIPART`. The
+disks are `@nestjs/storage`'s `Storage`.
 
 ## Common mistakes
 
-### Mistake 1 — `default` names a disk that isn't in `disks`
+### Mistake 1 — no `StorageModule`
 
 ```ts
-// Wrong — StorageManager throws UnknownDiskError at construction.
-MediaModule.forRoot({
-  default: 's3',
-  disks: { local: new LocalDriver({ root: './storage' }) }, // no 's3' key
-});
+// Wrong — MediaModule has no disks: boot fails with
+// "MediaModule stores files on the disks of @nestjs/storage: register StorageModule.forRoot(...)".
+@Module({ imports: [MediaModule.forRoot({ store })] })
 
-// Correct — the default key must exist in disks.
-MediaModule.forRoot({
-  default: 'local',
-  disks: { local: new LocalDriver({ root: './storage' }) },
-});
+// Correct
+@Module({ imports: [StorageModule.forRoot({ disks: { local: new LocalDisk({ root: './storage' }) } }), MediaModule.forRoot({ store })] })
 ```
 
-`StorageManager`'s constructor validates `default` against `disks` and throws
-`UnknownDiskError` immediately if missing. Source:
-`packages/core/src/storage-manager.ts`.
+### Mistake 2 — `default`/`disks` on `MediaModule`
 
-### Mistake 2 — using `forRoot` when a disk needs an injected client
+They moved to `StorageModule.forRoot()`. `MediaModuleOptions` has no `default`
+or `disks`; TypeScript rejects them.
+
+### Mistake 3 — a multipart side-car built from different options than its disk
 
 ```ts
-// Wrong — S3Client isn't resolvable here; you end up newing it by hand,
-// duplicating config and losing Nest's lifecycle.
-MediaModule.forRoot({
-  default: 's3',
-  disks: { s3: new S3Driver({ client: new S3Client({}), bucket: 'app-uploads' }) },
-});
+// Wrong — the side-car writes under another prefix/bucket than the disk reads.
+StorageModule.forRoot({ disks: { s3: new S3Disk({ bucket: 'a', prefix: 'p/' }) } });
+MediaModule.forRoot({ multipart: { s3: s3Multipart({ bucket: 'a' }) } });
 
-// Correct — inject the provider through forRootAsync.
-MediaModule.forRootAsync({
-  inject: [S3Client],
-  useFactory: (s3: S3Client) => ({
-    default: 's3',
-    disks: { s3: new S3Driver({ client: s3, bucket: 'app-uploads' }) },
-  }),
-});
+// Correct — one options object for both.
+const s3 = { bucket: 'a', prefix: 'p/' };
+StorageModule.forRoot({ disks: { s3: new S3Disk(s3) } });
+MediaModule.forRoot({ multipart: { s3: s3Multipart(s3) } });
 ```
 
-`forRootAsync.useFactory` receives `inject`ed providers; `forRoot` cannot resolve
-DI. Source: `packages/nestjs/src/media.module.ts`.
+A `multipart` key that isn't a `StorageModule` disk fails at boot.
 
-### Mistake 3 — importing `MediaModule` again in a feature module
+### Mistake 4 — importing `MediaModule` again in a feature module
 
-```ts
-// Wrong — MediaModule is @Global(); re-registering it per feature module
-// rebuilds StorageManager/MediaLibrary with (possibly) different config.
-@Module({ imports: [MediaModule.forRoot({ /* ... */ })] })
-export class PhotosModule {}
-
-// Correct — register once in AppModule; just inject MediaService downstream.
-@Module({ providers: [PhotosService] })
-export class PhotosModule {}
-```
-
-`MediaModule` is decorated `@Global()`, so a single root registration exports
-`MediaService` and every token app-wide. Source:
-`packages/nestjs/src/media.module.ts`.
+`MediaModule` is `@Global()`: register it once in `AppModule` and inject
+`MediaService` downstream.

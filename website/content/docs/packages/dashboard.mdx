@@ -6,13 +6,14 @@ description: Standalone /media console — disks, live uploads, and the media li
 
 import { Callout } from 'fumadocs-ui/components/callout';
 
-A bundled React SPA + JSON API you mount alongside [`MediaModule`](/docs/packages/nestjs) to browse disks, watch live uploads, and inspect the media library — without writing an admin UI of your own.
+A bundled React SPA + JSON API you mount alongside [`MediaModule`](/docs/packages/nestjs) to browse the `@nestjs/storage` disks, watch live uploads, and inspect the media library — without writing an admin UI of your own. It reads the disks from `StorageModule`'s `Storage`, and the multipart side-cars, store and upload sessions from `MediaModule`.
 
 ```ts
 import { MediaDashboardModule } from '@dudousxd/nestjs-media-dashboard';
 
 @Module({
   imports: [
+    StorageModule.forRoot({ disks: { /* … */ } }),
     MediaModule.forRoot({ /* … */ }),
     MediaDashboardModule.forRoot({
       basePath: '/media',
@@ -144,7 +145,7 @@ describes nothing.
 | Renderer | Opened for | How it reads |
 |---|---|---|
 | Image / video / audio | `image/*`, `video/*`, `audio/*` and the usual extensions | The object's own URL |
-| PDF | `application/pdf`, `.pdf` | Streamed inline through the same-origin proxy, so a signed URL carrying `Content-Disposition: attachment` still renders instead of downloading |
+| PDF | `application/pdf`, `.pdf` | Streamed inline through the same-origin `/raw` route (PDF is one of the types `serveFile()` serves inline), so a signed URL carrying `Content-Disposition: attachment` still renders instead of downloading |
 | Text | `text/*`, `.txt` `.json` `.csv` `.tsv` `.log` `.xml` `.yaml` `.sql` | Head sample (8 MB), rendered raw, as pretty JSON, or as a CSV/TSV grid |
 | Markdown | `text/markdown`, `.md` | Head sample, rendered and sanitized, with a source toggle |
 | NDJSON | `.ndjson` `.jsonl` | Head sample, one object per line, columns unioned across rows |
@@ -158,9 +159,8 @@ describes nothing.
 The last row is the important one: there is no "no preview available" state any more. Whatever the
 console cannot identify is still bytes, and bytes render as hex.
 
-The range-backed renderers need a disk whose driver reports [`capabilities.ranged`](/docs/recipes/custom-driver#capabilities-are-a-promise).
-Both bundled drivers do. On a disk that doesn't, they say so rather than pulling the whole object
-down.
+The range-backed renderers read `Range` requests answered by `@nestjs/storage`'s `serveFile()`; every
+`StorageDisk` serves byte ranges, so every disk gets them.
 
 Everything past the plain media types is code-split: opening the console does not load the SQLite
 engine, the Parquet reader, SheetJS, the inflater, the X.509 parser or the Markdown renderer. Each
@@ -243,17 +243,17 @@ export class HousekeepingService {
 }
 ```
 
-It resolves the storage manager, the `MediaStore`, and the upload-session store as **optional** dependencies, so a host missing any of them still boots — each method degrades to an empty shape (`{ disks: [] }`, `{ records: [] }`, …) instead of throwing. The full surface:
+It resolves `Storage` (from `StorageModule`), the multipart side-cars, the `MediaStore`, and the upload-session store as **optional** dependencies, so a host missing any of them still boots — each method degrades to an empty shape (`{ disks: [] }`, `{ records: [] }`, …) instead of throwing. The full surface:
 
 | Method | Returns | Notes |
 |---|---|---|
-| `listDisks()` | `DiskListResponse` | Registered disks + each one's capabilities. |
+| `listDisks()` | `Promise<DiskListResponse>` | Registered disks + each one's capabilities, computed by core's `diskCapabilities()` from the disk and its side-car. |
 | `listObjects(disk, { prefix, cursor, limit })` | `ObjectListResponse` | One level of a disk — `{ folders, files, cursor }`. See [Folders](/docs/concepts/folders). |
-| `objectDetail(disk, key)` | `ObjectDetailResponse` | Size, content type, and a preview/download URL (signed on presign-capable disks). |
-| `objectStream(disk, key, range?)` | `{ stream, contentType, size, range? }` | Raw byte stream for the inline preview proxy. With a `range` it streams just that slice (both bounds inclusive); `size` stays the whole object, so the controller can build `Content-Range`. Unsatisfiable → `RangeNotSatisfiableException` (416). |
-| `putObject(disk, key, body, contentType?)` | `void` | Writes an object from a stream. Buffered + size-capped. **Action.** |
-| `createFolder` / `deleteFolder` | `void` | Folder marker create / recursive delete. **Action.** |
-| `copyObject` / `moveObject` | `void` | Single-object copy/move, same disk or cross-disk. **Action.** |
+| `objectDetail(disk, key)` | `ObjectDetailResponse` | Size, content type, and a URL: the public one, else a signed one, else the console's `/raw` route. |
+| `serveObject(disk, key, { req, res, disposition?, filename? })` | `StreamableFile \| undefined` | The object as the response, through `serveFile()`: `Range` → 206, `If-None-Match` → 304, past the end → 416, missing → 404. |
+| `putObject(disk, key, body, contentType?, contentLength?)` | `void` | Streams an object onto the disk (no size cap, nothing buffered). **Action.** |
+| `createFolder` / `deleteFolder` | `void` | Create (a hidden `.keep`) / recursive delete. **Action.** |
+| `copyObject` / `moveObject` | `void` | Single-object copy/move, same disk or cross-disk (streamed). **Action.** |
 | `moveFolder` / `copyFolder` | `void` | Whole-subtree copy/move. **Action.** See [Folders](/docs/concepts/folders#the-dashboard-folder-feature). |
 | `listUploads({ disk?, prefix? })` | `UploadListResponse` | In-progress resumable sessions. |
 | `uploadDetail(id)` / `abortUpload(id)` | `UploadDetailResponse` / `void` | Inspect / cancel a session (`abort` is an **action**). |
@@ -279,7 +279,7 @@ The response shapes are exported as types — see [the client subpath](#the-type
 | `GET disks` | — | `DiskListResponse` |
 | `GET disks/:disk/objects` | `prefix?`, `cursor?`, `limit?` | `ObjectListResponse` |
 | `GET disks/:disk/object` | `key` | `ObjectDetailResponse` |
-| `GET disks/:disk/object/raw` | `key` | raw bytes, `Content-Disposition: inline` |
+| `GET disks/:disk/object/raw` | `key` | raw bytes; `inline` for types that can't run script (images, PDF, audio, video, plain text), else `attachment` |
 | `GET disks/:disk/object/download` | `key` | raw bytes, `Content-Disposition: attachment` |
 | `GET disks/:disk/object/insights` | `key` | `ObjectInsightsResponse` |
 | `GET uploads` | `disk?`, `prefix?` | `UploadListResponse` |
@@ -314,8 +314,8 @@ There are two ways the console gets at a file, and they answer different questio
 
 **Downloading** — the `Download` button on a file row, in the preview header, and on a library record
 — always goes through `GET disks/:disk/object/download`, this server's own same-origin route. It
-answers with `Content-Disposition: attachment` named after the key's last segment (in both RFC 6266
-forms, so a non-ASCII name survives), and it honours `Range`, so an interrupted download of a large
+answers with `Content-Disposition: attachment` named after the key's last segment (with the RFC 6266
+`filename*` form for a non-ASCII name), and it honours `Range`, so an interrupted download of a large
 object resumes rather than restarting. It is a read: it needs no `actions: true`.
 
 Being same-origin is the point. Saving a file is the console's own action, so it has to work on a
@@ -333,7 +333,7 @@ MediaDashboardModule.forRoot({
 
 | Value | `url` is | Use it when |
 |---|---|---|
-| `auto` (default) | a presigned, expiring URL straight to the store (5 min), or the driver's plain URL when it cannot presign | the browser can reach the store. The URL survives a copy-paste out of the console and needs nothing from this server. |
+| `auto` (default) | the disk's public URL when it has a `publicUrl`; else a signed, expiring URL (5 min); else the console's own `object/raw` route, for a disk that can do neither | the browser can reach the store. The URL survives a copy-paste out of the console and needs nothing from this server. |
 | `proxy` | the console's own `object/raw` route, same-origin | the browser cannot reach the store. The trade: the URL only means anything to a session that can reach this server, and every byte travels through it. |
 
 `objectUrls` does not affect downloading — that route is same-origin either way.
@@ -375,4 +375,4 @@ Its `register()` takes the same building blocks `MediaDashboardModule` feeds it 
 
 ## Peer dependencies
 
-`@dudousxd/nestjs-media-core`, `@nestjs/common` / `@nestjs/core` (^10, ^11 or ^12), and `rxjs`. The bundled SPA ships its own React copy — no extra frontend install needed.
+`@dudousxd/nestjs-media-core`, `@nestjs/storage` (`>=0.0.5 <0.1.0`), `@nestjs/common` / `@nestjs/core` (^12.1), and `rxjs`. The bundled SPA ships its own React copy — no extra frontend install needed.

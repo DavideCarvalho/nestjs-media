@@ -18,9 +18,9 @@ For large files, accept them through the resumable [tus](/docs/concepts/uploads)
 ```ts title="app.module.ts"
 import { InMemoryUploadSessionStore } from '@dudousxd/nestjs-media-testing';
 
+// StorageModule.forRoot({ disks: { s3: new S3Disk(s3Options) } })
 MediaModule.forRoot({
-  default: 's3',
-  disks: { s3 },
+  multipart: { s3: s3Multipart(s3Options) }, // optional here: chunks become native S3 parts
   uploadSessions: new InMemoryUploadSessionStore(), // swap for a durable store in prod
   tus: {
     disk: 's3',
@@ -85,17 +85,22 @@ import { MediaService } from '@dudousxd/nestjs-media';
 
 @Controller('posts/:id/photos')
 export class PostPhotosController {
-  constructor(private readonly media: MediaService) {}
+  constructor(
+    private readonly media: MediaService,
+    private readonly storage: Storage, // @nestjs/storage
+  ) {}
 
   @Post('finalize')
-  finalize(
+  async finalize(
     @Param('id') postId: string,
     @Body() body: { uploadedKey: string; fileName: string; mimeType: string },
   ) {
+    const upload = await this.storage.disk('s3').get(body.uploadedKey);
     return this.media.library.attach({
       ownerType: 'Post', ownerId: postId, collection: 'gallery',
       fileName: body.fileName, mimeType: body.mimeType, disk: 's3',
-      contents: this.media.disk('s3').stream(body.uploadedKey), // re-key into the library layout
+      size: upload.size,
+      contents: upload.body, // streamed, re-keyed into the library layout
     });
   }
 }
@@ -123,12 +128,11 @@ The tus flow above is *resumable proxy* — the bytes still pass through Nest. F
 
 ### Enable the direct controller
 
-Pass the `direct` option an S3 disk. This mounts `MediaDirectUploadController` at `media/uploads/direct` and exposes the orchestrator as `media.directUploads`:
+Pass the `direct` option an S3 disk that has a [multipart side-car](/docs/packages/disk-s3) (built from the same options as its `S3Disk`). This mounts `MediaDirectUploadController` at `media/uploads/direct` and exposes the orchestrator as `media.directUploads`:
 
 ```ts title="app.module.ts"
 MediaModule.forRoot({
-  default: 's3',
-  disks: { s3 },
+  multipart: { s3: s3Multipart(s3Options) },
   direct: {
     disk: 's3',
     partSize: 8 * 1024 * 1024, // optional — default 8 MiB
@@ -192,14 +196,19 @@ import { MediaService } from '@dudousxd/nestjs-media';
 
 @Controller('posts/:id/videos')
 export class PostVideosController {
-  constructor(private readonly media: MediaService) {}
+  constructor(
+    private readonly media: MediaService,
+    private readonly storage: Storage, // @nestjs/storage
+  ) {}
 
   @Post('finalize')
-  finalize(@Param('id') postId: string, @Body() body: { key: string; fileName: string; mimeType: string }) {
+  async finalize(@Param('id') postId: string, @Body() body: { key: string; fileName: string; mimeType: string }) {
+    const upload = await this.storage.disk('s3').get(body.key);
     return this.media.library.attach({
       ownerType: 'Post', ownerId: postId, collection: 'videos',
       fileName: body.fileName, mimeType: body.mimeType, disk: 's3',
-      contents: this.media.disk('s3').stream(body.key),
+      size: upload.size,
+      contents: upload.body,
     });
   }
 }
@@ -210,5 +219,5 @@ export class PostVideosController {
 </Steps>
 
 <Callout type="info" title="proxy vs direct, in one line">
-Use **proxy/tus** when you need to touch the bytes (virus-scan, transcode, watermark) or support disks that can't presign; use **direct multipart** when raw throughput matters and the disk is S3. See [Uploads & multipart](/docs/concepts/uploads) for the full comparison and the `DirectUploadManager` engine.
+Use **proxy/tus** when you need to touch the bytes (virus-scan, transcode, watermark) or the disk has no multipart side-car; use **direct multipart** when raw throughput matters and the disk is S3 with `s3Multipart()`. See [Uploads & multipart](/docs/concepts/uploads) for the full comparison and the `DirectUploadManager` engine.
 </Callout>

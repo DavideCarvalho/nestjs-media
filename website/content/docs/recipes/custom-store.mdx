@@ -118,7 +118,7 @@ runMediaStoreConformance('MyMediaStore', () => new MyMediaStore(makeFreshDb()));
 Pass the suite and your store drops into `MediaModule` unchanged:
 
 ```ts
-MediaModule.forRoot({ default: 's3', disks: { s3 }, store: new MyMediaStore(db) });
+MediaModule.forRoot({ store: new MyMediaStore(db) });
 ```
 
 For a real backend, also run it as a `*.db.spec.ts` against a container (the way the ORM stores are validated on Postgres). See [`-testing`](/docs/packages/testing) and [Persistence](/docs/concepts/persistence).

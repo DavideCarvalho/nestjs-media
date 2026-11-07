@@ -7,17 +7,19 @@ description: >-
   the tus option, which mounts MediaUploadController at media/uploads and REQUIRES
   an application/offset+octet-stream raw-body parser. The direct path uses
   presigned S3 multipart — enable it with the direct option, which mounts
-  MediaDirectUploadController at media/uploads/direct and needs a presign/multipart
-  disk (no session store). resolveUploadMode picks proxy vs direct
+  MediaDirectUploadController at media/uploads/direct and needs a multipart
+  side-car for the disk (multipart: { s3: s3Multipart(sameOptionsAsTheS3Disk) }
+  from @dudousxd/nestjs-media-disk-s3; no session store). The disks come from
+  @nestjs/storage's StorageModule. resolveUploadMode picks proxy vs direct
   (per-call > per-disk > global > auto). Reach the engines via
   MediaService.uploads (ResumableUploadManager) and MediaService.directUploads
   (DirectUploadManager). Explains the missing-raw-parser failure and the
-  UnsupportedOperationError when forcing direct on a non-presign disk.
+  UnsupportedOperationError when forcing direct on a disk without a side-car.
 license: MIT
 metadata:
   type: core
   library: "@dudousxd/nestjs-media"
-  library_version: 0.5.0
+  library_version: 0.10.0
   framework: nestjs
 ---
 
@@ -28,7 +30,9 @@ Two upload shapes:
 - **proxy** — bytes flow through NestJS in chunks over a resumable **tus 1.0.0**
   server. Works on any disk; lets you scan/transform on the way in.
 - **direct** — the browser PUTs chunks straight to S3 via presigned URLs; your
-  backend only orchestrates. Needs a presign/multipart-capable disk (S3).
+  backend only orchestrates. Needs an `S3Disk` with an `s3Multipart()` side-car.
+
+The disks are `@nestjs/storage`'s (`StorageModule.forRoot({ disks })`), registered before `MediaModule`.
 
 ## Setup — proxy (tus)
 
@@ -44,8 +48,6 @@ MediaModule.forRootAsync({
   decorators: [UseGuards(AuthenticationGuard), Can(MediaPolicy, 'upload')], // required in production
   inject: ['REDIS'],
   useFactory: (redis) => ({
-    default: 'local',
-    disks: { local },
     uploadSessions: new RedisUploadSessionStore(redis), // or InMemoryUploadSessionStore from -testing
     uploadTmpPrefix: '.uploads',                         // where in-progress chunks stage (default)
     tus: { disk: 'local', basePath: '/media/uploads', maxSize: 100 * 1024 * 1024 },
@@ -65,12 +67,20 @@ This mounts `MediaUploadController` (OPTIONS / POST / HEAD / PATCH / DELETE) at
 ## Setup — direct (presigned S3 multipart)
 
 ```ts
+import { S3Disk, StorageModule } from '@nestjs/storage';
+import { s3Multipart } from '@dudousxd/nestjs-media-disk-s3';
+
+const s3 = { bucket: 'app-uploads', region: 'eu-west-1' }; // ONE options object for both
+StorageModule.forRoot({ disks: { s3: new S3Disk(s3) } });
 MediaModule.forRoot({
-  default: 's3',
-  disks: { s3 },
+  multipart: { s3: s3Multipart(s3) },
   direct: { disk: 's3', partSize: 8 * 1024 * 1024 }, // partSize optional, default 8 MiB
 });
 ```
+
+The side-car is also what makes tus chunks native S3 parts on that disk; without
+it, resumable uploads on S3 still work (temporary part files streamed into the
+final `put()` on completion).
 
 This mounts `MediaDirectUploadController` at `media/uploads/direct` (initiate /
 parts / complete / abort) and exposes `media.directUploads`. No session store and
@@ -139,15 +149,16 @@ content-type must be parsed raw. Source:
 ### Mistake 2 — forcing `direct` on a non-presign disk
 
 ```ts
-// Wrong — local can't presign multipart; createUpload throws UnsupportedOperationError.
+// Wrong — 'local' has no multipart side-car; createUpload throws UnsupportedOperationError.
 await this.media.directUploads.createUpload({ disk: 'local', key: 'a.bin' });
 
-// Correct — direct uploads require an S3 (presign/multipart) disk.
+// Correct — direct uploads need a disk configured in `multipart`.
 await this.media.directUploads.createUpload({ disk: 's3', key: 'a.bin' });
 ```
 
-`DirectUploadManager.createUpload` checks `isMultipartCapable(driver)` and throws
-`UnsupportedOperationError` otherwise. Source:
+`DirectUploadManager.createUpload` looks the disk up in `multipart` and throws
+`UnsupportedOperationError` when it isn't there. A key `@nestjs/storage` would
+refuse (`../x`, `/abs`) throws `InvalidMediaKeyError` (400 on the routes). Source:
 `packages/core/src/direct-upload.ts`.
 
 ### Mistake 3 — adding an `UploadSessionStore` for the direct path
@@ -155,10 +166,10 @@ await this.media.directUploads.createUpload({ disk: 's3', key: 'a.bin' });
 ```ts
 // Wrong — the direct path is stateless on your side; a session store does nothing
 // for it and `direct` won't enable the proxy/tus controller.
-MediaModule.forRoot({ default: 's3', disks: { s3 }, uploadSessions: store, direct: { disk: 's3' } });
+MediaModule.forRoot({ multipart: { s3: s3Multipart(s3) }, uploadSessions: store, direct: { disk: 's3' } });
 
 // Correct — uploadSessions/tus is the proxy path; direct needs only `direct`.
-MediaModule.forRoot({ default: 's3', disks: { s3 }, direct: { disk: 's3' } });
+MediaModule.forRoot({ multipart: { s3: s3Multipart(s3) }, direct: { disk: 's3' } });
 ```
 
 `uploadSessions` powers the resumable proxy/tus engine where the backend tracks

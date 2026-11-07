@@ -14,7 +14,7 @@ import { MikroOrmMediaStore, ensureMediaSchema } from '@dudousxd/nestjs-media-da
 await ensureMediaSchema(orm);                  // orm.schema.updateSchema({ safe: true })
 const store = new MikroOrmMediaStore(orm.em);
 
-MediaModule.forRoot({ default: 's3', disks: { s3 }, store });
+MediaModule.forRoot({ store });
 ```
 
 ## Auto-schema

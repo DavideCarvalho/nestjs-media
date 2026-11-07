@@ -13,19 +13,19 @@ Small files are easy — `multipart/form-data`, one request, done. Large files a
 
 **`proxy`** — bytes flow through your NestJS backend in chunks via a real **tus 1.0.0** server. The upload is *resumable*: a dropped connection continues from the last acknowledged offset instead of starting over. Works on any disk (even local), and because the bytes pass through you, it's where you'd virus-scan, watermark, or transform on the way in.
 
-**`direct`** — the backend only orchestrates; the browser uploads chunks straight to the storage backend using **presigned S3 multipart**. Your server never sees the bytes, so it never becomes the bandwidth bottleneck. This is the right default at scale, but it requires a disk that can presign.
+**`direct`** — the backend only orchestrates; the browser uploads chunks straight to the storage backend using **presigned S3 multipart**. Your server never sees the bytes, so it never becomes the bandwidth bottleneck. This is the right default at scale. It needs a [multipart side-car](/docs/packages/disk-s3) for the disk: `@nestjs/storage`'s `S3Disk` uses multipart internally but doesn't expose parts.
 
 ## `uploadMode`: choosing per upload
 
-`resolveUploadMode` decides, reading the driver's `capabilities`:
+`resolveUploadMode` decides from the disk's capabilities (`diskCapabilities(disk, sidecar)` in core: `presign` when `signedUrl()` works, `multipart` when a side-car is configured):
 
 ```ts
 type UploadMode = 'auto' | 'proxy' | 'direct';
 ```
 
-- **`auto`** (default) → `direct` when the driver is presign/multipart-capable (S3), otherwise `proxy` (local). The sensible default for most apps: scale where you can, proxy where you can't.
-- **`proxy`** → always allowed; every driver can accept bytes through `put`.
-- **`direct`** → throws on a driver that can't presign, rather than silently degrading.
+- **`auto`** (default) → `direct` when the disk can presign or has a multipart side-car, otherwise `proxy`. The sensible default for most apps: scale where you can, proxy where you can't.
+- **`proxy`** → always allowed; every disk accepts bytes through `put`.
+- **`direct`** → throws on a disk that can do neither, rather than silently degrading.
 
 Resolution is **most-specific-wins**:
 
@@ -34,7 +34,7 @@ per-call  ▸  per-disk  ▸  global  ▸  auto
 ```
 
 <Callout type="info" title="The override is the point">
-Even on an S3 disk that *could* go direct, you can force `proxy` for a specific upload — e.g. user-supplied images you want to virus-scan or re-encode on the way in — and force `direct` elsewhere for raw throughput. The driver's capability sets the default; you keep the final say. This is exactly the override choice: the disk proposes, the call disposes.
+Even on an S3 disk that *could* go direct, you can force `proxy` for a specific upload — e.g. user-supplied images you want to virus-scan or re-encode on the way in — and force `direct` elsewhere for raw throughput. The disk's capability sets the default; you keep the final say. This is exactly the override choice: the disk proposes, the call disposes.
 </Callout>
 
 ## Resumable (tus) server
@@ -50,9 +50,8 @@ Enable the proxy path by giving the module an **upload session store**, and moun
 ```ts
 import { InMemoryUploadSessionStore } from '@dudousxd/nestjs-media-testing';
 
+// StorageModule.forRoot({ disks: { local: new LocalDisk({ root: './storage' }) } })
 MediaModule.forRoot({
-  default: 'local',
-  disks: { local },
   uploadSessions: new InMemoryUploadSessionStore(), // or your own UploadSessionStore
   uploadTmpPrefix: '.uploads',                       // where in-progress chunks live (default)
   tus: { disk: 'local', basePath: '/media/uploads', maxSize: 100 * 1024 * 1024 },
@@ -121,16 +120,21 @@ const { key } = await media.uploads.complete(session.id); // assembles + cleans 
 // media.uploads.status(id) to resume; media.uploads.abort(id) to cancel
 ```
 
-Each chunk is written immediately as a *part* on the target disk (under `uploadTmpPrefix`), so resuming needs no in-memory buffering and a half-finished upload survives a process restart. `complete` assembles the parts into the final object and removes them. On a disk with native multipart (S3) that is a server-side `completeMultipartUpload`; on any other disk the parts are streamed, in order, into a single `put` of the final key, each part opened only once the previous one has been read, so assembly holds about one part's chunks in memory rather than the whole object. Reach `media.uploads` directly when you want to drive uploads from your own protocol or a non-HTTP transport.
+Each chunk is written immediately as a *part* on the target disk (under `uploadTmpPrefix`), so resuming needs no in-memory buffering and a half-finished upload survives a process restart. `complete` assembles the parts into the final object and removes them. On a disk with a multipart side-car (S3) each chunk is a native part and completion is a server-side `completeMultipartUpload`; on any other disk the parts are streamed, in order, into a single `put` of the final key (with the received byte count as `contentLength`, so a missing part fails the write), each part opened only once the previous one has been read. The tus `keyFor` default is `uploads/<token>/<filename>`, the client's file name made one safe key segment; a custom `keyFor` returning a key `@nestjs/storage` refuses answers 400. Reach `media.uploads` directly when you want to drive uploads from your own protocol or a non-HTTP transport.
 
 ## Direct (presigned multipart) server
 
-The `direct` path inverts the data flow: the browser PUTs each part straight to S3 against a **presigned URL**, and your backend only orchestrates — it never sees a byte. Enable it with the `direct` option (it needs a presign/multipart-capable disk, i.e. S3):
+The `direct` path inverts the data flow: the browser PUTs each part straight to S3 against a **presigned URL**, and your backend only orchestrates — it never sees a byte. Enable it with the `direct` option and a multipart side-car for the disk, built from the **same options object** as its `S3Disk`:
 
 ```ts
+import { S3Disk, StorageModule } from '@nestjs/storage';
+import { s3Multipart } from '@dudousxd/nestjs-media-disk-s3';
+
+const s3 = { bucket: 'app-uploads', region: 'eu-west-1' };
+
+StorageModule.forRoot({ disks: { s3: new S3Disk(s3) } });
 MediaModule.forRoot({
-  default: 's3',
-  disks: { s3 },
+  multipart: { s3: s3Multipart(s3) },
   direct: {
     disk: 's3',
     partSize: 8 * 1024 * 1024, // optional, default 8 MiB
@@ -170,4 +174,4 @@ await media.directUploads.completeUpload({
 // media.directUploads.abortUpload({ key, uploadId }) to cancel
 ```
 
-`createUpload` throws `UnsupportedOperationError` if the target disk can't presign multipart — so forcing `direct` fails loudly rather than silently degrading.
+`createUpload` throws `UnsupportedOperationError` if the target disk has no multipart side-car — so forcing `direct` fails loudly rather than silently degrading. A client key that `@nestjs/storage` would refuse (`../x`, `/abs`) is a 400 before anything is created. For a single-`PUT` direct upload of a smaller file, `@nestjs/storage`'s own `disk.signedUpload()` does it.

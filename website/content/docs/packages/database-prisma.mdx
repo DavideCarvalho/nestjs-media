@@ -11,7 +11,7 @@ A `MediaStore` backed by Prisma. The adapter **never imports `@prisma/client`** 
 ```ts
 import { PrismaMediaStore } from '@dudousxd/nestjs-media-database-prisma';
 
-MediaModule.forRoot({ default: 's3', disks: { s3 }, store: new PrismaMediaStore(prisma) });
+MediaModule.forRoot({ store: new PrismaMediaStore(prisma) });
 ```
 
 ## Add the model

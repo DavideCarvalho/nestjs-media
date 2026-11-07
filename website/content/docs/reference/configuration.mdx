@@ -6,24 +6,21 @@ description: Every MediaModule option, the MediaService surface, and the injecti
 
 import { Callout } from 'fumadocs-ui/components/callout';
 
-The complete configuration surface for `@dudousxd/nestjs-media`.
+The complete configuration surface for `@dudousxd/nestjs-media`. The disks are configured with `StorageModule` from `@nestjs/storage` ([its options](https://docs.nestjs.com/application/file-storage)); register it before `MediaModule`.
 
 ## `MediaModule.forRoot(options)`
 
 ```ts
 interface MediaModuleOptions {
-  // ── storage (layer 1) ──────────────────────────────────────────────
-  default: string;                          // name of the default disk
-  disks: Record<string, StorageDriver>;     // named disks
-
-  // ── media-library (layer 2) — enabled when `store` is present ───────
-  store?: MediaStore;
+  // ── media-library — enabled when `store` is present ─────────────────
+  store?: MediaStore | { inject?: InjectionToken[]; useFactory: (...deps) => MediaStore };
   collections?: MediaCollectionConfig[];
   imageProcessor?: ImageProcessor;
 
   // ── resumable uploads — enabled when `uploadSessions` is present ─────
-  uploadSessions?: UploadSessionStore;
+  uploadSessions?: UploadSessionStore | { inject?; useFactory };
   uploadTmpPrefix?: string;                 // default '.uploads'
+  multipart?: Record<string, MultipartUploadDriver>; // side-car per StorageModule disk, e.g. { s3: s3Multipart(opts) }
   tus?: {                                   // mounts the tus HTTP controller
     disk: string;
     basePath?: string;                      // default '/media/uploads'
@@ -31,7 +28,10 @@ interface MediaModuleOptions {
     keyFor?: (filename: string, token: string, metadata: Record<string, string>) => string;
   };
 
-  // ── direct (presigned multipart) uploads — needs an S3-capable disk ──
+  // ── who may read/attach/delete through MediaService ────────────────────
+  authorize?: (user: unknown, action: 'read' | 'attach' | 'delete', subject: MediaRecord | MediaAttachTarget) => void | Promise<void>;
+
+  // ── direct (presigned multipart) uploads — needs a `multipart` side-car ─
   direct?: {                                // mounts the direct upload controller
     disk: string;
     basePath?: string;
@@ -48,15 +48,15 @@ interface MediaModuleOptions {
 
 | Option | Required | Purpose |
 |---|---|---|
-| `default` | ✅ | Which disk `media.disk()` returns with no name |
-| `disks` | ✅ | The named disks (`local`, `s3`, custom, …) |
-| `store` | — | Enables `media.library`; omit for raw-storage-only |
+| `store` | — | Enables `media.library`. An instance, or `{ inject, useFactory }` (e.g. `typeOrmMediaStore({ connectionName })`) |
 | `collections` | — | Per-collection rules + conversions |
 | `imageProcessor` | — | Required only if any collection declares `conversions` |
 | `uploadSessions` | — | Enables `media.uploads` (the resumable engine) |
-| `uploadTmpPrefix` | — | Where in-progress chunks are staged on the disk |
+| `uploadTmpPrefix` | — | Where in-progress chunks are staged on the disk (a valid key, default `.uploads`) |
+| `multipart` | — | Native multipart side-cars by disk name. A name that isn't a `StorageModule` disk fails at boot |
+| `authorize` | — | Checked by `MediaService.serve()`/`url()` (`read`), `attach()`, `delete()`; throw to refuse. See [authorize](/docs/packages/nestjs#authorize) |
 | `tus` | — | Mounts `MediaUploadController` (needs `uploadSessions`) |
-| `direct` | — | Enables `media.directUploads` + mounts `MediaDirectUploadController` (needs a presign/multipart disk, e.g. S3) |
+| `direct` | — | Enables `media.directUploads` + mounts `MediaDirectUploadController` (needs a `multipart` side-car for the disk) |
 | `decorators` | in production, unless nothing is mounted | Class decorators applied to every mounted upload controller, e.g. `[UseGuards(AuthenticationGuard), Can(MediaPolicy, 'upload')]`. The controllers are `@Can.Anyone()`-open to `@nestjs/authorization`'s global guard either way. See [Protecting the routes](#protecting-the-routes). |
 | `routes` | — | `false` mounts no upload controller; serve them from your own (see [Mount it yourself](/docs/packages/nestjs#1-mount-it-yourself)). Providers work either way. Default `true`. |
 | `mount` | — | `{ tus?, multipart?, direct? }` turns single surfaces off. Default: mount what's configured. |
@@ -79,14 +79,16 @@ Same options, resolved through a factory with DI — **except `decorators`, `rou
 interface MediaModuleAsyncOptions {
   imports?: any[];
   inject?: any[];
-  useFactory: (...args: any[]) => MediaModuleOptions | Promise<MediaModuleOptions>;
+  useFactory: (...args: any[]) => MediaModuleOptions | Promise<MediaModuleOptions>; // stores as instances
+  store?: { inject?; useFactory };                              // static — a store Nest builds (wins over the factory's)
+  uploadSessions?: { inject?; useFactory };                     // static
   decorators?: ClassDecorator[];                                // static — see MediaModuleOptions.decorators
   routes?: boolean;                                             // static, default true
   mount?: { tus?: boolean; multipart?: boolean; direct?: boolean }; // static, default all true
 }
 ```
 
-Use this whenever a disk or store needs an injected dependency (an `S3Client`, a `DataSource`, config service).
+Use this when options come from configuration (`ConfigService`) or `authorize` needs an injected service.
 
 <Callout title="`mount` on forRootAsync">
 `forRootAsync` can't know at module-build time whether `tus`/`direct` will end up configured by `useFactory`, so by default it mounts all three controllers and each 501s if its feature is left unconfigured. Set the ones you never use to `false` in `mount` so they don't exist as dead, always-501 surface — e.g. `mount: { direct: false }` — or `routes: false` to mount none and serve them yourself. (`forRoot` takes the same `mount`, on top of only mounting what's configured.)
@@ -117,8 +119,11 @@ interface ConversionPreset {
 
 ```ts
 class MediaService {
-  disk(name?: string): StorageDriver;       // layer 1
-  get library(): MediaLibrary;              // layer 2 — throws if no store configured
+  serve(id, conversion?, { req, res, user?, ...serveFileOptions }): Promise<StreamableFile | undefined>;
+  url(id, conversion?, { user?, expiresIn?, filename?, disposition? }?): Promise<string>;
+  attach(input: AttachInput, { user? }?): Promise<MediaRecord>;
+  delete(id, { user? }?): Promise<void>;
+  get library(): MediaLibrary;              // layer 2, unchecked — throws if no store configured
   get attachments(): AttachmentManager;     // attachment-as-column API — always available
   get uploads(): ResumableUploadManager;    // resumable proxy — throws if no uploadSessions configured
   get directUploads(): DirectUploadManager; // direct multipart — throws if no direct configured
@@ -136,7 +141,8 @@ attach(input: AttachInput): Promise<MediaRecord>;
 ensureConversion(id: string, conversion: string): Promise<MediaRecord>;
 list(ownerType: string, ownerId: string, collection?: string): Promise<MediaRecord[]>;
 delete(id: string): Promise<void>;
-url(id: string, conversion?: string): Promise<string>;
+url(id: string, conversion?: string, options?: StorageSignedUrlRequest): Promise<string>; // public, else signed
+locate(id: string, conversion?: string): Promise<{ record; disk; path; fileName }>;
 
 interface AttachInput {
   ownerType: string; ownerId: string; collection: string;
@@ -152,24 +158,27 @@ interface AttachInput {
 For advanced wiring, the module also exports tokens you can inject directly:
 
 ```ts
-import { MEDIA_STORAGE, MEDIA_LIBRARY, MEDIA_ATTACHMENTS, MEDIA_UPLOADS, MEDIA_TUS, MEDIA_DIRECT } from '@dudousxd/nestjs-media';
+import { MEDIA_LIBRARY, MEDIA_ATTACHMENTS, MEDIA_UPLOADS, MEDIA_TUS, MEDIA_DIRECT, MEDIA_MULTIPART } from '@dudousxd/nestjs-media';
 ```
 
 | Token | Resolves to |
 |---|---|
-| `MEDIA_STORAGE` | `StorageManager` |
 | `MEDIA_LIBRARY` | `MediaLibrary \| null` |
 | `MEDIA_ATTACHMENTS` | `AttachmentManager` |
 | `MEDIA_UPLOADS` | `ResumableUploadManager \| null` |
 | `MEDIA_TUS` | `TusUploadHandler \| null` |
 | `MEDIA_DIRECT` | `DirectUploadManager \| null` |
+| `MEDIA_STORE` | `MediaStore \| null` (`Symbol.for`) |
+| `MEDIA_UPLOAD_SESSIONS` | `UploadSessionStore \| null` (`Symbol.for`) |
+| `MEDIA_MULTIPART` | `Record<string, MultipartUploadDriver>` (`Symbol.for`) |
+
+The disks themselves are `@nestjs/storage`'s `Storage` (or `@InjectDisk(name)`).
 
 ## Error codes
 
 | Error | `code` |
 |---|---|
-| `FileNotFoundError` | `MEDIA_FILE_NOT_FOUND` |
-| `UnknownDiskError` | `MEDIA_UNKNOWN_DISK` |
+| `InvalidMediaKeyError` (status 400) | `MEDIA_INVALID_KEY` |
 | `UnsupportedOperationError` | `MEDIA_UNSUPPORTED_OP` |
 | `MimeNotAllowedError` | `MEDIA_MIME_NOT_ALLOWED` |
 | `MediaNotFoundError` | `MEDIA_RECORD_NOT_FOUND` |
@@ -177,3 +186,6 @@ import { MEDIA_STORAGE, MEDIA_LIBRARY, MEDIA_ATTACHMENTS, MEDIA_UPLOADS, MEDIA_T
 | `ImageProcessorMissingError` | `MEDIA_IMAGE_PROCESSOR_MISSING` |
 | `UploadSessionNotFoundError` | `MEDIA_UPLOAD_SESSION_NOT_FOUND` |
 | `UploadOffsetConflictError` | `MEDIA_UPLOAD_OFFSET_CONFLICT` |
+| `InvalidPartNumberError` | `MEDIA_INVALID_PART_NUMBER` |
+
+Storage errors (`StorageFileNotFoundError`, `StorageInvalidKeyError`, …) are `@nestjs/storage`'s; see [Migrating](/docs/reference/migration#errors).

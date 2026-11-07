@@ -1,59 +1,57 @@
 ---
 title: Serving files
 icon: Download
-description: Public URLs, signed temporary URLs, and streaming files through a controller.
+description: Public URLs, signed URLs, and streaming media records through your own controller with MediaService.serve().
 ---
 
 import { Callout } from 'fumadocs-ui/components/callout';
 
-Three ways to get bytes back to a client, depending on whether the file is public, private, or proxied through your app.
+Three ways to get a media record's bytes back to a client. For files that aren't media records, `@nestjs/storage` does the same things directly (`url()`, `signedUrl()`, `serveFile()`; [docs](https://docs.nestjs.com/application/file-storage)).
 
-## Public URLs
-
-If the disk has a public base (CloudFront/CDN for S3, a static base for local), `url()` returns a stable address you can hand straight to the browser:
+## `url()`: public, else signed
 
 ```ts
 const src = await media.library.url(mediaId);           // original
-const thumb = await media.library.url(mediaId, 'thumb'); // a conversion
+const thumb = await media.library.url(mediaId, 'thumb'); // a conversion (generated on first use)
 ```
 
-For raw storage: `media.disk('s3').url('path/to/file.png')`.
-
-## Signed, expiring URLs
-
-For private files, hand out a short-lived signed URL instead — no proxying, but access expires:
+When the record's disk has a `publicUrl` (a CDN, a public bucket), you get that stable address. Otherwise you get a signed, expiring one (`signedUrl()`, 15 minutes by default):
 
 ```ts
-const link = await media.disk('s3').temporaryUrl(`invoices/${id}.pdf`, 300); // 5 minutes
+await media.library.url(mediaId, undefined, { expiresIn: '5m', filename: 'invoice.pdf' });
 ```
 
 <Callout type="warn">
-`temporaryUrl` needs a presign-capable disk (S3). The local disk doesn't sign — proxy those through a controller (below) or put a CDN with signed URLs in front.
+`S3Disk` presigns on its own. A `LocalDisk` signs only with `signedUrls: { baseUrl, keys }`, and then your app serves those URLs with `serveSignedUrl()` ([docs](https://docs.nestjs.com/application/file-storage)). A disk with neither throws: serve its files through a controller (below).
 </Callout>
 
-## Streaming through a controller
+## Streaming through a controller: `MediaService.serve()`
 
-When you need auth checks, range support, or the disk can't sign, stream the bytes through Nest:
+When you need an authorization check, or the disk can't hand out URLs, stream the record through Nest:
 
 ```ts title="files.controller.ts"
-import { Controller, Get, Param, StreamableFile, Res } from '@nestjs/common';
-import type { Response } from 'express';
+import { Controller, Get, Param, Req, Res } from '@nestjs/common';
+import type { Request, Response } from 'express';
 import { MediaService } from '@dudousxd/nestjs-media';
 
 @Controller('media')
 export class FilesController {
   constructor(private readonly media: MediaService) {}
 
-  @Get(':id/raw')
-  async raw(@Param('id') id: string, @Res({ passthrough: true }) res: Response) {
-    const record = (await this.media.library.list('Post', '...', '...')).find((m) => m.id === id);
-    // …authorize here…
-    res.set({ 'Content-Type': record!.mimeType });
-    return new StreamableFile(await this.media.disk(record!.disk).stream(record!.path));
+  @Get(':id/:conversion?')
+  file(
+    @Param('id') id: string,
+    @Param('conversion') conversion: string | undefined,
+    @Req() req: Request,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    return this.media.serve(id, conversion, { req, res });
   }
 }
 ```
 
+`serve()` finds the record (404 for an unknown id), runs the module's [`authorize`](/docs/packages/nestjs#authorize) hook with `'read'` and `req.user` (or the `user` you pass), generates the conversion if needed, and answers through `@nestjs/storage`'s `serveFile()`: a single `Range` gets a 206, `If-None-Match` a 304, `ETag`/`Last-Modified`/`Cache-Control` (`private` unless the file has its own) and `X-Content-Type-Options: nosniff` are set. `Content-Disposition` is `inline` with the record's file name, but only for types that can't run script in your origin (images other than SVG, PDF, audio, video, plain text); anything else downloads. Pass `disposition`, `filename` or `cacheControl` to override.
+
 <Callout type="info">
-Prefer `stream` over `get` for serving — it pipes without loading the whole file into memory, which matters for video and large documents.
+The body streams: nothing is loaded into memory, and a client that disconnects releases the file or the S3 connection.
 </Callout>

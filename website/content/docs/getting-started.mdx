@@ -1,7 +1,7 @@
 ---
 title: Getting Started
 icon: Rocket
-description: Install nestjs-media, wire MediaModule with a disk + store, attach your first file, and serve it back — in about five minutes.
+description: Install nestjs-media on top of @nestjs/storage, wire MediaModule with a store, attach your first file, and serve it back — in about five minutes.
 ---
 
 import { Callout } from 'fumadocs-ui/components/callout';
@@ -16,30 +16,30 @@ By the end of this page you'll have a working upload endpoint that stores a file
 
 ## Install
 
-Pick the umbrella package plus the disks, store, and image engine you want. Everything is à la carte — install only what you use.
+nestjs-media stores files on the disks of NestJS's first-party [`@nestjs/storage`](https://docs.nestjs.com/application/file-storage) (`LocalDisk`, `S3Disk`, `InMemoryDisk`, or your own `StorageDisk`). Install it next to the umbrella package, plus the store and image engine you want. Everything is à la carte.
 
 <Tabs items={['pnpm', 'npm', 'yarn']}>
 <Tab value="pnpm">
 ```bash
-pnpm add @dudousxd/nestjs-media @dudousxd/nestjs-media-disk-s3 \
+pnpm add @nestjs/storage @dudousxd/nestjs-media \
   @dudousxd/nestjs-media-database-typeorm @dudousxd/nestjs-media-image-sharp
 ```
 </Tab>
 <Tab value="npm">
 ```bash
-npm i @dudousxd/nestjs-media @dudousxd/nestjs-media-disk-s3 \
+npm i @nestjs/storage @dudousxd/nestjs-media \
   @dudousxd/nestjs-media-database-typeorm @dudousxd/nestjs-media-image-sharp
 ```
 </Tab>
 <Tab value="yarn">
 ```bash
-yarn add @dudousxd/nestjs-media @dudousxd/nestjs-media-disk-s3 \
+yarn add @nestjs/storage @dudousxd/nestjs-media \
   @dudousxd/nestjs-media-database-typeorm @dudousxd/nestjs-media-image-sharp
 ```
 </Tab>
 </Tabs>
 
-The umbrella package (`@dudousxd/nestjs-media`) carries the NestJS module and the core SPIs. Each disk, ORM store, and image engine is its own package so you never pull S3 SDKs into a local-only app, or sharp into a service that doesn't resize.
+`@nestjs/storage` needs Nest 12.1 or later. The umbrella package (`@dudousxd/nestjs-media`) carries the NestJS module and the core SPIs. Each ORM store and image engine is its own package, so you never pull sharp into a service that doesn't resize. Add `@dudousxd/nestjs-media-disk-s3` only for resumable/direct uploads with native S3 multipart (see [Uploads](/docs/concepts/uploads)).
 
 </Step>
 
@@ -47,44 +47,43 @@ The umbrella package (`@dudousxd/nestjs-media`) carries the NestJS module and th
 
 ## Register the module
 
-`MediaModule.forRoot` wires the **storage** layer (disks). Pass a `store` and you also get the **media-library** layer; pass an `imageProcessor` and `collections` with `conversions` and you get image variants.
+Register the disks with `StorageModule` ([its docs](https://docs.nestjs.com/application/file-storage)), then `MediaModule` on top: a `store` gives you the **media-library** layer; an `imageProcessor` and `collections` with `conversions` give you image variants.
 
 ```ts title="app.module.ts"
 import { Module } from '@nestjs/common';
+import { LocalDisk, S3Disk, StorageModule } from '@nestjs/storage';
+import { TypeOrmModule } from '@nestjs/typeorm';
 import { MediaModule } from '@dudousxd/nestjs-media';
-import { LocalDriver } from '@dudousxd/nestjs-media-disk-local';
-import { S3Driver } from '@dudousxd/nestjs-media-disk-s3';
-import { TypeOrmMediaStore } from '@dudousxd/nestjs-media-database-typeorm';
+import { typeOrmMediaStore } from '@dudousxd/nestjs-media-database-typeorm/nest';
 import { SharpImageProcessor } from '@dudousxd/nestjs-media-image-sharp';
-import { S3Client } from '@aws-sdk/client-s3';
-import { getDataSourceToken } from '@nestjs/typeorm';
 
 @Module({
   imports: [
-    MediaModule.forRootAsync({
-      // No upload routes in this app (forRootAsync would otherwise mount them). Mounting them?
-      // Protect them: see "Protecting the routes" in the nestjs package docs.
+    TypeOrmModule.forRoot({ /* ... */ }),
+    StorageModule.forRoot({
+      default: 's3',
+      disks: {
+        s3: new S3Disk({ bucket: 'app-uploads', region: 'eu-west-1' }),
+        local: new LocalDisk({ root: './storage' }),
+      },
+    }),
+    MediaModule.forRoot({
+      // No upload routes in this app. Mounting them? Protect them: see "Protecting the routes"
+      // in the nestjs package docs.
       routes: false,
-      inject: [getDataSourceToken(), S3Client],
-      useFactory: (ds, s3: S3Client) => ({
-        default: 's3',
-        disks: {
-          s3: new S3Driver({ client: s3, bucket: 'app-uploads' }),
-          local: new LocalDriver({ root: './storage', baseUrl: 'http://localhost:3000/files' }),
+      // Nest injects the TypeORM DataSource (the default connection; `connectionName` for another).
+      store: typeOrmMediaStore(),
+      imageProcessor: new SharpImageProcessor(),
+      collections: [
+        { name: 'avatar', single: true, acceptsMimeTypes: ['image/png', 'image/jpeg'] },
+        {
+          name: 'gallery',
+          conversions: [
+            { name: 'thumb', width: 200 },
+            { name: 'og', width: 1200, height: 630, eager: true },
+          ],
         },
-        store: new TypeOrmMediaStore(ds),
-        imageProcessor: new SharpImageProcessor(),
-        collections: [
-          { name: 'avatar', single: true, acceptsMimeTypes: ['image/png', 'image/jpeg'] },
-          {
-            name: 'gallery',
-            conversions: [
-              { name: 'thumb', width: 200 },
-              { name: 'og', width: 1200, height: 630, eager: true },
-            ],
-          },
-        ],
-      }),
+      ],
     }),
   ],
 })
@@ -92,7 +91,7 @@ export class AppModule {}
 ```
 
 <Callout type="info">
-`MediaModule` is `@Global()` — import it once and inject `MediaService` anywhere. Prefer `forRoot` (static config) when your disks don't need other providers; reach for `forRootAsync` when a disk needs an injected client or DataSource, as above.
+`MediaModule` is `@Global()` — import it once and inject `MediaService` anywhere. `StorageModule` is global by default too; MediaModule fails at boot, naming it, when it isn't registered. Use `MediaModule.forRootAsync` when the options come from configuration.
 </Callout>
 
 The `TypeOrmMediaStore` creates the `media` table on first use by default (non-destructive — see [Persistence](/docs/concepts/persistence)). Nothing else to migrate to get started.
@@ -129,7 +128,11 @@ export class PhotosController {
 }
 ```
 
-`attach` writes the bytes to the collection's disk, records a `MediaRecord`, and (because `og` is `eager`) generates that variant right away. It returns the saved record, including its `id`.
+`attach` writes the bytes to the collection's disk (the default one here), records a `MediaRecord`, and (because `og` is `eager`) generates that variant right away. It returns the saved record, including its `id`. The client's file name becomes one safe key segment (`/`, `\`, `..` and control characters are replaced), since `@nestjs/storage` refuses such keys.
+
+<Callout type="info">
+To stream uploads straight onto a disk instead of buffering them, use `@nestjs/storage`'s [`uploadToDisk()`](https://docs.nestjs.com/application/file-storage) storage engine and attach the stored key; nestjs-media doesn't wrap it.
+</Callout>
 
 </Step>
 
@@ -137,7 +140,7 @@ export class PhotosController {
 
 ## Serve it back
 
-Ask the library for a URL. Conversions are generated lazily the first time you request them, then cached:
+Ask the library for a URL: the disk's public URL when it has a `publicUrl`, else a signed one (`signedUrl()`, 15 minutes by default). Conversions are generated lazily the first time you request them, then cached:
 
 ```ts title="photos.service.ts"
 @Injectable()
@@ -157,12 +160,16 @@ export class PhotosService {
 }
 ```
 
-And the raw storage layer is always there when you don't need an entity:
+Or stream it through your app with `MediaService.serve()`, which answers `Range`, `If-None-Match` and the security headers via `@nestjs/storage`'s `serveFile()`:
 
 ```ts
-await this.media.disk('s3').put(`reports/${id}.csv`, csv, { contentType: 'text/csv' });
-const link = await this.media.disk('s3').temporaryUrl(`reports/${id}.csv`, 300);
+@Get('media/:id')
+file(@Param('id') id: string, @Req() req: Request, @Res({ passthrough: true }) res: Response) {
+  return this.media.serve(id, undefined, { req, res });
+}
 ```
+
+For files that aren't media records, use the disk directly: `Storage`/`@InjectDisk()` from `@nestjs/storage` ([docs](https://docs.nestjs.com/application/file-storage)).
 
 </Step>
 
@@ -171,11 +178,15 @@ const link = await this.media.disk('s3').temporaryUrl(`reports/${id}.csv`, 300);
 ## Troubleshooting
 
 <Callout type="warn" title="`MediaLibrary is not configured`">
-You called `media.library` without passing a `store` to `MediaModule`. The two layers are independent — add a `store` to enable layer 2, or use `media.disk(...)` for raw storage.
+You called `media.library` without passing a `store` to `MediaModule`. Add a `store` to enable the media-library layer; for plain files, use the `@nestjs/storage` disks directly.
 </Callout>
 
-<Callout type="warn" title="`temporaryUrl` throws on the local disk">
-Signed URLs need a presign-capable driver (S3). The local disk only serves stable public URLs when you give it a `baseUrl`.
+<Callout type="warn" title="`MediaModule stores files on the disks of @nestjs/storage`">
+`StorageModule.forRoot({ disks })` isn't registered (or isn't global). Register it before `MediaModule`.
+</Callout>
+
+<Callout type="warn" title="`url()` throws on the local disk">
+A `LocalDisk` has neither a public nor a signed URL until you give it `publicUrl` or `signedUrls` (then serve them with `serveSignedUrl()`). Or stream the file through your app with `MediaService.serve()`.
 </Callout>
 
 ## Next steps
@@ -183,5 +194,6 @@ Signed URLs need a presign-capable driver (S3). The local disk only serves stabl
 - [Concepts → The two layers](/docs/concepts/two-layers) — the model in depth
 - [Concepts → Uploads & multipart](/docs/concepts/uploads) — resumable tus + presigned direct
 - [Concepts → Conversions](/docs/concepts/conversions) — lazy vs eager image variants
-- [Recipes](/docs/recipes) — avatars, galleries, direct-to-S3, raw storage
+- [Recipes](/docs/recipes) — avatars, galleries, direct-to-S3, serving files
+- [Migrating to 0.x on @nestjs/storage](/docs/reference/migration) — from `StorageManager` and the old drivers
 - [Reference → Configuration](/docs/reference/configuration) — every `MediaModule` option

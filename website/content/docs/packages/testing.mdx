@@ -1,50 +1,58 @@
 ---
 title: '@dudousxd/nestjs-media-testing'
 icon: FlaskConical
-description: In-memory driver/store/session + reusable conformance suites.
+description: In-memory stores, storageOf(), and reusable conformance suites for disks and stores.
 ---
 
 import { Callout } from 'fumadocs-ui/components/callout';
 
-Test doubles and contract suites. Use it to test your own code against fast in-memory implementations, and to verify custom drivers/stores behave exactly like the built-ins.
+Test doubles and contract suites. The disk for tests is `@nestjs/storage`'s `InMemoryDisk`; this package adds the media side.
 
 ## In-memory doubles
 
 ```ts
-import {
-  InMemoryDriver,
-  InMemoryMediaStore,
-  InMemoryUploadSessionStore,
-} from '@dudousxd/nestjs-media-testing';
+import { InMemoryDisk, StorageModule } from '@nestjs/storage';
+import { InMemoryMediaStore, InMemoryUploadSessionStore } from '@dudousxd/nestjs-media-testing';
 
+StorageModule.forRoot({ disks: { mem: new InMemoryDisk() } });
 MediaModule.forRoot({
-  default: 'mem',
-  disks: { mem: new InMemoryDriver() },
   store: new InMemoryMediaStore(),
   uploadSessions: new InMemoryUploadSessionStore(),
 });
 ```
 
-Fast, dependency-free, and isolated per instance — ideal for unit tests of services that use `MediaService`, with no filesystem, database, or container.
+To build the core engines by hand, without Nest, `storageOf()` gives you a `Storage` over plain disks:
+
+```ts
+import { storageOf } from '@dudousxd/nestjs-media-testing';
+
+const disk = new InMemoryDisk();
+const library = new MediaLibrary({ storage: storageOf({ local: disk }), store: new InMemoryMediaStore() });
+await library.attach({ /* ... */ });
+expect(disk.keys()).toEqual(['Post/1/gallery/<id>/photo.png']);
+```
 
 ## Conformance suites
 
-The same contracts every built-in driver and store is verified against, exported for your custom implementations:
-
 ```ts
 import {
-  runStorageDriverConformance,
+  describeMediaDiskConformance,
   runMediaStoreConformance,
 } from '@dudousxd/nestjs-media-testing';
 
-runStorageDriverConformance('MyDriver', () => new MyDriver(/* … */));
+describeMediaDiskConformance('MyDisk', () => new MyDisk(/* … */));
+describeMediaDiskConformance('S3Disk on MinIO', () => new S3Disk(options), {
+  multipart: () => s3Multipart(options), // a function: built after beforeAll started the container
+});
 runMediaStoreConformance('MyStore', () => new MyStore(/* … */));
 ```
 
-Each registers a `describe` block exercising the full behavioral contract — round-trips, `FileNotFoundError` semantics, idempotent delete, ordering, `nextOrder`, and more. If your driver or store passes, it drops into the library unchanged.
+`describeMediaDiskConformance(name, makeDisk, { multipart?, prefix? })` checks what nestjs-media relies on from a `StorageDisk` (`@nestjs/storage` tests its own disks): streamed writes of unknown length and the size `put()` reports, `contentLength` mismatches writing nothing, inclusive and suffix ranges, `StorageFileNotFoundError`, batch delete, flat key-ordered listing folded into folders and paged without repeats, and streamed copies. With `multipart`, it also checks the side-car against the disk: parts assembled at a key the disk reads back with its content type, abort, presigned part URLs, and `listFolders` agreeing with the fold. Every test writes under its own random prefix, so a shared bucket is fine.
+
+`runMediaStoreConformance` exercises the `MediaStore` contract — ordering, `nextOrder`, owner filtering, and more.
 
 <Callout type="info">
-This is how the built-ins stay honest: `disk-s3` runs the storage suite against MinIO; the four ORM stores all run the store suite (in-memory, sqlite, and real Postgres). Your custom backend gets the same guarantee for free.
+The repo runs the disk suite against `InMemoryDisk`, `LocalDisk`, and `S3Disk` + `s3Multipart()` on MinIO; the four ORM stores run the store suite (in-memory, sqlite, and real Postgres).
 </Callout>
 
-See [Recipes → Custom driver](/docs/recipes/custom-driver) and [Custom store](/docs/recipes/custom-store).
+See [Custom store](/docs/recipes/custom-store). A custom disk subclasses `@nestjs/storage`'s `StorageDisk` ([docs](https://docs.nestjs.com/application/file-storage)).

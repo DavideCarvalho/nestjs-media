@@ -8,10 +8,7 @@
     "direct-s3-upload",
     "serving-files",
     "multi-disk",
-    "custom-driver",
     "custom-store",
-    "mail-attachments",
-    "testing",
-    "raw-storage"
+    "testing"
   ]
 }
