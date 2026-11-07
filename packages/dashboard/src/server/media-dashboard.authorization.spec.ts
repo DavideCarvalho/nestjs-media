@@ -9,9 +9,7 @@ import { NestFactory } from '@nestjs/core';
 import { afterEach, describe, expect, it } from 'vitest';
 import { CAN_ANYONE_METADATA } from './controller-decorators.js';
 import { MediaConsoleActionsController } from './media-console-actions.controller.js';
-import { MediaConsoleAuthController } from './media-console-auth.controller.js';
 import { MediaConsoleReadController } from './media-console-read.controller.js';
-import { MediaConsoleGuard } from './media-console.guard.js';
 import { MediaDashboardUiController } from './media-dashboard-ui.controller.js';
 import { MediaDashboardModule } from './media-dashboard.module.js';
 
@@ -85,7 +83,6 @@ describe('can-anyone mark', () => {
       MediaDashboardUiController,
       MediaConsoleReadController,
       MediaConsoleActionsController,
-      MediaConsoleAuthController,
     ]) {
       expect(Reflect.getMetadata(CAN_ANYONE_METADATA, controller)).toBe(true);
     }
@@ -97,13 +94,12 @@ describe('with the global AuthorizationGuard and no decorators', () => {
     const url = await boot(MediaDashboardModule.forRoot({ actions: true }));
 
     expect((await fetch(`${url}/media/api/disks`)).status).toBe(200);
-    expect(await (await fetch(`${url}/media/api/me`)).json()).toEqual({ authRequired: false });
     // The page controller is reached: no SPA bundle in this workspace, so its own "not built" 404.
     expect((await fetch(`${url}/media`)).status).toBe(404);
   });
 
   it('forRootAsync too', async () => {
-    const url = await boot(MediaDashboardModule.forRootAsync({ useAuth: () => undefined }));
+    const url = await boot(MediaDashboardModule.forRootAsync());
 
     expect((await fetch(`${url}/media/api/disks`)).status).toBe(200);
   });
@@ -124,7 +120,6 @@ describe('decorators: [Can(ConsolePolicy, "console")]', () => {
       () =>
         MediaDashboardModule.forRootAsync({
           actions: true,
-          useAuth: () => undefined,
           decorators: [Can(ConsolePolicy, 'console')],
         }),
     ],
@@ -135,9 +130,6 @@ describe('decorators: [Can(ConsolePolicy, "console")]', () => {
       expect((await fetch(`${url}/media/api/disks`)).status).toBe(401);
       expect((await fetch(`${url}/media/api/disks`, as('viewer'))).status).toBe(403);
       expect((await fetch(`${url}/media/api/disks`, as('admin'))).status).toBe(200);
-
-      expect((await fetch(`${url}/media/api/me`, as('viewer'))).status).toBe(403);
-      expect((await fetch(`${url}/media/api/me`, as('admin'))).status).toBe(200);
 
       expect((await fetch(`${url}/media`, as('viewer'))).status).toBe(403);
       expect((await fetch(`${url}/media`, as('admin'))).status).toBe(404); // reached, not built
@@ -158,19 +150,12 @@ describe('no leakage between registrations', () => {
     expect((await fetch(`${first}/media/api/disks`)).status).toBe(401);
     await closeApp();
 
-    for (const controller of [
-      MediaDashboardUiController,
-      MediaConsoleReadController,
-      MediaConsoleAuthController,
-    ]) {
+    for (const controller of [MediaDashboardUiController, MediaConsoleReadController]) {
       expect(Reflect.getMetadata('authorization:can', controller)).toBeUndefined();
     }
-    expect(Reflect.getOwnMetadata(GUARDS_METADATA, MediaConsoleReadController)).toEqual([
-      MediaConsoleGuard,
-    ]);
+    expect(Reflect.getMetadata(GUARDS_METADATA, MediaConsoleReadController)).toBeUndefined();
 
     const second = await boot(MediaDashboardModule.forRoot());
     expect((await fetch(`${second}/media/api/disks`)).status).toBe(200);
-    expect((await fetch(`${second}/media/api/me`)).status).toBe(200);
   });
 });

@@ -22,8 +22,6 @@ import './styles.css';
 
 const TOPOLOGY: Topology = { hasStore: true, hasUploads: true, disks: 3, actions: true };
 
-const ME = { user: { id: 'u_1', name: 'ops@aviary.dev', roles: ['media:admin'] } };
-
 const DISKS: DiskListResponse = {
   disks: [
     {
@@ -231,7 +229,6 @@ function json(body: unknown): Response {
 
 /** Route a console API request to a fixture. `path` is everything after `/media/api`. */
 function fixtureFor(path: string, search: URLSearchParams): Response | undefined {
-  if (path === '/me') return json(ME);
   if (path === '/topology') return json(TOPOLOGY);
   if (path === '/disks') return json(DISKS);
   if (path.endsWith('/objects')) {

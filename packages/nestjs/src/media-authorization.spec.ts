@@ -32,7 +32,7 @@ class MediaPolicy {
   }
 }
 
-/** Rejects unless `x-test-token: ok` — a stand-in for the library's existing `guards` option. */
+/** Rejects unless `x-test-token: ok` — a stand-in for an authentication guard. */
 @Injectable()
 class TokenGuard implements CanActivate {
   canActivate(context: ExecutionContext): boolean {
@@ -131,13 +131,6 @@ describe('with the global AuthorizationGuard and no decorators', () => {
 
     expect((await createUpload(baseUrl)).status).toBe(201);
   });
-
-  it('the existing `guards` option keeps deciding who gets in', async () => {
-    const baseUrl = await boot(MediaModule.forRoot({ ...options(), guards: [TokenGuard] }));
-
-    expect((await createUpload(baseUrl)).status).toBe(401);
-    expect((await createUpload(baseUrl, { 'x-test-token': 'ok' })).status).toBe(201);
-  });
 });
 
 describe('decorators: [Can(MediaPolicy, "upload")]', () => {
@@ -176,12 +169,11 @@ describe('decorators: [Can(MediaPolicy, "upload")]', () => {
     });
   }
 
-  it('composes with `guards`: both must pass', async () => {
+  it('UseGuards(...) and Can(...) compose: both must pass', async () => {
     const baseUrl = await boot(
       MediaModule.forRoot({
         ...options(),
-        guards: [TokenGuard],
-        decorators: [Can(MediaPolicy, 'upload')],
+        decorators: [UseGuards(TokenGuard), Can(MediaPolicy, 'upload')],
       }),
     );
 
@@ -200,7 +192,6 @@ describe('no leakage between registrations', () => {
     const first = await boot(
       MediaModule.forRoot({
         ...options(),
-        guards: [TokenGuard],
         decorators: [Can(MediaPolicy, 'upload'), UseGuards(TokenGuard)],
       }),
     );
@@ -209,21 +200,10 @@ describe('no leakage between registrations', () => {
 
     // The shared classes were never decorated…
     expect(Reflect.getMetadata('authorization:can', MediaUploadController)).toBeUndefined();
-    expect(Reflect.getMetadata(GUARDS_METADATA, MediaUploadController)).toEqual([TokenGuard]);
+    expect(Reflect.getMetadata(GUARDS_METADATA, MediaUploadController)).toBeUndefined();
 
-    // …so a registration without decorators (or guards) is open again.
+    // …so a registration without decorators is open again.
     const second = await boot(MediaModule.forRoot(options()));
     expect((await createUpload(second)).status).toBe(201);
-    await closeApp();
-
-    // And a later registration re-stamping the base class's guards doesn't touch an earlier
-    // decorated registration still running.
-    const decorated = MediaModule.forRoot({
-      ...options(),
-      decorators: [Can(MediaPolicy, 'upload')],
-    });
-    MediaModule.forRoot({ ...options(), guards: [TokenGuard] });
-    const third = await boot(decorated);
-    expect((await createUpload(third, { 'x-role': 'uploader' })).status).toBe(201);
   });
 });

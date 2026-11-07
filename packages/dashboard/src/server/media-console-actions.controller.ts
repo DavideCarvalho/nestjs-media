@@ -9,10 +9,8 @@ import {
   Post,
   Query,
   Req,
-  UseGuards,
 } from '@nestjs/common';
 import { OpenToAuthorization } from './controller-decorators.js';
-import { MediaConsoleGuard } from './media-console.guard.js';
 import { MediaConsoleService } from './media-console.service.js';
 
 interface CopyMoveBody {
@@ -29,13 +27,11 @@ interface CreateFolderBody {
 /**
  * Destructive JSON API for the /media console. Only registered when the host opts in with
  * `MediaDashboardModule.forRoot({ actions: true })` (default off). Bare `@Controller()` — the path
- * prefix comes from `RouterModule`, sharing the API base with the read controller. Gated by
- * `MediaConsoleGuard` (session cookie) when the host configured `auth`.
+ * prefix comes from `RouterModule`, sharing the API base with the read controller.
  */
-// Open to `@nestjs/authorization`'s deny-by-default guard; the console's own auth/guards and the
-// host's `decorators` decide access.
+// Open to `@nestjs/authorization`'s deny-by-default guard; the host's `decorators` (or its own
+// subclass, with `routes: false`) decide access.
 @OpenToAuthorization()
-@UseGuards(MediaConsoleGuard)
 @Controller()
 export class MediaConsoleActionsController {
   constructor(@Inject(MediaConsoleService) private readonly service: MediaConsoleService) {}

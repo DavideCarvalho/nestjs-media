@@ -8,5 +8,5 @@
     "types": ["node", "reflect-metadata"],
     "lib": ["ES2022", "DOM"]
   },
-  "include": ["src/server/**/*.spec.ts", "src/client/**/*.spec.ts", "src/react/**/*.spec.tsx"]
+  "include": ["src/server/**/*.spec.ts", "src/client/**/*.spec.ts"]
 }

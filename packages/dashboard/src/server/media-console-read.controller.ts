@@ -7,7 +7,6 @@ import {
   Query,
   Res,
   StreamableFile,
-  UseGuards,
 } from '@nestjs/common';
 import type {
   CollectionsResponse,
@@ -22,7 +21,6 @@ import type {
 } from '../client/types.js';
 import { attachmentDisposition, downloadFilename } from './content-disposition.js';
 import { OpenToAuthorization } from './controller-decorators.js';
-import { MediaConsoleGuard } from './media-console.guard.js';
 import {
   MediaConsoleService,
   RangeNotSatisfiableException,
@@ -68,7 +66,7 @@ export function parseRangeHeader(header: string | undefined): RequestedReadRange
 
 /** The response surface this controller drives, structurally typed: Express' response and Fastify's
  *  reply both expose `status()`, and both reach the Node response for `setHeader` (Fastify via
- *  `.raw`). Keeps the package free of a platform-specific type dependency, like `auth/response.ts`. */
+ *  `.raw`). Keeps the package free of a platform-specific type dependency. */
 interface ConsoleHttpResponse {
   status?(code: number): unknown;
   statusCode?: number;
@@ -98,12 +96,10 @@ function setStatus(response: ConsoleHttpResponse, code: number): void {
 /**
  * Read-only JSON API for the /media console. Bare `@Controller()` — the path prefix is applied by
  * `RouterModule` (set in `MediaDashboardModule.forRoot({ apiBasePath })`). Always mounted.
- * `MediaConsoleGuard` gates it on a session cookie when the host configured `auth` (else a no-op).
  */
-// Open to `@nestjs/authorization`'s deny-by-default guard; the console's own auth/guards and the
-// host's `decorators` decide access.
+// Open to `@nestjs/authorization`'s deny-by-default guard; the host's `decorators` (or its own
+// subclass, with `routes: false`) decide access.
 @OpenToAuthorization()
-@UseGuards(MediaConsoleGuard)
 @Controller()
 export class MediaConsoleReadController {
   constructor(@Inject(MediaConsoleService) private readonly service: MediaConsoleService) {}

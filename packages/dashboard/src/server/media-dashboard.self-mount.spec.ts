@@ -8,7 +8,6 @@ import { NestFactory } from '@nestjs/core';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
   MediaConsoleActionsController,
-  MediaConsoleAuthController,
   MediaConsoleReadController,
   MediaConsoleService,
   MediaDashboardModule,
@@ -61,10 +60,6 @@ class ConsoleReadController extends MediaConsoleReadController {}
 @Controller('media/api')
 class ConsoleActionsController extends MediaConsoleActionsController {}
 
-@Can(ConsolePolicy, 'console')
-@Controller('media/api')
-class ConsoleAuthController extends MediaConsoleAuthController {}
-
 let app: Awaited<ReturnType<typeof NestFactory.create>> | undefined;
 
 function running() {
@@ -105,16 +100,13 @@ const as = (role?: string): RequestInit => (role ? { headers: { 'x-role': role }
 describe('routes: false', () => {
   for (const [name, register] of [
     ['forRoot', () => MediaDashboardModule.forRoot({ actions: true, routes: false })],
-    [
-      'forRootAsync',
-      () => MediaDashboardModule.forRootAsync({ useAuth: () => undefined, routes: false }),
-    ],
+    ['forRootAsync', () => MediaDashboardModule.forRootAsync({ routes: false })],
   ] as const) {
     it(`${name}: mounts no console route, the service still works`, async () => {
       const url = await boot(register(), []);
 
       expect((await fetch(`${url}/media/api/disks`)).status).toBe(404);
-      expect((await fetch(`${url}/media/api/me`)).status).toBe(404);
+      expect((await fetch(`${url}/media`)).status).toBe(404);
       expect(running().get(MediaConsoleService)).toBeInstanceOf(MediaConsoleService);
     });
   }
@@ -126,7 +118,6 @@ describe('console mounted by the host, protected with @Can(...)', () => {
       ConsolePageController,
       ConsoleReadController,
       ConsoleActionsController,
-      ConsoleAuthController,
     ]);
 
     expect((await fetch(`${url}/media/api/disks`)).status).toBe(401);
@@ -135,11 +126,6 @@ describe('console mounted by the host, protected with @Can(...)', () => {
     expect(disks.status).toBe(200);
     expect(JSON.stringify(await disks.json())).toContain('primary');
 
-    expect((await fetch(`${url}/media/api/me`, as('viewer'))).status).toBe(403);
-    expect(await (await fetch(`${url}/media/api/me`, as('admin'))).json()).toEqual({
-      authRequired: false,
-    });
-
     expect((await fetch(`${url}/media`, as('viewer'))).status).toBe(403);
     expect((await fetch(`${url}/media`, as('admin'))).status).toBe(404); // reached, not built
 
@@ -147,20 +133,5 @@ describe('console mounted by the host, protected with @Can(...)', () => {
       fetch(`${url}/media/api/disks/primary/object?key=a.txt`, { method: 'DELETE', ...as(role) });
     expect((await remove('viewer')).status).toBe(403);
     expect([401, 403, 404]).not.toContain((await remove('admin')).status);
-  });
-
-  it("the subclasses resolve the controllers' @Optional() dependencies (built-in auth reaches them)", async () => {
-    const url = await boot(
-      MediaDashboardModule.forRoot({
-        routes: false,
-        auth: { secret: 'x'.repeat(32), login: () => null },
-      }),
-      [ConsoleReadController, ConsoleAuthController],
-    );
-
-    // MEDIA_CONSOLE_AUTH reached the auth subclass (an `@Optional()` dep): it now asks for a login…
-    expect((await fetch(`${url}/media/api/me`, as('admin'))).status).toBe(401);
-    // …and the read subclass inherits the built-in `MediaConsoleGuard` cookie gate.
-    expect((await fetch(`${url}/media/api/disks`, as('admin'))).status).toBe(401);
   });
 });

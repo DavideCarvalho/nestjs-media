@@ -26,7 +26,8 @@ interface CompleteBody {
   disk?: string;
 }
 
-// Open to `@nestjs/authorization`'s deny-by-default guard; `guards`/`decorators` decide access.
+// Open to `@nestjs/authorization`'s deny-by-default guard; the host's `decorators` (or its own
+// subclass, with `routes: false`) decide access.
 @OpenToAuthorization()
 @Controller('media/uploads/direct')
 export class MediaDirectUploadController {

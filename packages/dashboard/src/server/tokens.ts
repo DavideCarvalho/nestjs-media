@@ -18,11 +18,6 @@ export const MEDIA_DASHBOARD_API_PATH: symbol = Symbol('MEDIA_DASHBOARD_API_PATH
 /** Carries whether destructive action routes were enabled (`options.actions`). */
 export const MEDIA_DASHBOARD_ACTIONS: symbol = Symbol('MEDIA_DASHBOARD_ACTIONS');
 
-/** Carries the resolved console-auth config (`ResolvedConsoleAuth | null`) to the guard/controller. */
-export const MEDIA_CONSOLE_AUTH: symbol = Symbol('MEDIA_CONSOLE_AUTH');
-/** Carries the cookie `Path` (the JSON API base) so the session cookie rides every API request. */
-export const MEDIA_CONSOLE_COOKIE_PATH: symbol = Symbol('MEDIA_CONSOLE_COOKIE_PATH');
-
 /** Carries the host's `ObjectInsightProvider[]` (`options.objectInsights`) to the console service. */
 export const MEDIA_CONSOLE_OBJECT_INSIGHTS: symbol = Symbol('MEDIA_CONSOLE_OBJECT_INSIGHTS');
 

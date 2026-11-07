@@ -37,35 +37,20 @@
       "types": "./dist/client/index.d.ts",
       "import": "./dist/client/index.js",
       "default": "./dist/client/index.js"
-    },
-    "./react": {
-      "types": "./dist/react/index.d.ts",
-      "import": "./dist/react/index.js",
-      "default": "./dist/react/index.js"
     }
   },
   "files": [
     "dist"
   ],
   "scripts": {
-    "build": "vite build && tsup && tsc -p tsconfig.client.json && tsc -p tsconfig.react.json",
-    "typecheck": "tsc -p tsconfig.server.json --noEmit && tsc -p tsconfig.app.json --noEmit && tsc -p tsconfig.react.json --noEmit && tsc -p tsconfig.spec.json --noEmit"
+    "build": "vite build && tsup && tsc -p tsconfig.client.json",
+    "typecheck": "tsc -p tsconfig.server.json --noEmit && tsc -p tsconfig.app.json --noEmit && tsc -p tsconfig.spec.json --noEmit"
   },
   "peerDependencies": {
     "@dudousxd/nestjs-media-core": ">=0.8.0 <1.0.0",
     "@nestjs/common": "^10.0.0 || ^11.0.0 || ^12.0.0",
     "@nestjs/core": "^10.0.0 || ^11.0.0 || ^12.0.0",
-    "react": "^18.0.0 || ^19.0.0",
-    "react-dom": "^18.0.0 || ^19.0.0",
     "rxjs": "^7.0.0"
-  },
-  "peerDependenciesMeta": {
-    "react": {
-      "optional": true
-    },
-    "react-dom": {
-      "optional": true
-    }
   },
   "devDependencies": {
     "@base-ui/react": "1.9.0",

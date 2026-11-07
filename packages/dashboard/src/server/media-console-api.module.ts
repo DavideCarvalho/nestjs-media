@@ -1,71 +1,26 @@
-import {
-  type CanActivate,
-  type DynamicModule,
-  Module,
-  type ModuleMetadata,
-  type Provider,
-  type Type,
-} from '@nestjs/common';
+import { type DynamicModule, Module, type ModuleMetadata, type Provider } from '@nestjs/common';
 import { decoratedController } from './controller-decorators.js';
-import { GUARDS_METADATA, baseGuards, isGuardClass, stampGuards } from './guards.js';
 import { MediaConsoleActionsController } from './media-console-actions.controller.js';
-import { MediaConsoleAuthController } from './media-console-auth.controller.js';
 import { MediaConsoleReadController } from './media-console-read.controller.js';
-import { MediaConsoleGuard } from './media-console.guard.js';
 import { MediaConsoleService } from './media-console.service.js';
 import type { ObjectUrlConfig } from './object-urls.js';
 import {
-  MEDIA_CONSOLE_AUTH,
-  MEDIA_CONSOLE_COOKIE_PATH,
   MEDIA_CONSOLE_OBJECT_INSIGHTS,
   MEDIA_CONSOLE_OBJECT_URLS,
   MEDIA_DASHBOARD_ACTIONS,
 } from './tokens.js';
 
-/**
- * `MediaConsoleReadController`/`MediaConsoleActionsController`'s own, pristine
- * `@UseGuards(MediaConsoleGuard)` metadata, captured once at module-load time — the baseline every
- * `register()` call's host `guards` append onto (see `stampGuards` in `./guards.js`).
- */
-const READ_BASE_GUARDS = baseGuards(MediaConsoleReadController);
-const ACTIONS_BASE_GUARDS = baseGuards(MediaConsoleActionsController);
-
-/**
- * Give a decorated subclass its OWN copy of this registration's guard list, so a later
- * registration re-stamping the shared base class (`stampGuards`) can't change it.
- */
-function ownGuards(
-  target: Type,
-  base: Array<Type<CanActivate> | CanActivate>,
-  guards: Array<Type<CanActivate> | CanActivate> | undefined,
-): void {
-  Reflect.defineMetadata(GUARDS_METADATA, [...base, ...(guards ?? [])], target);
-}
-
 interface ApiModuleOptions {
   actions: boolean;
-  /** Cookie `Path` — the JSON API base — so the session cookie rides every console API request. */
-  cookiePath: string;
-  /** Provider for `MEDIA_CONSOLE_AUTH` — a `useValue` (forRoot) or a `useFactory` (forRootAsync). */
-  authProvider: Provider;
   /** Provider for `MEDIA_CONSOLE_OBJECT_INSIGHTS` — the host's object-annotation providers.
    *  Omitted binds the empty list, which is the no-op the console renders nothing for. */
   insightsProvider?: Provider;
   /** Resolved object-URL strategy + the API mount it builds proxy URLs against. */
   objectUrls: ObjectUrlConfig;
-  /** Extra imports the auth factory's `inject` deps (or a guard class's own deps) live in. */
+  /** Extra imports the insights factory's `inject` deps (or a decorator's guards' deps) live in. */
   imports?: ModuleMetadata['imports'];
   /**
-   * Guard classes (or instances) fronting the read + action controllers — APPENDED to their own
-   * built-in `MediaConsoleGuard` (session-cookie) gate, so a request must pass BOTH. Deliberately
-   * NOT applied to `MediaConsoleAuthController`: it MINTS the session cookie the built-in gate (and
-   * any host guard reusing that same cookie) checks for, so it can't be made to require the very
-   * auth it grants — mirrors `@dudousxd/nestjs-telescope`'s own auth controller staying outside its
-   * `stampGuards` call.
-   */
-  guards?: Array<Type<CanActivate> | CanActivate>;
-  /**
-   * Class decorators applied to EVERY controller this module mounts (read, auth, actions) — see
+   * Class decorators applied to EVERY controller this module mounts (read, actions) — see
    * `MediaDashboardOptions.decorators`. Each call decorates fresh subclasses, never the shared
    * classes, so decorators never leak from one registration into the next.
    */
@@ -78,19 +33,12 @@ interface ApiModuleOptions {
 }
 
 /**
- * Holds the console's JSON API: the read controller (always), the actions controller (only when
- * `actions: true`), and the auth controller (always — it mints the session the guard checks, so it
- * is never itself guarded). The read/action controllers carry `MediaConsoleGuard`, a no-op unless
- * the host configured `auth`, plus any host `guards` (see {@link ApiModuleOptions.guards}) — both
- * gates must pass.
+ * Holds the console's JSON API: the read controller (always) and the actions controller (only when
+ * `actions: true`). Who reaches them is the host's call — `decorators`, or its own controllers.
  */
 @Module({})
 export class MediaConsoleApiModule {
   static register(options: ApiModuleOptions): DynamicModule {
-    stampGuards(options.guards, [
-      [MediaConsoleReadController, READ_BASE_GUARDS],
-      [MediaConsoleActionsController, ACTIONS_BASE_GUARDS],
-    ]);
     return {
       module: MediaConsoleApiModule,
       imports: options.imports ?? [],
@@ -98,51 +46,22 @@ export class MediaConsoleApiModule {
         options.routes === false
           ? []
           : [
-              decoratedController(MediaConsoleReadController, options.decorators, (target) =>
-                ownGuards(target, READ_BASE_GUARDS, options.guards),
-              ),
-              decoratedController(MediaConsoleAuthController, options.decorators),
+              decoratedController(MediaConsoleReadController, options.decorators),
               ...(options.actions
-                ? [
-                    decoratedController(
-                      MediaConsoleActionsController,
-                      options.decorators,
-                      (target) => ownGuards(target, ACTIONS_BASE_GUARDS, options.guards),
-                    ),
-                  ]
+                ? [decoratedController(MediaConsoleActionsController, options.decorators)]
                 : []),
             ],
       providers: [
         MediaConsoleService,
-        MediaConsoleGuard,
         { provide: MEDIA_DASHBOARD_ACTIONS, useValue: options.actions },
-        { provide: MEDIA_CONSOLE_COOKIE_PATH, useValue: options.cookiePath },
         { provide: MEDIA_CONSOLE_OBJECT_URLS, useValue: options.objectUrls },
-        options.authProvider,
         options.insightsProvider ?? {
           provide: MEDIA_CONSOLE_OBJECT_INSIGHTS,
           useValue: [],
         },
-        // Class guards need a DI provider so Nest can instantiate them in THIS module's context
-        // (where `imports` above resolves their dependencies). An already-instantiated guard needs
-        // none — it's used as-is.
-        ...(options.guards ?? []).filter(isGuardClass),
       ],
-      // MEDIA_CONSOLE_AUTH is exported (not just provided) because MediaDashboardUiController —
-      // hosted in MediaDashboardModule, which imports THIS module — reads it to decide whether to
-      // hand an unauthenticated navigation to the host's `unauthenticatedPage`. Exporting keeps the
-      // single `authProvider` instance shared; re-providing the same factory in both modules would
-      // run a `forRootAsync` host's `useAuth` twice.
-      // The rest is exported for a host mounting the controllers itself (`routes: false`): a subclass of
-      // the auth controller, or `MediaConsoleGuard` on the read/action ones, injects them in the
-      // host's module.
-      exports: [
-        MediaConsoleService,
-        MediaConsoleGuard,
-        MEDIA_CONSOLE_AUTH,
-        MEDIA_CONSOLE_COOKIE_PATH,
-        MEDIA_DASHBOARD_ACTIONS,
-      ],
+      // For a host mounting the controllers itself (`routes: false`): its subclasses inject these.
+      exports: [MediaConsoleService, MEDIA_DASHBOARD_ACTIONS],
     };
   }
 }

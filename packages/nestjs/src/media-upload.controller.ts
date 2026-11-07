@@ -32,7 +32,8 @@ interface ReqLike {
  * `application/offset+octet-stream` (e.g. `express.raw({ type: 'application/offset+octet-stream' })`)
  * so PATCH bodies arrive as Buffers.
  */
-// Open to `@nestjs/authorization`'s deny-by-default guard; `guards`/`decorators` decide access.
+// Open to `@nestjs/authorization`'s deny-by-default guard; the host's `decorators` (or its own
+// subclass, with `routes: false`) decide access.
 @OpenToAuthorization()
 @Controller('media/uploads')
 export class MediaUploadController {
