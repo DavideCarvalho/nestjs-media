@@ -42,7 +42,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.spec.json --noEmit"
   },
   "dependencies": {
-    "@dudousxd/nestjs-diagnostics": "0.7.2"
+    "@dudousxd/nestjs-diagnostics": ">=0.7.0 <1.0.0"
   },
   "devDependencies": {
     "tsup": "8.5.1",

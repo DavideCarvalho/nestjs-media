@@ -63,8 +63,8 @@ importers:
   packages/core:
     dependencies:
       '@dudousxd/nestjs-diagnostics':
-        specifier: 0.7.2
-        version: 0.7.2(@nestjs/common@12.3.2(reflect-metadata@0.2.2)(rxjs@7.8.2))(@nestjs/core@12.3.2)(reflect-metadata@0.2.2)
+        specifier: '>=0.7.0 <1.0.0'
+        version: 0.8.0(@nestjs/common@12.3.2(reflect-metadata@0.2.2)(rxjs@7.8.2))(@nestjs/core@12.3.2)(reflect-metadata@0.2.2)
     devDependencies:
       '@nestjs/common':
         specifier: 12.3.2
@@ -479,8 +479,8 @@ importers:
   packages/telescope:
     devDependencies:
       '@dudousxd/nestjs-diagnostics':
-        specifier: 0.7.2
-        version: 0.7.2(@nestjs/common@12.3.2(reflect-metadata@0.2.2)(rxjs@7.8.2))(@nestjs/core@12.3.2)(reflect-metadata@0.2.2)
+        specifier: 0.8.0
+        version: 0.8.0(@nestjs/common@12.3.2(reflect-metadata@0.2.2)(rxjs@7.8.2))(@nestjs/core@12.3.2)(reflect-metadata@0.2.2)
       '@dudousxd/nestjs-media-core':
         specifier: workspace:*
         version: link:../core
@@ -849,8 +849,8 @@ packages:
       tsx:
         optional: true
 
-  '@dudousxd/nestjs-diagnostics@0.7.2':
-    resolution: {integrity: sha512-PHlL8Fdb6kfFRqU3RHJtIUc5rz8u738Fjx3YyaDQaVpn5UBdNC2hhcaFyK+XO7c6luzcSlQAe76aWwRcaeuDRA==}
+  '@dudousxd/nestjs-diagnostics@0.8.0':
+    resolution: {integrity: sha512-3frnGK2zyLHGc32OSu2iJu36a3L8ZMBFSwMKJyMz7AToUTfeBmU/NF135GzHdu1bMCzL5f4b7rmzvj7FmNfIZg==}
     engines: {node: '>=20'}
     peerDependencies:
       '@nestjs/common': ^10 || ^11 || ^12
@@ -4864,7 +4864,7 @@ snapshots:
     optionalDependencies:
       '@nestjs/common': 12.3.2(reflect-metadata@0.2.2)(rxjs@7.8.2)
 
-  '@dudousxd/nestjs-diagnostics@0.7.2(@nestjs/common@12.3.2(reflect-metadata@0.2.2)(rxjs@7.8.2))(@nestjs/core@12.3.2)(reflect-metadata@0.2.2)':
+  '@dudousxd/nestjs-diagnostics@0.8.0(@nestjs/common@12.3.2(reflect-metadata@0.2.2)(rxjs@7.8.2))(@nestjs/core@12.3.2)(reflect-metadata@0.2.2)':
     optionalDependencies:
       '@nestjs/common': 12.3.2(reflect-metadata@0.2.2)(rxjs@7.8.2)
       '@nestjs/core': 12.3.2(@nestjs/common@12.3.2(reflect-metadata@0.2.2)(rxjs@7.8.2))(@nestjs/platform-express@12.3.2)(reflect-metadata@0.2.2)(rxjs@7.8.2)
