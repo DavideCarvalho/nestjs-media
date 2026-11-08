@@ -190,6 +190,15 @@ describe('MediaConsoleService — listing', () => {
     });
     await expect(service.listObjects('nope', {})).rejects.toMatchObject({ status: 404 });
   });
+
+  it('answers 400 for a forged cursor, not 500', async () => {
+    const service = new MediaConsoleService(fakeStorage(), null, null, true);
+    for (const cursor of ['not-a-cursor', Buffer.from('{"o":-1}').toString('base64url')]) {
+      const error = await service.listObjects('primary', { cursor }).catch((e: unknown) => e);
+      expect(error).toBeInstanceOf(HttpException);
+      expect(error).toMatchObject({ status: 400 });
+    }
+  });
 });
 
 describe('MediaConsoleService — actions', () => {

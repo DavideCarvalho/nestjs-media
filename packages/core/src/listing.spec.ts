@@ -2,6 +2,7 @@ import { InMemoryDisk } from '@nestjs/storage';
 import { describe, expect, it, vi } from 'vitest';
 import {
   DEFAULT_FOLDER_LISTING_LIMIT,
+  InvalidListingCursorError,
   MAX_FOLDER_LISTING_LIMIT,
   foldListing,
   folderListingLimit,
@@ -75,5 +76,14 @@ describe('folder listing page size', () => {
     await expect(listFolderLevel(disk, 'docs/', { limit: 0 }, driver)).rejects.toThrow(RangeError);
     await expect(foldListing(disk, 'docs/', { limit: 0 })).rejects.toThrow(RangeError);
     expect(calls).toEqual([]);
+  });
+
+  it('a forged cursor is an InvalidListingCursorError (a TypeError with status 400)', async () => {
+    const error = await foldListing(new InMemoryDisk(), 'docs/', { cursor: 'forged' }).catch(
+      (e: unknown) => e,
+    );
+    expect(error).toBeInstanceOf(InvalidListingCursorError);
+    expect(error).toBeInstanceOf(TypeError);
+    expect(error).toMatchObject({ status: 400, code: 'MEDIA_INVALID_CURSOR' });
   });
 });

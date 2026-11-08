@@ -102,9 +102,13 @@ function isAddressable(key: string): boolean {
   }
 }
 
+/** Core errors that carry a client `status` (400). */
+const CORE_CLIENT_ERRORS = new Set(['InvalidMediaKeyError', 'InvalidListingCursorError']);
+
 /**
  * Storage errors as HTTP: `@nestjs/storage`'s errors carry a `status` (404 missing file, 400
- * invalid key, 409 key conflict, 416 range) that Nest's exception filter doesn't read on its own.
+ * invalid key, 409 key conflict, 416 range) that Nest's exception filter doesn't read on its own;
+ * so do the core's `InvalidMediaKeyError` and `InvalidListingCursorError` (400).
  * An object store failure (`StorageServiceError`, no status) stays a 500.
  */
 function toHttp(error: unknown): unknown {
@@ -112,7 +116,8 @@ function toHttp(error: unknown): unknown {
   if (error instanceof StorageFileNotFoundError) return new NotFoundException(error.message);
   const status = (error as { status?: unknown } | null)?.status;
   if (
-    (error instanceof StorageError || (error as Error | null)?.name === 'InvalidMediaKeyError') &&
+    (error instanceof StorageError ||
+      CORE_CLIENT_ERRORS.has((error as Error | null)?.name ?? '')) &&
     typeof status === 'number'
   ) {
     return new HttpException((error as Error).message, status);

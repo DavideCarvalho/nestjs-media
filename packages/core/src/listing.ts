@@ -55,6 +55,19 @@ function encode(cursor: FoldCursor): string {
   return Buffer.from(JSON.stringify(cursor)).toString('base64url');
 }
 
+/**
+ * A `cursor` that no previous page returned (forged or corrupted). A `TypeError` carrying
+ * `status` 400, like `InvalidMediaKeyError`, so an HTTP layer can answer it as a client mistake.
+ */
+export class InvalidListingCursorError extends TypeError {
+  readonly code = 'MEDIA_INVALID_CURSOR';
+  readonly status = 400;
+  constructor() {
+    super('foldListing(): `cursor` must be the cursor of a previous page');
+    this.name = 'InvalidListingCursorError';
+  }
+}
+
 function decode(cursor: string | undefined): FoldCursor {
   if (!cursor) return { o: 0 };
   try {
@@ -63,7 +76,7 @@ function decode(cursor: string | undefined): FoldCursor {
   } catch {
     // fall through
   }
-  throw new TypeError('foldListing(): `cursor` must be the cursor of a previous page');
+  throw new InvalidListingCursorError();
 }
 
 /**
