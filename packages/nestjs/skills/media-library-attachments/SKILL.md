@@ -126,7 +126,7 @@ user.avatar = attachment.toJSON();           // persist the JSON on your column
 const url = await this.media.attachments.url(attachment, 'thumb');
 
 // rehydrate a stored column value later:
-import { Attachment } from '@dudousxd/nestjs-media/storage';
+import { Attachment } from '@dudousxd/nestjs-media-core';
 const restored = Attachment.fromJSON(user.avatar);
 ```
 
@@ -139,7 +139,7 @@ const restored = Attachment.fromJSON(user.avatar);
 //   "MediaLibrary is not configured. Pass a `store` to MediaModule.forRoot ..."
 this.media.library.attach({ /* ... */ });
 
-// Correct — either configure a store, or use the column model / raw storage.
+// Correct — either configure a store, or use the column model / `@nestjs/storage` directly.
 const attachment = await this.media.attachments.createFromFile(
   { fileName, mimeType, contents },
 );

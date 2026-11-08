@@ -96,9 +96,9 @@ type UploadMode = 'auto' | 'proxy' | 'direct';
 ```
 
 Resolution is most-specific-wins: **per-call ▸ per-disk ▸ global ▸ `auto`**.
-`auto` resolves to `direct` when the driver is presign/multipart-capable (S3),
+`auto` resolves to `direct` when the disk is presign/multipart-capable (S3),
 else `proxy` (local). `proxy` is always allowed; `direct` throws on a disk that
-can't presign — so forcing it fails loudly rather than silently degrading.
+can't presign and has no multipart side-car — so forcing it fails loudly rather than silently degrading.
 Source: `packages/core/src/upload-mode.ts`.
 
 ### 2. Drive the proxy engine directly
