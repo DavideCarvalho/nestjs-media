@@ -156,8 +156,9 @@ await this.media.directUploads.createUpload({ disk: 'local', key: 'a.bin' });
 await this.media.directUploads.createUpload({ disk: 's3', key: 'a.bin' });
 ```
 
-`DirectUploadManager.createUpload` looks the disk up in `multipart` and throws
-`UnsupportedOperationError` when it isn't there. A key `@nestjs/storage` would
+Every `DirectUploadManager` call (`createUpload`, `presignPart`, `completeUpload`,
+`abortUpload`) checks the key with `assertMediaKey` and looks the disk up in `multipart`,
+throwing `UnsupportedOperationError` when it isn't there. A key `@nestjs/storage` would
 refuse (`../x`, `/abs`) throws `InvalidMediaKeyError` (400 on the routes). Source:
 `packages/core/src/direct-upload.ts`.
 
