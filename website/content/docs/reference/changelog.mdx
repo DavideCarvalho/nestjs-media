@@ -4,25 +4,31 @@ icon: History
 description: Release history for the nestjs-media packages.
 ---
 
-All packages are versioned together via [changesets](https://github.com/changesets/changesets).
+Each package is versioned on its own with [changesets](https://github.com/changesets/changesets) and has its own `CHANGELOG.md`. The headings below are `@dudousxd/nestjs-media` releases. The facade's 0.9.x were patch releases, but `@dudousxd/nestjs-media-core` 0.9.0 was a breaking minor: `DriverCapabilities.ranged` became required, so a third-party storage driver must declare whether it honours byte-range reads (`stream(path, { start, end })`).
 
-## Next release — on `@nestjs/storage`
+## 0.10.0 — on `@nestjs/storage`
 
-Breaking (0.x minor). nestjs-media drops its own storage layer and works on the disks of NestJS's
+Breaking (0.x minor). Ships as `@dudousxd/nestjs-media` 0.10.0, `-core` 0.10.0 and `-dashboard` 0.17.0. nestjs-media drops its own storage layer and works on the disks of NestJS's
 first-party [`@nestjs/storage`](https://docs.nestjs.com/application/file-storage). See
 [Migrating](/docs/reference/migration).
 
 - **Removed:** `StorageManager`, the `StorageDriver` interface, `-disk-local`, `S3Driver`, `InMemoryDriver`, `runStorageDriverConformance`, `MediaService.disk()`/`diskNames()`, `MEDIA_STORAGE`/`MEDIA_STORAGE_SHARED`, the `@dudousxd/nestjs-media/storage` entry, `FileNotFoundError`, `UnknownDiskError`.
 - **`MediaModule`** injects `Storage` from `StorageModule`; `multipart: { disk: s3Multipart(opts) }` adds native S3 multipart; `store`/`uploadSessions` accept `{ inject, useFactory }`.
-- **`MediaService.serve()`** streams a record through `serveFile()`; an optional **`authorize`** hook checks `serve`/`url`/`attach`/`delete`.
+- **`MediaService.serve()`** streams a record through `serveFile()`; an optional **`authorize`** hook checks `read` (for `serve()` and `url()`), `attach` and `delete`.
+- **Protecting the routes** (breaking): the `guards` option is removed from `MediaModule` and `MediaDashboardModule`, replaced by `decorators` (class decorators applied to every mounted controller). `routes: false` mounts no controller so you can mount your own subclasses, and `mount` now works on `forRoot` too. In production (`NODE_ENV === 'production'`), mounting routes with no `decorators` throws at boot. See [Protecting the routes](/docs/packages/nestjs#protecting-the-routes).
+- **Dashboard login removed** (breaking): `auth` / `useAuth`, the session cookie, the `/me`, `/login`, `/session` and `/logout` routes, the `./react` entry and `openMediaConsole` are gone. Authenticate with your app's own strategy and authorize with `decorators`. `forRootAsync`'s `injectObjectInsights` is now `inject`.
+- **`MediaService.delete()`** passes store errors through (only a missing record is a no-op) and throws "MediaLibrary is not configured" without a `store`.
 - **`-disk-s3`** is the `s3Multipart()` side-car (part-level multipart + delimiter listing, no AWS SDK).
 - **Dashboard:** folders from the side-car or folded from the flat listing, `.keep` folders, `serveFile()` previews, streamed uploads and cross-disk copies.
+- **Folder listings:** one page size on every path, 50 by default, at most 1000 (`folderListingLimit()`); a forged `cursor` is `InvalidListingCursorError` (400). See [Folders](/docs/concepts/folders#page-size).
 - **ORM helpers:** `typeOrmMediaStore({ connectionName })`, `drizzlePgMediaStore(...)` and friends on `/nest` entries.
 - **Testing:** `describeMediaDiskConformance()` (run on `LocalDisk`, `InMemoryDisk`, and `S3Disk` on MinIO) and `storageOf()`.
 
+`-core` 0.10.1 accepts `@dudousxd/nestjs-diagnostics` `>=0.7.0 <1.0.0`, and `-telescope` 0.6.1 accepts `@dudousxd/nestjs-telescope` `^1.0.0 || ^2.0.0`.
+
 ## 0.8.0
 
-Guards can now be scoped **per upload surface**.
+Guards can now be scoped **per upload surface**. (`guards` was removed in 0.10.0; use `decorators`.)
 
 - **Per-surface `guards`**: `guards: { tus: [AdminGuard], multipart: [AuthenticatedGuard] }` gates each upload controller with its own list, since the surfaces often carry different sensitivity (session creation admin-only, part PUTs any authenticated user). The plain-array form still gates all three uniformly; an omitted key leaves that surface unguarded.
 
@@ -30,7 +36,7 @@ Guards can now be scoped **per upload surface**.
 
 Three fixes for consumer friction on the upload controllers.
 
-- **`guards` option** on `MediaModule.forRoot`/`forRootAsync` — gate all three upload controllers instead of reimplementing auth in a `NestMiddleware`, since third-party controller classes can't take `@UseGuards`. Uploads remain unauthenticated by default when `guards` is omitted.
+- **`guards` option** on `MediaModule.forRoot`/`forRootAsync` — gate all three upload controllers instead of reimplementing auth in a `NestMiddleware`, since third-party controller classes can't take `@UseGuards`. Uploads remain unauthenticated by default when `guards` is omitted. (Removed in 0.10.0 in favor of `decorators`.)
 - **`mount` option** on `forRootAsync` (`{ tus?, multipart?, direct? }`, default all `true`) — previously always mounted all three controllers, 501-ing the ones you never configured; set the unused ones to `false` so they 404 instead.
 - **Facade re-exports** — `@dudousxd/nestjs-media` now re-exports the error classes, `ResumableUploadManager`, `mediaDiagnosticKey`, `MediaDiagnosticEvent`, `publishMedia`, and the storage-consumer/upload-session types from `-core`, so consumers no longer need a direct dependency on it for these.
 
