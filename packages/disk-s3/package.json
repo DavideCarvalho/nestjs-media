@@ -49,7 +49,7 @@
   "devDependencies": {
     "@dudousxd/nestjs-media-core": "workspace:*",
     "@dudousxd/nestjs-media-testing": "workspace:*",
-    "testcontainers": "10.18.0",
+    "testcontainers": "10.28.0",
     "tsup": "8.5.1",
     "typescript": "5.9.3",
     "@nestjs/storage": "0.0.5",
