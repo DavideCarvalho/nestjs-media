@@ -1,5 +1,15 @@
 # @dudousxd/nestjs-media-database-typeorm
 
+## 0.6.0
+
+### Minor Changes
+
+- [#199](https://github.com/DavideCarvalho/nestjs-media/pull/199) [`fa191a3`](https://github.com/DavideCarvalho/nestjs-media/commit/fa191a3e7a982e71e23b8cdd9fd67deec3848437) Thanks [@DavideCarvalho](https://github.com/DavideCarvalho)! - New `/nest` entries with store factories on a named connection, for `MediaModule.forRoot({ store, uploadSessions })`: `typeOrmMediaStore({ connectionName, autoCreateSchema })` (on `getDataSourceToken()` from `@nestjs/typeorm`), and `drizzleMediaStore`, `drizzlePgMediaStore`, `drizzlePgUploadSessions` (on `getDrizzleToken()` from `@nestjs/drizzle`). `@nestjs/typeorm` and `@nestjs/drizzle` are optional peers, loaded only by `/nest`.
+
+### Patch Changes
+
+- [#199](https://github.com/DavideCarvalho/nestjs-media/pull/199) [`fa191a3`](https://github.com/DavideCarvalho/nestjs-media/commit/fa191a3e7a982e71e23b8cdd9fd67deec3848437) Thanks [@DavideCarvalho](https://github.com/DavideCarvalho)! - Fix packages that could be published without files their `exports` point to. The two tsup passes (ESM, CJS) no longer each clean `dist/` while running at the same time; `dist/` is cleaned once before the build. A new `check:exports` step (also `prepack`) fails the release if any `exports`/`main`/`types` path is missing.
+
 ## 0.5.10
 
 ### Patch Changes

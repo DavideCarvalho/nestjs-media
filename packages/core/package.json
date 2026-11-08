@@ -1,7 +1,7 @@
 {
   "name": "@dudousxd/nestjs-media-core",
-  "version": "0.9.2",
-  "description": "nestjs-media core \u2014 media library, attachments and uploads on top of @nestjs/storage",
+  "version": "0.10.0",
+  "description": "nestjs-media core — media library, attachments and uploads on top of @nestjs/storage",
   "license": "MIT",
   "repository": {
     "type": "git",

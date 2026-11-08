@@ -1,5 +1,19 @@
 # @dudousxd/nestjs-media-disk-s3
 
+## 0.9.0
+
+### Minor Changes
+
+- [#199](https://github.com/DavideCarvalho/nestjs-media/pull/199) [`fa191a3`](https://github.com/DavideCarvalho/nestjs-media/commit/fa191a3e7a982e71e23b8cdd9fd67deec3848437) Thanks [@DavideCarvalho](https://github.com/DavideCarvalho)! - **Breaking:** `S3Driver` is removed — store files on `@nestjs/storage`'s `S3Disk`. This package is now the side-car for what `S3Disk` keeps private: `s3Multipart(options)` takes the same `S3DiskOptions` object (so prefix, endpoint and addressing style line up) and implements `MultipartUploadDriver` (`createMultipartUpload`, `uploadPart`, `presignUploadPart`, `completeMultipartUpload`, `abortMultipartUpload`) plus `listFolders(prefix)` (`ListObjectsV2` with a delimiter). Over `fetch` + SigV4, like `S3Disk`: the `@aws-sdk/*` peers and the `@smithy/*` dependencies are gone. `hardenBodyStream` and the XML-entity fallback are removed with the driver.
+
+  `@dudousxd/nestjs-media-disk-local` is discontinued: use `LocalDisk` from `@nestjs/storage`.
+
+### Patch Changes
+
+- [#199](https://github.com/DavideCarvalho/nestjs-media/pull/199) [`fa191a3`](https://github.com/DavideCarvalho/nestjs-media/commit/fa191a3e7a982e71e23b8cdd9fd67deec3848437) Thanks [@DavideCarvalho](https://github.com/DavideCarvalho)! - Fix packages that could be published without files their `exports` point to. The two tsup passes (ESM, CJS) no longer each clean `dist/` while running at the same time; `dist/` is cleaned once before the build. A new `check:exports` step (also `prepack`) fails the release if any `exports`/`main`/`types` path is missing.
+
+- [#199](https://github.com/DavideCarvalho/nestjs-media/pull/199) [`fa191a3`](https://github.com/DavideCarvalho/nestjs-media/commit/fa191a3e7a982e71e23b8cdd9fd67deec3848437) Thanks [@DavideCarvalho](https://github.com/DavideCarvalho)! - One page size for folder listings. `listFolderLevel()` returned 50 entries per page when it folded a flat listing but 1000 through the S3 side-car's `listFolders`. Both paths now use `limit`, or the new `DEFAULT_FOLDER_LISTING_LIMIT` (50) when absent, capped at `MAX_FOLDER_LISTING_LIMIT` (1000, S3's per-request maximum). `listFolderLevel()` passes the resolved `limit` to the side-car, `s3Multipart().listFolders()` defaults to 50 on its own, and a `limit` that is not a positive integer is a `RangeError` on every path. New export: `folderListingLimit()`.
+
 ## 0.8.4
 
 ### Patch Changes

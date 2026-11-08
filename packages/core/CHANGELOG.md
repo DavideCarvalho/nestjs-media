@@ -1,5 +1,29 @@
 # @dudousxd/nestjs-media-core
 
+## 0.10.0
+
+### Minor Changes
+
+- [#199](https://github.com/DavideCarvalho/nestjs-media/pull/199) [`fa191a3`](https://github.com/DavideCarvalho/nestjs-media/commit/fa191a3e7a982e71e23b8cdd9fd67deec3848437) Thanks [@DavideCarvalho](https://github.com/DavideCarvalho)! - **Breaking:** the media layer runs on the disks of NestJS's first-party `@nestjs/storage` (new peer, `>=0.0.5 <0.1.0`, type-only in core).
+
+  - `MediaLibrary`, `AttachmentManager`, `ResumableUploadManager`, `DirectUploadManager` and the tus handler take `storage: Storage` (or any `MediaDisks`: `disk(name)`, `names()`, `defaultDisk`) and use `StorageDisk`'s `put`/`getBuffer`/`get().body`/`delete([...])`/`url`/`signedUrl`.
+  - Removed, with no shims: `StorageManager`, `StorageManagerOptions`, `StorageDriver`, `DriverCapabilities`, `PutOptions`, `ListOptions`, `ListResult`, `ListEntry`, `StatResult`, `ReadRangeOptions`, `TemporaryUrlOptions`, `Visibility`, `isMultipartCapable`, `collectStream`, `FileNotFoundError`, `UnknownDiskError`, `AttachmentManager.temporaryUrl`.
+  - Native multipart is a per-disk side-car: `MultipartUploadDriver` (optional `listFolders`) passed as `multipart: { [disk]: driver }` to the upload managers; `multipartFor()`, `requireMultipart()`.
+  - New: `diskCapabilities(disk, sidecar)`, `listFolderLevel()` / `foldListing()` (one folder level from a flat listing, cursor-paged without repeats), `keySegment()` / `assertMediaKey()` / `folderPrefix()` / `InvalidMediaKeyError` (the `@nestjs/storage` key rule), `fileUrl()`, `MediaLibrary.locate()`, `AttachmentManager.signedUrl()`.
+  - `MediaLibrary.url()` and `AttachmentManager.url()` return the public URL when the disk has a `publicUrl`, else a signed one.
+  - Keys built from user input (file names, owner ids, the default tus key) go through `keySegment()`; ordinary names are unchanged. A custom tus `keyFor` returning an invalid key answers 400. Resumable assembly passes the received byte count as `contentLength`.
+  - `resolveUploadMode()` takes `{ presign, multipart }` (`MediaDiskCapabilities`).
+
+### Patch Changes
+
+- [#199](https://github.com/DavideCarvalho/nestjs-media/pull/199) [`fa191a3`](https://github.com/DavideCarvalho/nestjs-media/commit/fa191a3e7a982e71e23b8cdd9fd67deec3848437) Thanks [@DavideCarvalho](https://github.com/DavideCarvalho)! - Fix packages that could be published without files their `exports` point to. The two tsup passes (ESM, CJS) no longer each clean `dist/` while running at the same time; `dist/` is cleaned once before the build. A new `check:exports` step (also `prepack`) fails the release if any `exports`/`main`/`types` path is missing.
+
+- [#199](https://github.com/DavideCarvalho/nestjs-media/pull/199) [`fa191a3`](https://github.com/DavideCarvalho/nestjs-media/commit/fa191a3e7a982e71e23b8cdd9fd67deec3848437) Thanks [@DavideCarvalho](https://github.com/DavideCarvalho)! - `DirectUploadManager.presignPart()`, `completeUpload()` and `abortUpload()` check the key with `assertMediaKey` before calling the multipart side-car, as `createUpload()` does.
+
+- [#199](https://github.com/DavideCarvalho/nestjs-media/pull/199) [`fa191a3`](https://github.com/DavideCarvalho/nestjs-media/commit/fa191a3e7a982e71e23b8cdd9fd67deec3848437) Thanks [@DavideCarvalho](https://github.com/DavideCarvalho)! - One page size for folder listings. `listFolderLevel()` returned 50 entries per page when it folded a flat listing but 1000 through the S3 side-car's `listFolders`. Both paths now use `limit`, or the new `DEFAULT_FOLDER_LISTING_LIMIT` (50) when absent, capped at `MAX_FOLDER_LISTING_LIMIT` (1000, S3's per-request maximum). `listFolderLevel()` passes the resolved `limit` to the side-car, `s3Multipart().listFolders()` defaults to 50 on its own, and a `limit` that is not a positive integer is a `RangeError` on every path. New export: `folderListingLimit()`.
+
+- [#199](https://github.com/DavideCarvalho/nestjs-media/pull/199) [`fa191a3`](https://github.com/DavideCarvalho/nestjs-media/commit/fa191a3e7a982e71e23b8cdd9fd67deec3848437) Thanks [@DavideCarvalho](https://github.com/DavideCarvalho)! - A forged folder-listing `cursor` throws `InvalidListingCursorError` (a `TypeError` with `status` 400), which the media console answers as 400 instead of 500.
+
 ## 0.9.2
 
 ### Patch Changes

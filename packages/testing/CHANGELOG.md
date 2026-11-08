@@ -1,5 +1,15 @@
 # @dudousxd/nestjs-media-testing
 
+## 0.7.0
+
+### Minor Changes
+
+- [#199](https://github.com/DavideCarvalho/nestjs-media/pull/199) [`fa191a3`](https://github.com/DavideCarvalho/nestjs-media/commit/fa191a3e7a982e71e23b8cdd9fd67deec3848437) Thanks [@DavideCarvalho](https://github.com/DavideCarvalho)! - **Breaking:** `InMemoryDriver` and `runStorageDriverConformance` are removed (use `InMemoryDisk` from `@nestjs/storage`). New `describeMediaDiskConformance(name, makeDisk, { multipart, prefix })` checks a `StorageDisk` (and optionally its multipart side-car) against what nestjs-media relies on; the repo runs it on `LocalDisk`, `InMemoryDisk` and `S3Disk` on MinIO. New `storageOf({ name: disk }, default?)` builds a `Storage` for unit tests. New peer `@nestjs/storage`.
+
+### Patch Changes
+
+- [#199](https://github.com/DavideCarvalho/nestjs-media/pull/199) [`fa191a3`](https://github.com/DavideCarvalho/nestjs-media/commit/fa191a3e7a982e71e23b8cdd9fd67deec3848437) Thanks [@DavideCarvalho](https://github.com/DavideCarvalho)! - Fix packages that could be published without files their `exports` point to. The two tsup passes (ESM, CJS) no longer each clean `dist/` while running at the same time; `dist/` is cleaned once before the build. A new `check:exports` step (also `prepack`) fails the release if any `exports`/`main`/`types` path is missing.
+
 ## 0.6.0
 
 ### Minor Changes

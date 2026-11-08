@@ -1,5 +1,34 @@
 # @dudousxd/nestjs-media-dashboard
 
+## 0.17.0
+
+### Minor Changes
+
+- [#199](https://github.com/DavideCarvalho/nestjs-media/pull/199) [`fa191a3`](https://github.com/DavideCarvalho/nestjs-media/commit/fa191a3e7a982e71e23b8cdd9fd67deec3848437) Thanks [@DavideCarvalho](https://github.com/DavideCarvalho)! - **Breaking:** the console is now protected only with NestJS's first-party tools (`@nestjs/authentication`, `@nestjs/authorization`); its built-in auth is gone, and an unprotected console refuses to boot in production.
+
+  - New `decorators?: ClassDecorator[]` on `MediaDashboardModule.forRoot`/`forRootAsync` (static on the async variant), applied to every console controller (page, read, actions), e.g. `[UseGuards(AuthenticationGuard), Can(MediaPolicy, 'console')]`. Each registration decorates fresh controller subclasses, so decorators never leak between registrations.
+  - The console controllers are marked `@Can.Anyone()`-open (`'authorization:can-anyone'`), so `@nestjs/authorization`'s deny-by-default global guard doesn't refuse them; a `Can(...)` passed through `decorators` is still enforced.
+  - Removed: the `guards` option; the built-in login (`auth` on `forRoot`, `useAuth` on `forRootAsync`, `ConsoleAuthOptions`, `LoginHook`, `SessionHook`, `ConsoleSessionUser`, `revalidate`, `unauthenticatedPage`); the session cookie; `MediaConsoleAuthController` and its `/me`, `/login`, `/session`, `/logout` routes; `MediaConsoleGuard`; the SPA's login screen and sign-out button; the `./react` entry (`OpenMediaConsoleButton`, `useOpenMediaConsole`) and the session launcher in `./client` (`openMediaConsole`, `mintMediaConsoleSession`, `mediaConsoleSessionUrl`, `mediaConsoleUrl`, `ConsoleSessionError`), plus `mediaConsoleClient.me/login/logout`. React and React DOM are no longer peer dependencies. `forRootAsync`'s `injectObjectInsights` is replaced by `inject`, which now feeds only `useObjectInsights`.
+  - When `NODE_ENV === 'production'`, `MediaDashboardModule.forRoot`/`forRootAsync` (and `MediaConsoleApiModule.register`) throw if they mount routes with no `decorators` (an empty array counts as none); the error names both ways to protect them. Outside production undecorated routes mount open, as before.
+
+  Migration: `guards: [ConsoleGuard]` → `decorators: [UseGuards(ConsoleGuard)]`; `auth: { login | session }` → authenticate with your app's own strategy (`@nestjs/authentication`, reading a cookie, since a page navigation sends no `Authorization` header) and authorize with `decorators: [UseGuards(AuthenticationGuard), Can(MediaPolicy, 'console')]`, or `routes: false` plus your own subclasses of the exported controllers; `openMediaConsole(...)` → link to the console page; `injectObjectInsights` → `inject`.
+
+- [#199](https://github.com/DavideCarvalho/nestjs-media/pull/199) [`fa191a3`](https://github.com/DavideCarvalho/nestjs-media/commit/fa191a3e7a982e71e23b8cdd9fd67deec3848437) Thanks [@DavideCarvalho](https://github.com/DavideCarvalho)! - Mount the routes yourself. `MediaModule.forRoot`/`forRootAsync` take `routes: false` to mount no upload controller (the per-surface `mount: { tus?, multipart?, direct? }`, formerly `forRootAsync`-only, now works on `forRoot` too), and `MediaDashboardModule.forRoot`/`forRootAsync` take `routes: false` to mount no console controller. Every provider keeps working, so you serve the same routes from controllers of your own, protected with ordinary Nest decorators, by extending the exported controller classes (`@Can(MediaPolicy, 'upload') @Controller('api/uploads') class UploadsController extends MediaUploadController {}`). The dashboard now exports `MediaDashboardUiController`, `MediaConsoleReadController` and `MediaConsoleActionsController`, and its modules export the providers those controllers inject. The docs gain one "Protecting the routes" section: mount them yourself, or `decorators`, and the production rule that requires one of the two.
+
+- [#199](https://github.com/DavideCarvalho/nestjs-media/pull/199) [`fa191a3`](https://github.com/DavideCarvalho/nestjs-media/commit/fa191a3e7a982e71e23b8cdd9fd67deec3848437) Thanks [@DavideCarvalho](https://github.com/DavideCarvalho)! - **Breaking:** the console reads the disks from `@nestjs/storage`'s `Storage` (new peer; Nest `^12.1`) and the multipart side-cars from `MEDIA_MULTIPART`; `MEDIA_STORAGE_SHARED` is removed.
+
+  - Capabilities are computed from the disk (`presign` when it signs, `publicUrls` with a `publicUrl`, `multipart` with a side-car; `ranged` is always true).
+  - Folders come from the side-car's delimiter listing, else are folded from the flat listing. A new folder is a hidden `<folder>/.keep` (`prefix/` markers are invalid keys); legacy markers show as folders but are skipped by deletes.
+  - `/raw` and `/download` go through `serveFile()`: `/raw` is `inline` only for script-safe types (images, PDF, audio, video, plain text), `If-None-Match` answers 304. `MediaConsoleService.objectStream`, `RangeNotSatisfiableException` and `parseRangeHeader` are replaced by `serveObject()`.
+  - Console uploads and cross-disk copies/moves stream, with no 100 MB caps; storage errors map to their HTTP status.
+  - `auto` object URLs: public URL, else signed, else the console's own `/raw` route.
+
+### Patch Changes
+
+- [#199](https://github.com/DavideCarvalho/nestjs-media/pull/199) [`fa191a3`](https://github.com/DavideCarvalho/nestjs-media/commit/fa191a3e7a982e71e23b8cdd9fd67deec3848437) Thanks [@DavideCarvalho](https://github.com/DavideCarvalho)! - Fix packages that could be published without files their `exports` point to. The two tsup passes (ESM, CJS) no longer each clean `dist/` while running at the same time; `dist/` is cleaned once before the build. A new `check:exports` step (also `prepack`) fails the release if any `exports`/`main`/`types` path is missing.
+
+- [#199](https://github.com/DavideCarvalho/nestjs-media/pull/199) [`fa191a3`](https://github.com/DavideCarvalho/nestjs-media/commit/fa191a3e7a982e71e23b8cdd9fd67deec3848437) Thanks [@DavideCarvalho](https://github.com/DavideCarvalho)! - A forged folder-listing `cursor` throws `InvalidListingCursorError` (a `TypeError` with `status` 400), which the media console answers as 400 instead of 500.
+
 ## 0.16.2
 
 ### Patch Changes

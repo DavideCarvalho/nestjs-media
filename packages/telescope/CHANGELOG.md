@@ -1,5 +1,15 @@
 # @dudousxd/nestjs-media-telescope
 
+## 0.6.0
+
+### Minor Changes
+
+- [#199](https://github.com/DavideCarvalho/nestjs-media/pull/199) [`fa191a3`](https://github.com/DavideCarvalho/nestjs-media/commit/fa191a3e7a982e71e23b8cdd9fd67deec3848437) Thanks [@DavideCarvalho](https://github.com/DavideCarvalho)! - `media.disks` reads the disks from `@nestjs/storage`'s `Storage` (new peer) and the multipart side-cars, and computes the badges with core's `diskCapabilities()`. The rows keep their shape (`name`, `default`, `presign`, `multipart`, `publicUrls`, `list`). `MEDIA_STORAGE_SHARED` is replaced by `MEDIA_MULTIPART`.
+
+### Patch Changes
+
+- [#199](https://github.com/DavideCarvalho/nestjs-media/pull/199) [`fa191a3`](https://github.com/DavideCarvalho/nestjs-media/commit/fa191a3e7a982e71e23b8cdd9fd67deec3848437) Thanks [@DavideCarvalho](https://github.com/DavideCarvalho)! - Fix packages that could be published without files their `exports` point to. The two tsup passes (ESM, CJS) no longer each clean `dist/` while running at the same time; `dist/` is cleaned once before the build. A new `check:exports` step (also `prepack`) fails the release if any `exports`/`main`/`types` path is missing.
+
 ## 0.5.11
 
 ### Patch Changes

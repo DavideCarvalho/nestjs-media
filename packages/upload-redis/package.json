@@ -1,6 +1,6 @@
 {
   "name": "@dudousxd/nestjs-media-upload-redis",
-  "version": "0.7.11",
+  "version": "0.7.12",
   "description": "nestjs-media Redis UploadSessionStore adapter",
   "license": "MIT",
   "repository": {
