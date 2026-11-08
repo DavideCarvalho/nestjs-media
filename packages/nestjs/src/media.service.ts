@@ -150,11 +150,13 @@ export class MediaService {
 
   /** `library.delete()`, after `authorize` (`delete`). A missing id is a no-op, as in the library. */
   async delete(id: string, caller: MediaCaller = {}): Promise<void> {
-    const record = await this.mediaLibrary?.locate(id).then(
-      (found) => found.record,
-      () => null,
-    );
-    if (!record) return;
+    let record: MediaRecord;
+    try {
+      record = (await this.library.locate(id)).record;
+    } catch (error) {
+      if (isNotFound(error)) return;
+      throw error;
+    }
     await this.check(caller.user, 'delete', record);
     await this.library.delete(id);
   }
@@ -163,7 +165,7 @@ export class MediaService {
     try {
       return (await this.library.locate(id)).record;
     } catch (error) {
-      if (error instanceof Error && error.name === 'MediaNotFoundError') {
+      if (isNotFound(error)) {
         throw new NotFoundException();
       }
       throw error;
@@ -181,4 +183,8 @@ export class MediaService {
   ): Promise<void> {
     await this.options?.authorize?.(user, action, subject);
   }
+}
+
+function isNotFound(error: unknown): boolean {
+  return error instanceof Error && error.name === 'MediaNotFoundError';
 }

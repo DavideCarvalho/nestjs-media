@@ -1,4 +1,9 @@
 import type { AddressInfo } from 'node:net';
+import {
+  type AttachmentManager,
+  type MediaLibrary,
+  MediaNotFoundError,
+} from '@dudousxd/nestjs-media-core';
 import { InMemoryMediaStore } from '@dudousxd/nestjs-media-testing';
 import { Controller, ForbiddenException, Get, Module, Param, Req, Res } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
@@ -138,5 +143,45 @@ describe('MediaService attach/delete/url with authorize', () => {
       running().get(MediaService).url(record.id, undefined, { user: 'u' }),
     ).rejects.toThrow(/signedUrls/);
     expect(authorize).toHaveBeenCalledWith('u', 'read', expect.objectContaining({ id: record.id }));
+  });
+});
+
+describe('MediaService.delete failures', () => {
+  function service(library: Partial<MediaLibrary> | null): MediaService {
+    return new MediaService(
+      null,
+      library as MediaLibrary | null,
+      null,
+      {} as AttachmentManager,
+      null,
+    );
+  }
+
+  it('is a no-op only for a genuinely missing record', async () => {
+    const remove = vi.fn();
+    const media = service({
+      locate: async () => {
+        throw new MediaNotFoundError('nope');
+      },
+      delete: remove,
+    });
+    await expect(media.delete('nope')).resolves.toBeUndefined();
+    expect(remove).not.toHaveBeenCalled();
+  });
+
+  it('propagates other store failures instead of reporting success', async () => {
+    const remove = vi.fn();
+    const media = service({
+      locate: async () => {
+        throw new Error('db down');
+      },
+      delete: remove,
+    });
+    await expect(media.delete('x')).rejects.toThrow('db down');
+    expect(remove).not.toHaveBeenCalled();
+  });
+
+  it('throws the clean "not configured" error when no store was given', async () => {
+    await expect(service(null).delete('x')).rejects.toThrow(/MediaLibrary is not configured/);
   });
 });
