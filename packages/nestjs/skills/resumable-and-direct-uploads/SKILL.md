@@ -11,10 +11,10 @@ description: >-
   side-car for the disk (multipart: { s3: s3Multipart(sameOptionsAsTheS3Disk) }
   from @dudousxd/nestjs-media-disk-s3; no session store). The disks come from
   @nestjs/storage's StorageModule. resolveUploadMode picks proxy vs direct
-  (per-call > per-disk > global > auto). Reach the engines via
-  MediaService.uploads (ResumableUploadManager) and MediaService.directUploads
-  (DirectUploadManager). Explains the missing-raw-parser failure and the
-  UnsupportedOperationError when forcing direct on a disk without a side-car.
+  (per-call > per-disk > global > auto). Engines: MediaService.uploads
+  (ResumableUploadManager) and MediaService.directUploads (DirectUploadManager).
+  Covers the missing-raw-parser failure and UnsupportedOperationError when
+  forcing direct on a disk without a side-car.
 license: MIT
 metadata:
   type: core
