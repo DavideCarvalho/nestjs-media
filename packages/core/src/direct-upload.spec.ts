@@ -182,4 +182,23 @@ describe('DirectUploadManager key rule', () => {
     await expect(mgr.createUpload({ key: '../escape.bin' })).rejects.toThrow(/Invalid storage key/);
     expect(driver.createMultipartUpload).not.toHaveBeenCalled();
   });
+
+  it('refuses a hostile key on presignPart, completeUpload and abortUpload, before the side-car', async () => {
+    const driver = makeFakeDriver();
+    const mgr = new DirectUploadManager({
+      storage: storageOf({ m: new InMemoryDisk() }),
+      multipart: { m: driver },
+    });
+    const key = '../escape.bin';
+    await expect(mgr.presignPart({ key, uploadId: 'u', partNumber: 1 })).rejects.toThrow(
+      /Invalid storage key/,
+    );
+    await expect(mgr.completeUpload({ key, uploadId: 'u', parts: [] })).rejects.toThrow(
+      /Invalid storage key/,
+    );
+    await expect(mgr.abortUpload({ key, uploadId: 'u' })).rejects.toThrow(/Invalid storage key/);
+    expect(driver.presignUploadPart).not.toHaveBeenCalled();
+    expect(driver.completeMultipartUpload).not.toHaveBeenCalled();
+    expect(driver.abortMultipartUpload).not.toHaveBeenCalled();
+  });
 });

@@ -89,6 +89,7 @@ export class DirectUploadManager {
     const diskName = input.disk ?? this.storage.defaultDisk;
     const driver = requireMultipart(this.multipart, diskName, 'direct upload');
 
+    assertMediaKey(input.key);
     const url = await driver.presignUploadPart(
       input.key,
       input.uploadId,
@@ -108,6 +109,7 @@ export class DirectUploadManager {
     const diskName = input.disk ?? this.storage.defaultDisk;
     const driver = requireMultipart(this.multipart, diskName, 'direct upload');
 
+    assertMediaKey(input.key);
     await driver.completeMultipartUpload(input.key, input.uploadId, input.parts);
 
     if (this.emitDiagnostics) {
@@ -130,6 +132,7 @@ export class DirectUploadManager {
     const diskName = input.disk ?? this.storage.defaultDisk;
     const driver = requireMultipart(this.multipart, diskName, 'direct upload');
 
+    assertMediaKey(input.key);
     await driver.abortMultipartUpload(input.key, input.uploadId);
 
     if (this.emitDiagnostics) {
