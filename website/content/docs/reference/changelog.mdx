@@ -4,7 +4,7 @@ icon: History
 description: Release history for the nestjs-media packages.
 ---
 
-Each package is versioned on its own with [changesets](https://github.com/changesets/changesets) and has its own `CHANGELOG.md`. The headings below are `@dudousxd/nestjs-media` releases; 0.9.x were patch releases.
+Each package is versioned on its own with [changesets](https://github.com/changesets/changesets) and has its own `CHANGELOG.md`. The headings below are `@dudousxd/nestjs-media` releases. The facade's 0.9.x were patch releases, but `@dudousxd/nestjs-media-core` 0.9.0 was a breaking minor: `DriverCapabilities.ranged` became required, so a third-party storage driver must declare whether it honours byte-range reads (`stream(path, { start, end })`).
 
 ## 0.10.0 — on `@nestjs/storage`
 
