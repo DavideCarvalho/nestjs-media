@@ -41,6 +41,7 @@ interface MultipartUploadDriver {   // native multipart for one disk (see -disk-
 | --- | --- |
 | `diskCapabilities(disk, sidecar?)` | `{ presign, multipart, publicUrls, list, ranged }` |
 | `listFolderLevel(disk, prefix, page, sidecar?)`, `foldListing(disk, prefix, page)` | one folder level ([Folders](/docs/concepts/folders)) |
+| `folderListingLimit(limit)`, `DEFAULT_FOLDER_LISTING_LIMIT`, `MAX_FOLDER_LISTING_LIMIT` | the page size of a folder listing: `limit`, else 50, at most 1000; `RangeError` unless a positive integer |
 | `keySegment(text)`, `assertMediaKey(key)`, `folderPrefix(prefix)` | `@nestjs/storage`'s key rule, for keys built from user input |
 | `fileUrl(disk, key, options?)` | the public URL, else a signed one |
 | `multipartFor(drivers, disk)` | the side-car configured for a disk |
@@ -49,7 +50,7 @@ interface MultipartUploadDriver {   // native multipart for one disk (see -disk-
 
 **Diagnostics** — `publishMedia` + the `aviary:media:*` events.
 
-**Errors** — `MediaNotFoundError`, `MimeNotAllowedError`, `ConversionNotDefinedError`, `ImageProcessorMissingError`, `UploadSessionNotFoundError`, `UploadOffsetConflictError`, `InvalidPartNumberError`, `UnsupportedOperationError`, `InvalidMediaKeyError` (status 400), each with a stable `code`. Storage errors are `@nestjs/storage`'s.
+**Errors** — `MediaNotFoundError`, `MimeNotAllowedError`, `ConversionNotDefinedError`, `ImageProcessorMissingError`, `UploadSessionNotFoundError`, `UploadOffsetConflictError`, `InvalidPartNumberError`, `UnsupportedOperationError`, `InvalidMediaKeyError` (status 400), `InvalidListingCursorError` (a forged folder-listing `cursor`, status 400), each with a stable `code`. Storage errors are `@nestjs/storage`'s.
 
 ## Using it directly
 

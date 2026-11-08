@@ -49,6 +49,10 @@ class MediaService {
 
 Streams a record (or a conversion, generated on first use) through `@nestjs/storage`'s `serveFile()`: `Range` → 206, `If-None-Match` → 304, `ETag`, `nosniff`, `inline` only for types that can't run script, the record's file name in `Content-Disposition`, 404 for an unknown id. See [Serving files](/docs/recipes/serving-files).
 
+### `delete()`
+
+A missing id is a no-op. Any other store error is thrown, not reported as success. Without a `store` it throws the same "MediaLibrary is not configured" error as `media.library`.
+
 ### `authorize`
 
 An optional hook, checked by `serve()`/`url()` (`'read'`), `attach()` (`'attach'`, on `{ ownerType, ownerId, collection }`) and `delete()` (`'delete'`). It throws to refuse. `user` is what the caller passed, else `req.user` for `serve()`. `media.library` stays the unchecked core API. With the first-party `@nestjs/authorization`:

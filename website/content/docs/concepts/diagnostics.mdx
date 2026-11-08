@@ -49,7 +49,7 @@ subscribe('nestjs:media:upload.complete', (msg) => {
 });
 ```
 
-Each emitter takes `emitDiagnostics: false` to opt out (`MediaLibrary`, `ResumableUploadManager`, `AttachmentManager`). See [`@dudousxd/nestjs-diagnostics`](https://github.com/DavideCarvalho/nestjs-diagnostics) for the cross-ecosystem convention this follows.
+Each emitter takes `emitDiagnostics: false` to opt out (`MediaLibrary`, `ResumableUploadManager`, `AttachmentManager`). See [`@dudousxd/nestjs-diagnostics`](https://github.com/DavideCarvalho/nestjs-diagnostics) for the cross-ecosystem convention this follows. media-core depends on `@dudousxd/nestjs-diagnostics` `>=0.7.0 <1.0.0`, so it shares the copy your app already installs instead of adding a second one.
 
 ## 2. Telescope
 

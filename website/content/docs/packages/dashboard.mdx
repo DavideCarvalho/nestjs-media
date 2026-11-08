@@ -289,6 +289,8 @@ The response shapes are exported as types — see [the client subpath](#the-type
 | `GET library/:id` | — | `LibraryDetailResponse` |
 | `GET topology` | — | `Topology` |
 
+A `cursor` on `disks/:disk/objects` that is not one a previous page returned answers 400 (`InvalidListingCursorError`), not 500.
+
 ### Actions
 
 Present only with `actions: true`. All return `204 No Content`. On copy/move routes the `:disk` in the path is the **source**; the JSON body's optional `toDisk` names a cross-disk destination.

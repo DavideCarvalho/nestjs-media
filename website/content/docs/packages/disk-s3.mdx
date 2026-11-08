@@ -41,7 +41,7 @@ interface S3Multipart extends MultipartUploadDriver {
 }
 ```
 
-You rarely call these yourself: `ResumableUploadManager` (tus and parallel parts), `DirectUploadManager` (presigned parts) and the dashboard's folder listing use them. Keys go through `@nestjs/storage`'s key rule first, so no object is ever created at a key the disk can't read back. Server-side encryption options (`serverSideEncryption`, `kmsKeyId`) apply to multipart uploads too.
+You rarely call these yourself: `ResumableUploadManager` (tus and parallel parts), `DirectUploadManager` (presigned parts) and the dashboard's folder listing use them. `listFolders()` returns 50 entries per page unless you pass `limit` (at most 1000; anything but a positive integer is a `RangeError`), the same page size as the folded listing (see [Folders](/docs/concepts/folders#page-size)). Keys go through `@nestjs/storage`'s key rule first, so no object is ever created at a key the disk can't read back. Server-side encryption options (`serverSideEncryption`, `kmsKeyId`) apply to multipart uploads too.
 
 Like `S3Disk`, it runs over `fetch` with Signature Version 4 on `node:crypto` — no AWS SDK. Credentials: the options' `credentials` (an object, or a function called per request), else `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` / `AWS_SESSION_TOKEN`. Transient failures (429, 5xx, network) are retried twice. A failed request throws `S3MultipartError` with S3's `code`.
 

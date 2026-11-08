@@ -37,6 +37,12 @@ photos/2024/paris/eiffel.jpg
 
 listing `photos/` gives `folders: ['photos/2023/', 'photos/2024/']` and the one file directly there, `photos/logo.png`. `prefix` is `''` (the root) or ends with `/`; core's `folderPrefix('photos')` normalizes it.
 
+### Page size
+
+Both paths below use the same page size: `limit`, or `DEFAULT_FOLDER_LISTING_LIMIT` (50) when you pass none, capped at `MAX_FOLDER_LISTING_LIMIT` (1000, S3's own cap per request). A `limit` that is not a positive integer is a `RangeError`. `folderListingLimit(limit)` resolves it the same way. A page holds at most `limit` entries; while it has a `cursor` it can hold fewer (S3 leaves out a folder's marker object), so page on the `cursor`, not on the count.
+
+A `cursor` that is not one a previous page returned throws `InvalidListingCursorError` (`status` 400).
+
 ### On S3: the side-car asks the store
 
 S3 can roll keys up itself (`ListObjectsV2` with `Delimiter: '/'`, returning `CommonPrefixes`), so browsing a huge bucket costs one request per level. `S3Disk` doesn't expose that; the [`s3Multipart()` side-car](/docs/packages/disk-s3) does, as `listFolders(prefix, { cursor, limit })`, and `listFolderLevel()` uses it when the disk has one.
