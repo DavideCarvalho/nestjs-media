@@ -50,7 +50,7 @@
   "devDependencies": {
     "@dudousxd/nestjs-diagnostics": "0.7.2",
     "@dudousxd/nestjs-media-core": "workspace:*",
-    "@dudousxd/nestjs-telescope": "1.31.0",
+    "@dudousxd/nestjs-telescope": "1.31.1",
     "tsup": "8.5.1",
     "typescript": "5.9.3",
     "@nestjs/storage": "0.0.5",
