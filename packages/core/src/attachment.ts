@@ -1,8 +1,11 @@
 import { randomUUID } from 'node:crypto';
 import type { Readable } from 'node:stream';
+import type { StorageSignedUrlRequest } from '@nestjs/storage';
 import { publishMedia } from './diagnostics';
 import type { ConversionPreset, ImageProcessor } from './image-processor';
-import type { StorageManager } from './storage-manager';
+import { keySegment } from './keys';
+import { deleteKeys, fileUrl } from './storage-helpers';
+import type { MediaDisks } from './types';
 
 export interface AttachmentVariant {
   disk: string;
@@ -90,7 +93,8 @@ export interface CreateAttachmentOptions {
 }
 
 export interface AttachmentManagerOptions {
-  storage: StorageManager;
+  /** The disks: `Storage` from `@nestjs/storage`, or any {@link MediaDisks}. */
+  storage: MediaDisks;
   imageProcessor?: ImageProcessor;
   keyPrefix?: string;
   idGenerator?: () => string;
@@ -104,7 +108,7 @@ export interface AttachmentManagerOptions {
  * you assign to a model column; the ORM integrations serialize it via `toJSON`.
  */
 export class AttachmentManager {
-  private readonly storage: StorageManager;
+  private readonly storage: MediaDisks;
   private readonly imageProcessor: ImageProcessor | undefined;
   private readonly keyPrefix: string;
   private readonly newId: () => string;
@@ -125,11 +129,14 @@ export class AttachmentManager {
     const disk = options.disk ?? this.storage.defaultDisk;
     const prefix = options.keyPrefix ?? this.keyPrefix;
     const id = options.id ?? this.newId();
-    const dir = `${prefix}/${id}`;
-    const path = `${dir}/${input.fileName}`;
+    const dir = `${prefix}/${keySegment(id)}`;
+    const path = `${dir}/${keySegment(input.fileName)}`;
 
-    await this.storage.disk(disk).put(path, input.contents, { contentType: input.mimeType });
-    const size = input.size ?? (await this.storage.disk(disk).size(path));
+    const written = await this.storage.disk(disk).put(path, input.contents, {
+      contentType: input.mimeType,
+      ...(input.size !== undefined ? { contentLength: input.size } : {}),
+    });
+    const size = input.size ?? written.size;
 
     const variants: Record<string, AttachmentVariant> = {};
     const presets = options.variants ?? [];
@@ -139,7 +146,7 @@ export class AttachmentManager {
           'AttachmentManager: variants requested but no ImageProcessor was configured',
         );
       }
-      const original = await this.storage.disk(disk).get(path);
+      const original = await this.storage.disk(disk).getBuffer(path);
       for (const preset of presets) {
         const result = await this.imageProcessor.convert(original, preset);
         const variantPath = `${dir}/variants/${preset.name}.${result.format}`;
@@ -178,28 +185,32 @@ export class AttachmentManager {
     return attachment;
   }
 
-  /** Public URL for the attachment, or a named variant. */
-  async url(attachment: Attachment, variant?: string): Promise<string> {
-    const target = this.resolve(attachment, variant);
-    return this.storage.disk(target.disk).url(target.path);
-  }
-
-  /** Signed, expiring URL (presign-capable disks). */
-  async temporaryUrl(
+  /**
+   * A URL for the attachment, or a named variant: the disk's public URL when it has a
+   * `publicUrl`, else a signed, expiring one (`options.expiresIn`, default 15 minutes).
+   */
+  async url(
     attachment: Attachment,
-    expiresInSeconds: number,
     variant?: string,
+    options?: StorageSignedUrlRequest,
   ): Promise<string> {
     const target = this.resolve(attachment, variant);
-    return this.storage.disk(target.disk).temporaryUrl(target.path, expiresInSeconds);
+    return fileUrl(this.storage.disk(target.disk), target.path, options);
+  }
+
+  /** A signed, expiring URL even when the disk has a public one (`signedUrl()`). */
+  async signedUrl(
+    attachment: Attachment,
+    variant?: string,
+    options?: StorageSignedUrlRequest,
+  ): Promise<string> {
+    const target = this.resolve(attachment, variant);
+    return this.storage.disk(target.disk).signedUrl(target.path, options);
   }
 
   /** Remove the attachment and all its variants from storage. */
   async delete(attachment: Attachment): Promise<void> {
-    await this.storage.disk(attachment.disk).delete(attachment.path);
-    for (const variant of Object.values(attachment.variants)) {
-      await this.storage.disk(variant.disk).delete(variant.path);
-    }
+    await deleteKeys(this.storage, [attachment, ...Object.values(attachment.variants)]);
     if (this.emitDiagnostics) {
       publishMedia('attachment.delete', {
         disk: attachment.disk,

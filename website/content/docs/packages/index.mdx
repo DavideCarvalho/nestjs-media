@@ -1,29 +1,28 @@
 ---
 title: Overview
 icon: Package
-description: The full nestjs-media package set — core, the NestJS module, the browser client, disks, ORM stores, the image engine, and the ecosystem glue points.
+description: The full nestjs-media package set — core, the NestJS module, the browser client, the S3 multipart side-car, ORM stores, the image engine, and the ecosystem glue points.
 ---
 
-Everything ships under the `@dudousxd/nestjs-media*` scope, versioned together. Install only what you use — disks, stores, and the image engine are separate packages so you never pull an S3 SDK or sharp into an app that doesn't need it.
+Everything ships under the `@dudousxd/nestjs-media*` scope, versioned together. The disks are `@nestjs/storage`'s ([docs](https://docs.nestjs.com/application/file-storage)); install only the media packages you use.
 
 ## The map
 
 | Package | Role |
 |---|---|
-| [`-core`](/docs/packages/core) | SPIs (`StorageDriver`, `MediaStore`, `ImageProcessor`), `StorageManager`, `MediaLibrary`, `uploadMode`, diagnostics, resumable-upload engine, tus handler |
-| [`(umbrella)`](/docs/packages/nestjs) | NestJS `MediaModule` + `MediaService` + tus controller + the `/storage` subpath |
+| [`-core`](/docs/packages/core) | SPIs (`MediaStore`, `ImageProcessor`, `MultipartUploadDriver`), `MediaLibrary`, attachments, `uploadMode`, folder listing, capabilities, diagnostics, resumable-upload engine, tus handler — on `@nestjs/storage` disks |
+| [`(umbrella)`](/docs/packages/nestjs) | NestJS `MediaModule` + `MediaService` (`serve`, `authorize`) + upload controllers |
 | [`-client`](/docs/packages/client) | framework-agnostic browser client — `uploadMedia` (tus) + `mediaUrl` |
-| [`-disk-local`](/docs/packages/disk-local) | local filesystem driver |
-| [`-disk-s3`](/docs/packages/disk-s3) | S3 driver (presign + native multipart) |
+| [`-disk-s3`](/docs/packages/disk-s3) | `s3Multipart()`: native multipart + delimiter listing for `S3Disk` |
 | [`-image-sharp`](/docs/packages/image-sharp) | sharp-backed `ImageProcessor` |
-| [`-database-typeorm`](/docs/packages/database-typeorm) | TypeORM media store (non-destructive auto-schema) |
+| [`-database-typeorm`](/docs/packages/database-typeorm) | TypeORM media store (non-destructive auto-schema); `/nest`: `typeOrmMediaStore({ connectionName })` |
 | [`-database-mikro-orm`](/docs/packages/database-mikro-orm) | MikroORM media store (safe auto-schema) |
-| [`-database-drizzle`](/docs/packages/database-drizzle) | Drizzle media store (sqlite, migration-first) |
+| [`-database-drizzle`](/docs/packages/database-drizzle) | Drizzle media stores (sqlite, `/pg`, migration-first); `/nest`: factories on `@nestjs/drizzle` |
 | [`-database-prisma`](/docs/packages/database-prisma) | Prisma media store (consumer-managed schema) |
 | [`-telescope`](/docs/packages/telescope) | Telescope watcher consuming `nestjs:media:*` |
 | [`-codegen`](/docs/packages/codegen) | Codegen extension emitting a typed media client |
 | [`-react`](/docs/packages/react) | `useMediaUpload` hook + `MediaUploader` component |
-| [`-testing`](/docs/packages/testing) | in-memory driver/store/upload-session + conformance suites |
+| [`-testing`](/docs/packages/testing) | in-memory store/upload-session, `storageOf()`, conformance suites |
 | [`-dashboard`](/docs/packages/dashboard) | standalone `/media` console (SPA + JSON API) — disks, live uploads, media library |
 
 ## How they layer
@@ -32,10 +31,10 @@ Everything ships under the `@dudousxd/nestjs-media*` scope, versioned together. 
 -react ─┐
         ├─▸ -client ──▸ (tus HTTP) ──▸ umbrella ─▸ -core
 -codegen┘                                          │
-                          -disk-local / -disk-s3 ──┤  (StorageDriver)
+     @nestjs/storage disks (+ -disk-s3 side-car) ──┤  (StorageDisk, MultipartUploadDriver)
                           -image-sharp ────────────┤  (ImageProcessor)
    -database-{typeorm,mikro-orm,drizzle,prisma} ───┤  (MediaStore)
                           -telescope ──────────────┘  (diagnostics consumer)
 ```
 
-`-core` defines the contracts; everything else either implements one (disks, stores, the image engine) or consumes the library (the umbrella module, the glue points). Start at [`-core`](/docs/packages/core) for the SPIs, or jump to the package you're wiring.
+`-core` defines the contracts; everything else either implements one (the S3 side-car, stores, the image engine) or consumes the library (the umbrella module, the glue points). Start at [`-core`](/docs/packages/core) for the SPIs, or jump to the package you're wiring.

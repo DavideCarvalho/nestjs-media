@@ -12,7 +12,7 @@ A `MediaStore` backed by Drizzle ORM. The store is a POJO that receives your dri
 import { DrizzleMediaStore, createMediaTable, mediaTable } from '@dudousxd/nestjs-media-database-drizzle';
 
 createMediaTable(db);   // dev/test helper — see below
-MediaModule.forRoot({ default: 's3', disks: { s3 }, store: new DrizzleMediaStore(db) });
+MediaModule.forRoot({ store: new DrizzleMediaStore(db) });
 ```
 
 ## Migration-first
@@ -35,8 +35,6 @@ const db = drizzle(process.env.DATABASE_URL!);
 await createMediaPgTables(db); // dev/test helper — use drizzle-kit migrations in production
 
 MediaModule.forRoot({
-  default: 's3',
-  disks: { s3 },
   store: new DrizzlePgMediaStore(db),
   // resumable uploads: persist sessions + multipart ETags in Postgres
   uploadSessions: new DrizzlePgUploadSessionStore(db),
@@ -53,6 +51,25 @@ MediaModule.forRoot({
 | `DrizzlePgDatabase` | the accepted db type (`PgDatabase<any, any, any>`) |
 
 For drizzle-kit, re-export `mediaPgTable`, `mediaUploadSessionsPgTable` and `mediaUploadPartsPgTable` from your schema file and generate migrations as usual.
+
+## On a `@nestjs/drizzle` connection (`/nest`)
+
+With `@nestjs/drizzle`, let Nest inject the database instead of building it yourself:
+
+```ts
+import {
+  drizzleMediaStore,        // sqlite/libSQL store
+  drizzlePgMediaStore,      // Postgres store
+  drizzlePgUploadSessions,  // Postgres upload sessions
+} from '@dudousxd/nestjs-media-database-drizzle/nest';
+
+MediaModule.forRoot({
+  store: drizzlePgMediaStore({ connectionName: 'media' }),       // DrizzleModule.forRoot({ name: 'media', ... })
+  uploadSessions: drizzlePgUploadSessions({ connectionName: 'media' }),
+});
+```
+
+Each returns `{ inject: [getDrizzleToken(connectionName)], useFactory }`; omit `connectionName` for the default connection. `@nestjs/drizzle` is an optional peer, loaded only by the `/nest` entry.
 
 ## Attachment column
 
@@ -72,4 +89,4 @@ On write it `JSON.stringify`s the `Attachment` (or stores `null`); on read it re
 
 ## Peer dependencies
 
-`drizzle-orm` (`>=0.38 <1`, tested on 0.45) and `@dudousxd/nestjs-media-core`, plus a driver (`better-sqlite3`, `libsql`, … — or `pg` / `postgres` for `/pg`). See [Concepts → Persistence](/docs/concepts/persistence) and [Concepts → Attachments](/docs/concepts/attachments).
+`drizzle-orm` (`>=0.38 <1`, tested on 0.45) and `@dudousxd/nestjs-media-core`, plus a driver (`better-sqlite3`, `libsql`, … — or `pg` / `postgres` for `/pg`); optionally `@nestjs/drizzle` for `/nest`. See [Concepts → Persistence](/docs/concepts/persistence) and [Concepts → Attachments](/docs/concepts/attachments).

@@ -2,33 +2,29 @@ import { Readable } from 'node:stream';
 import type {
   MediaListResult,
   MediaStore,
-  ReadRangeOptions,
-  StorageManager,
+  MultipartUploadDriver,
   UploadSession,
   UploadSessionStore,
 } from '@dudousxd/nestjs-media-core';
+import { storageOf } from '@dudousxd/nestjs-media-testing';
+import { HttpException } from '@nestjs/common';
+import { InMemoryDisk, S3Disk, type Storage } from '@nestjs/storage';
 import { describe, expect, it } from 'vitest';
-import {
-  MediaConsoleService,
-  RangeNotSatisfiableException,
-  type RequestedReadRange,
-} from './media-console.service.js';
+import { MediaConsoleService } from './media-console.service.js';
 
-function fakeStorage(): StorageManager {
-  const driver = {
-    capabilities: { presign: true, multipart: true, publicUrls: false, list: true },
-  };
-  return {
-    defaultDisk: 'primary',
-    diskNames: () => ['primary', 'secondary'],
-    disk: () => driver,
-  } as unknown as StorageManager;
+function fakeStorage(): Storage {
+  return storageOf({ primary: new InMemoryDisk(), secondary: new InMemoryDisk() }, 'primary');
+}
+
+async function seeded(keys: string[], disk = new InMemoryDisk()): Promise<InMemoryDisk> {
+  for (const key of keys) await disk.put(key, `body of ${key}`);
+  return disk;
 }
 
 describe('MediaConsoleService', () => {
   it('degrades every capability to an empty shape when nothing is configured', async () => {
     const service = new MediaConsoleService(null, null, null, null);
-    expect(service.listDisks()).toEqual({ disks: [] });
+    expect(await service.listDisks()).toEqual({ disks: [] });
     expect(await service.listUploads({})).toEqual({ uploads: [] });
     expect(await service.listCollections()).toEqual({ collections: [] });
     expect(await service.listLibrary({})).toEqual({ records: [] });
@@ -40,13 +36,37 @@ describe('MediaConsoleService', () => {
     });
   });
 
-  it('lists disks with default flag + capabilities', () => {
-    const service = new MediaConsoleService(fakeStorage(), null, null, true);
-    const result = service.listDisks();
+  it('lists disks with default flag + capabilities computed from the disk and its side-car', async () => {
+    const storage = storageOf(
+      {
+        primary: new S3Disk({
+          bucket: 'media-bucket',
+          region: 'us-east-1',
+          credentials: { accessKeyId: 'a', secretAccessKey: 's' },
+        }),
+        secondary: new InMemoryDisk({ publicUrl: 'https://cdn.example' }),
+      },
+      'primary',
+    );
+    const service = new MediaConsoleService(storage, null, null, true, null, null, {
+      primary: {} as MultipartUploadDriver,
+    });
+    const result = await service.listDisks();
     expect(result.disks.map((d) => d.name)).toEqual(['primary', 'secondary']);
     expect(result.disks[0]?.default).toBe(true);
     expect(result.disks[1]?.default).toBe(false);
-    expect(result.disks[0]?.capabilities.presign).toBe(true);
+    expect(result.disks[0]?.capabilities).toEqual({
+      presign: true,
+      multipart: true,
+      publicUrls: false,
+      list: true,
+      ranged: true,
+    });
+    expect(result.disks[1]?.capabilities).toMatchObject({
+      presign: false,
+      multipart: false,
+      publicUrls: true,
+    });
     expect(service.topology().actions).toBe(true);
   });
 
@@ -99,227 +119,166 @@ describe('MediaConsoleService', () => {
     expect(result.cursor).toBe('next');
     expect(service.topology().hasStore).toBe(true);
   });
+});
 
-  it('drops phantom empty-name folders (leading-slash CommonPrefix) from a listing', async () => {
-    const driver = {
-      capabilities: { presign: true, multipart: true, publicUrls: false, list: true },
-      list: async () => ({
-        // A stray leading-slash key makes S3 emit a "/" CommonPrefix (empty name) — the self-
-        // referential trap that froze the tree. It must not reach the client.
-        folders: ['/', 'bases/', 'templates/'],
-        files: [{ key: 'a.txt', name: 'a.txt', sizeBytes: 1, lastModified: null }],
+describe('MediaConsoleService — listing', () => {
+  it('folds a flat listing into one folder level, hiding .keep files', async () => {
+    const disk = await seeded([
+      'docs/a.txt',
+      'docs/sub/b.txt',
+      'docs/sub/deep/c.txt',
+      'docs/empty/.keep',
+      'top.txt',
+    ]);
+    const service = new MediaConsoleService(storageOf({ primary: disk }), null, null, true);
+
+    const root = await service.listObjects('primary', {});
+    expect(root.folders).toEqual([{ name: 'docs', prefix: 'docs/' }]);
+    expect(root.files.map((f) => f.name)).toEqual(['top.txt']);
+
+    const docs = await service.listObjects('primary', { prefix: 'docs' });
+    expect(docs.folders.map((f) => f.prefix)).toEqual(['docs/empty/', 'docs/sub/']);
+    expect(docs.files).toEqual([
+      expect.objectContaining({ key: 'docs/a.txt', name: 'a.txt', sizeBytes: 18 }),
+    ]);
+
+    const empty = await service.listObjects('primary', { prefix: 'docs/empty/' });
+    expect(empty).toEqual({ folders: [], files: [] });
+  });
+
+  it('pages a folded listing with a cursor, never repeating a folder', async () => {
+    const disk = await seeded(['a/1', 'a/2', 'b.txt', 'c/1', 'd.txt']);
+    const service = new MediaConsoleService(storageOf({ primary: disk }), null, null, true);
+    const seen: string[] = [];
+    let cursor: string | undefined;
+    do {
+      const page = await service.listObjects('primary', {
+        limit: 2,
+        ...(cursor ? { cursor } : {}),
+      });
+      seen.push(...page.folders.map((f) => f.prefix), ...page.files.map((f) => f.key));
+      cursor = page.cursor;
+    } while (cursor);
+    expect(seen).toEqual(['a/', 'b.txt', 'c/', 'd.txt']);
+  });
+
+  it('uses the side-car delimiter listing when it has one, dropping phantom folders', async () => {
+    const sidecar = {
+      listFolders: async () => ({
+        folders: ['bases/', 'templates/', '/'],
+        files: [{ key: 'a.txt', size: 1, lastModified: new Date(0) }],
       }),
-    };
-    const storage = {
-      defaultDisk: 'primary',
-      diskNames: () => ['primary'],
-      disk: () => driver,
-    } as unknown as StorageManager;
-    const service = new MediaConsoleService(storage, null, null, true);
-
-    const result = await service.listObjects('primary', {});
-    expect(result.folders.map((folder) => folder.prefix)).toEqual(['bases/', 'templates/']);
-  });
-
-  it('deletes a folder recursively: flat listing (empty delimiter), paginated, marker last', async () => {
-    const listCalls: Array<{ prefix: string; delimiter?: string; cursor?: string }> = [];
-    const deleted: string[] = [];
-    const driver = {
-      capabilities: { presign: true, multipart: true, publicUrls: false, list: true },
-      list: async (
-        prefix: string,
-        options?: { delimiter?: string; cursor?: string; limit?: number },
-      ) => {
-        listCalls.push({
-          prefix,
-          ...(options?.delimiter !== undefined ? { delimiter: options.delimiter } : {}),
-          ...(options?.cursor !== undefined ? { cursor: options.cursor } : {}),
-        });
-        if (options?.cursor === undefined) {
-          return {
-            folders: [],
-            files: [{ key: 'reports/deep/a.txt', name: 'deep/a.txt' }],
-            cursor: 'p2',
-          };
-        }
-        return { folders: [], files: [{ key: 'reports/b.txt', name: 'b.txt' }] };
-      },
-      delete: async (key: string) => {
-        deleted.push(key);
-      },
-    };
-    const storage = {
-      defaultDisk: 'primary',
-      diskNames: () => ['primary'],
-      disk: () => driver,
-    } as unknown as StorageManager;
-    const service = new MediaConsoleService(storage, null, null, true);
-
-    await service.deleteFolder('primary', 'reports');
-
-    // Every list call swept the folder prefix with an EMPTY delimiter (flat, so nested keys surface).
-    expect(listCalls.every((call) => call.prefix === 'reports/' && call.delimiter === '')).toBe(
+    } as unknown as MultipartUploadDriver;
+    const service = new MediaConsoleService(
+      storageOf({ primary: new InMemoryDisk() }),
+      null,
+      null,
       true,
+      null,
+      null,
+      { primary: sidecar },
     );
-    expect(listCalls.map((call) => call.cursor)).toEqual([undefined, 'p2']);
-    // Nested files across both pages, then the folder marker itself, deleted last.
-    expect(deleted).toEqual(['reports/deep/a.txt', 'reports/b.txt', 'reports/']);
+    const result = await service.listObjects('primary', {});
+    expect(result.folders.map((f) => f.name)).toEqual(['bases', 'templates']);
+    expect(result.files.map((f) => f.key)).toEqual(['a.txt']);
   });
 
-  it('deletes each listed page of a folder in one deleteMany call when the disk supports it', async () => {
-    const batches: string[][] = [];
-    const deleted: string[] = [];
-    const driver = {
-      capabilities: { presign: true, multipart: true, publicUrls: false, list: true },
-      list: async (_prefix: string, options?: { cursor?: string }) => {
-        if (options?.cursor === undefined) {
-          return {
-            folders: [],
-            files: [
-              { key: 'reports/a.txt', name: 'a.txt' },
-              { key: 'reports/deep/b.txt', name: 'deep/b.txt' },
-            ],
-            cursor: 'p2',
-          };
-        }
-        return { folders: [], files: [{ key: 'reports/c.txt', name: 'c.txt' }] };
-      },
-      deleteMany: async (keys: string[]) => {
-        batches.push(keys);
-      },
-      delete: async (key: string) => {
-        deleted.push(key);
-      },
-    };
-    const storage = {
-      defaultDisk: 'primary',
-      diskNames: () => ['primary'],
-      disk: () => driver,
-    } as unknown as StorageManager;
-    const service = new MediaConsoleService(storage, null, null, true);
-
-    await service.deleteFolder('primary', 'reports');
-
-    expect(batches).toEqual([['reports/a.txt', 'reports/deep/b.txt'], ['reports/c.txt']]);
-    expect(deleted).toEqual(['reports/']);
+  it('answers 400 for a prefix no disk accepts, 404 for an unknown disk', async () => {
+    const service = new MediaConsoleService(fakeStorage(), null, null, true);
+    await expect(service.listObjects('primary', { prefix: 'a/../b' })).rejects.toMatchObject({
+      status: 400,
+    });
+    await expect(service.listObjects('nope', {})).rejects.toMatchObject({ status: 404 });
   });
 
-  it('moves a folder recursively, preserving relative paths and relocating the marker', async () => {
-    const moves: Array<{ from: string; to: string }> = [];
-    const puts: string[] = [];
-    const deletes: string[] = [];
-    const driver = {
-      capabilities: { presign: true, multipart: true, publicUrls: false, list: true },
-      list: async (_prefix: string, options?: { cursor?: string }) => {
-        if (options?.cursor === undefined) {
-          return { folders: [], files: [{ key: 'bases/deep/a.txt', name: 'deep/a.txt' }] };
-        }
-        return { folders: [], files: [] };
-      },
-      move: async (from: string, to: string) => {
-        moves.push({ from, to });
-      },
-      put: async (key: string) => {
-        puts.push(key);
-      },
-      delete: async (key: string) => {
-        deletes.push(key);
-      },
-    };
-    const storage = {
-      defaultDisk: 'primary',
-      diskNames: () => ['primary'],
-      disk: () => driver,
-    } as unknown as StorageManager;
-    const service = new MediaConsoleService(storage, null, null, true);
+  it('answers 400 for a forged cursor, not 500', async () => {
+    const service = new MediaConsoleService(fakeStorage(), null, null, true);
+    for (const cursor of ['not-a-cursor', Buffer.from('{"o":-1}').toString('base64url')]) {
+      const error = await service.listObjects('primary', { cursor }).catch((e: unknown) => e);
+      expect(error).toBeInstanceOf(HttpException);
+      expect(error).toMatchObject({ status: 400 });
+    }
+  });
+});
 
-    await service.moveFolder('primary', 'bases', 'primary', 'templates/bases');
+describe('MediaConsoleService — actions', () => {
+  it('creates a folder as a hidden .keep file (no invalid `prefix/` marker)', async () => {
+    const disk = new InMemoryDisk();
+    const service = new MediaConsoleService(storageOf({ primary: disk }), null, null, true);
+    await service.createFolder('primary', '/reports/2026/');
+    expect(disk.keys()).toEqual(['reports/2026/.keep']);
+    expect((await service.listObjects('primary', { prefix: 'reports/' })).folders).toEqual([
+      { name: '2026', prefix: 'reports/2026/' },
+    ]);
+    await expect(service.createFolder('primary', '  ')).rejects.toMatchObject({ status: 400 });
+    await expect(service.createFolder('primary', 'a//b')).rejects.toMatchObject({ status: 400 });
+  });
 
-    // Each key relocates under the destination with its relative path intact.
-    expect(moves).toEqual([{ from: 'bases/deep/a.txt', to: 'templates/bases/deep/a.txt' }]);
-    // Destination marker written, source marker removed.
-    expect(puts).toEqual(['templates/bases/']);
-    expect(deletes).toEqual(['bases/']);
+  it('deletes a folder recursively, nested keys and .keep included, nothing else', async () => {
+    const disk = await seeded(['f/a', 'f/sub/b', 'f/.keep', 'fx/keep-me', 'other']);
+    const service = new MediaConsoleService(storageOf({ primary: disk }), null, null, true);
+    await service.deleteFolder('primary', 'f');
+    expect(disk.keys()).toEqual(['fx/keep-me', 'other']);
+  });
+
+  it('moves a folder recursively, preserving relative paths', async () => {
+    const disk = await seeded(['src/a.txt', 'src/sub/b.txt', 'src/.keep']);
+    const service = new MediaConsoleService(storageOf({ primary: disk }), null, null, true);
+    await service.moveFolder('primary', 'src', 'primary', 'dst/');
+    expect(disk.keys()).toEqual(['dst/.keep', 'dst/a.txt', 'dst/sub/b.txt']);
   });
 
   it('rejects moving a folder into itself or a descendant (same disk)', async () => {
-    const driver = {
-      capabilities: { presign: true, multipart: true, publicUrls: false, list: true },
-    };
-    const storage = {
-      defaultDisk: 'primary',
-      diskNames: () => ['primary'],
-      disk: () => driver,
-    } as unknown as StorageManager;
-    const service = new MediaConsoleService(storage, null, null, true);
-    await expect(service.moveFolder('primary', 'bases', 'primary', 'bases/sub')).rejects.toThrow(
+    const service = new MediaConsoleService(fakeStorage(), null, null, true);
+    await expect(service.moveFolder('primary', 'a', 'primary', 'a/b')).rejects.toThrow(
       /into itself/,
     );
+    await expect(service.copyFolder('primary', 'a', 'primary', 'a')).rejects.toThrow(/into itself/);
   });
 
-  it('moves an object across disks by streaming get→put→delete (no driver copy/move)', async () => {
-    const primaryOps: string[] = [];
-    const secondaryPuts: Array<{ key: string; contentType?: string }> = [];
-    const primary = {
-      capabilities: { presign: true, multipart: true, publicUrls: false, list: true },
-      stat: async () => ({ size: 12, contentType: 'image/png' }),
-      get: async () => {
-        primaryOps.push('get');
-        return Buffer.from('hello world!');
-      },
-      delete: async (key: string) => {
-        primaryOps.push(`delete:${key}`);
-      },
-      copy: async () => {
-        throw new Error('driver.copy must not be used across disks');
-      },
-      move: async () => {
-        throw new Error('driver.move must not be used across disks');
-      },
-    };
-    const secondary = {
-      capabilities: { presign: true, multipart: true, publicUrls: false, list: true },
-      put: async (key: string, _body: Buffer, options?: { contentType?: string }) => {
-        secondaryPuts.push({
-          key,
-          ...(options?.contentType ? { contentType: options.contentType } : {}),
-        });
-      },
-    };
-    const storage = {
-      defaultDisk: 'primary',
-      diskNames: () => ['primary', 'secondary'],
-      disk: (name: string) => (name === 'secondary' ? secondary : primary),
-    } as unknown as StorageManager;
-    const service = new MediaConsoleService(storage, null, null, true);
-
-    await service.moveObject('primary', 'a/logo.png', 'secondary', 'b/logo.png');
-
-    // Bytes stream through the pod, content type is preserved, and the source is removed for a move.
-    expect(primaryOps).toEqual(['get', 'delete:a/logo.png']);
-    expect(secondaryPuts).toEqual([{ key: 'b/logo.png', contentType: 'image/png' }]);
+  it('copies a folder across disks, streaming each file with its content type', async () => {
+    const from = new InMemoryDisk();
+    await from.put('p/x.json', '{"a":1}', { contentType: 'application/json' });
+    await from.put('p/y/z.bin', Buffer.alloc(3, 7));
+    const to = new InMemoryDisk();
+    const service = new MediaConsoleService(storageOf({ from, to }), null, null, true);
+    await service.copyFolder('from', 'p', 'to', 'q');
+    expect(to.keys()).toEqual(['q/x.json', 'q/y/z.bin']);
+    expect((await to.stat('q/x.json')).contentType).toBe('application/json');
+    expect(from.keys()).toEqual(['p/x.json', 'p/y/z.bin']);
   });
 
-  it('rejects a cross-disk transfer larger than the buffered ceiling', async () => {
-    const primary = {
-      capabilities: { presign: true, multipart: true, publicUrls: false, list: true },
-      stat: async () => ({ size: 200 * 1024 * 1024, contentType: 'application/octet-stream' }),
-      get: async () => Buffer.alloc(0),
-    };
-    const secondary = {
-      capabilities: { presign: true, multipart: true, publicUrls: false, list: true },
-      put: async () => undefined,
-    };
-    const storage = {
-      defaultDisk: 'primary',
-      diskNames: () => ['primary', 'secondary'],
-      disk: (name: string) => (name === 'secondary' ? secondary : primary),
-    } as unknown as StorageManager;
-    const service = new MediaConsoleService(storage, null, null, true);
+  it('moves an object across disks by streaming get→put, then deletes the source; no size cap', async () => {
+    const from = new InMemoryDisk();
+    const big = Buffer.alloc(150 * 1024 * 1024, 1);
+    await from.put('big.bin', big);
+    const to = new InMemoryDisk();
+    const service = new MediaConsoleService(storageOf({ from, to }), null, null, true);
+    await service.moveObject('from', 'big.bin', 'to', 'moved/big.bin');
+    expect(await from.exists('big.bin')).toBe(false);
+    expect((await to.stat('moved/big.bin')).size).toBe(big.length);
+  });
 
+  it('streams an upload onto the disk, and refuses a body shorter than its Content-Length', async () => {
+    const disk = new InMemoryDisk();
+    const service = new MediaConsoleService(storageOf({ primary: disk }), null, null, true);
+    await service.putObject(
+      'primary',
+      'u/a.txt',
+      Readable.from([Buffer.from('hi')]),
+      'text/plain',
+      2,
+    );
+    expect(await disk.getText('u/a.txt')).toBe('hi');
     await expect(
-      service.copyObject('primary', 'huge.bin', 'secondary', 'huge.bin'),
-    ).rejects.toThrow(/too large|limit/i);
+      service.putObject('primary', 'u/b.txt', Readable.from([Buffer.from('h')]), 'text/plain', 2),
+    ).rejects.toBeInstanceOf(HttpException);
+    expect(await disk.exists('u/b.txt')).toBe(false);
+  });
+
+  it('a missing object is a 404', async () => {
+    const service = new MediaConsoleService(fakeStorage(), null, null, true);
+    await expect(service.objectDetail('primary', 'missing')).rejects.toMatchObject({ status: 404 });
   });
 });
 
@@ -399,160 +358,27 @@ describe('MediaConsoleService.objectInsights', () => {
   });
 });
 
-describe('MediaConsoleService.objectStream ranges', () => {
-  const CONTENT = 'abcdefghij';
-
-  /** A disk holding one 10-byte object, recording the range each `stream()` was asked for. */
-  function rangedStorage(options?: { ranged?: boolean; size?: number }) {
-    const asked: Array<ReadRangeOptions | undefined> = [];
-    const size = options?.size ?? CONTENT.length;
-    const driver = {
-      capabilities: {
-        presign: true,
-        multipart: true,
-        publicUrls: false,
-        list: true,
-        ranged: options?.ranged ?? true,
-      },
-      stat: async () => ({ size, contentType: 'text/plain' }),
-      stream: async (_key: string, range?: ReadRangeOptions) => {
-        asked.push(range);
-        const slice = range
-          ? CONTENT.slice(range.start, range.end === undefined ? undefined : range.end + 1)
-          : CONTENT;
-        return Readable.from(Buffer.from(slice));
-      },
-    };
-    const storage = {
-      defaultDisk: 'primary',
-      diskNames: () => ['primary'],
-      disk: () => driver,
-    } as unknown as StorageManager;
-    return { storage, asked };
-  }
-
-  const drain = async (stream: Readable): Promise<string> => {
-    const chunks: Buffer[] = [];
-    for await (const chunk of stream) chunks.push(Buffer.from(chunk));
-    return Buffer.concat(chunks).toString();
-  };
-
-  it('leaves a range-less read exactly as it was: whole body, no resolved range', async () => {
-    const { storage, asked } = rangedStorage();
-    const service = new MediaConsoleService(storage, null, null, false);
-    const result = await service.objectStream('primary', 'a.txt');
-    expect(result.size).toBe(10);
-    expect(result.contentType).toBe('text/plain');
-    expect(result.range).toBeUndefined();
-    expect(asked).toEqual([undefined]);
-    expect(await drain(result.stream)).toBe(CONTENT);
-  });
-
-  it('passes a satisfiable range through and reports it absolutely, with the OBJECT size', async () => {
-    const { storage, asked } = rangedStorage();
-    const service = new MediaConsoleService(storage, null, null, false);
-    const result = await service.objectStream('primary', 'a.txt', { start: 2, end: 4 });
-    expect(asked).toEqual([{ start: 2, end: 4 }]);
-    expect(result.range).toEqual({ start: 2, end: 4 });
-    // `size` is the whole object, not the slice — it is the denominator of `Content-Range`.
-    expect(result.size).toBe(10);
-    expect(await drain(result.stream)).toBe('cde');
-  });
-
-  it('clamps an end past EOF instead of failing — the tail of a file is an ordinary read', async () => {
-    const { storage, asked } = rangedStorage();
-    const service = new MediaConsoleService(storage, null, null, false);
-    const result = await service.objectStream('primary', 'a.txt', { start: 6, end: 99999 });
-    expect(asked).toEqual([{ start: 6, end: 9 }]);
-    expect(result.range).toEqual({ start: 6, end: 9 });
-    expect(await drain(result.stream)).toBe('ghij');
-  });
-
-  it('resolves an omitted end to the last byte', async () => {
-    const { storage } = rangedStorage();
-    const service = new MediaConsoleService(storage, null, null, false);
-    const result = await service.objectStream('primary', 'a.txt', { start: 8 });
-    expect(result.range).toEqual({ start: 8, end: 9 });
-  });
-
-  it('resolves the suffix form (`bytes=-N`) against the size, and clamps an oversized suffix', async () => {
-    const { storage } = rangedStorage();
-    const service = new MediaConsoleService(storage, null, null, false);
-    expect((await service.objectStream('primary', 'a.txt', { suffixLength: 3 })).range).toEqual({
-      start: 7,
-      end: 9,
-    });
-    // A suffix longer than the object is the whole object, not a negative start.
-    expect((await service.objectStream('primary', 'a.txt', { suffixLength: 500 })).range).toEqual({
-      start: 0,
-      end: 9,
-    });
-  });
-
-  it('416s an unsatisfiable range, carrying the size the client needs to re-ask', async () => {
-    const { storage, asked } = rangedStorage();
-    const service = new MediaConsoleService(storage, null, null, false);
-    const cases: RequestedReadRange[] = [
-      { start: 10 }, // exactly at EOF — there is no byte 10 in a 10-byte object
-      { start: 40, end: 60 }, // wholly past EOF
-      { start: 5, end: 2 }, // inverted
-      { suffixLength: 0 }, // `bytes=-0` asks for nothing
-    ];
-    for (const range of cases) {
-      const failure = await service
-        .objectStream('primary', 'a.txt', range)
-        .catch((e: unknown) => e);
-      expect(failure).toBeInstanceOf(RangeNotSatisfiableException);
-      expect((failure as RangeNotSatisfiableException).size).toBe(10);
-      expect((failure as RangeNotSatisfiableException).getStatus()).toBe(416);
-    }
-    // Nothing reached the driver — an unsatisfiable range never opens a body.
-    expect(asked).toEqual([]);
-  });
-
-  it('416s every range against a zero-byte object', async () => {
-    const { storage } = rangedStorage({ size: 0 });
-    const service = new MediaConsoleService(storage, null, null, false);
-    await expect(service.objectStream('primary', 'empty', { start: 0 })).rejects.toBeInstanceOf(
-      RangeNotSatisfiableException,
-    );
-  });
-
-  it('refuses a range on a driver that cannot serve one, rather than returning the whole object', async () => {
-    const { storage, asked } = rangedStorage({ ranged: false });
-    const service = new MediaConsoleService(storage, null, null, false);
-    // The silent alternative — 400 MB where 64 KB was asked for — is the whole reason `ranged` is a
-    // required capability, so this must be an error and not a full body.
-    await expect(service.objectStream('primary', 'a.txt', { start: 0, end: 9 })).rejects.toThrow(
-      /cannot serve byte ranges/,
-    );
-    expect(asked).toEqual([]);
-    // The un-ranged read still works on such a disk.
-    expect((await service.objectStream('primary', 'a.txt')).range).toBeUndefined();
-  });
-});
-
-/** A storage manager whose driver records how it was asked for a URL, so a test can tell a
- *  presigned URL apart from one the console built itself. */
-function urlStorage(options: { presign: boolean }): StorageManager {
-  const driver = {
-    capabilities: { presign: options.presign, multipart: true, publicUrls: false, list: true },
-    stat: async () => ({ size: 3, contentType: 'text/plain' }),
-    temporaryUrl: async (key: string, ttl: number) => `https://store.example/${key}?expires=${ttl}`,
-    url: async (key: string) => `https://store.example/${key}`,
-  };
-  return {
-    defaultDisk: 'primary',
-    diskNames: () => ['primary'],
-    disk: () => driver,
-  } as unknown as StorageManager;
-}
-
 describe('MediaConsoleService — objectUrls', () => {
-  it('presigns by default, and when the host asks for auto', async () => {
+  const s3 = () =>
+    new S3Disk({
+      bucket: 'media-bucket',
+      region: 'us-east-1',
+      credentials: { accessKeyId: 'a', secretAccessKey: 's' },
+    });
+
+  it('signs by default, and when the host asks for auto', async () => {
     for (const config of [null, { strategy: 'auto' as const, apiBasePath: '/api/media' }]) {
+      const disk = s3();
+      // `objectDetail` stats the object; stand in for S3 there, sign for real.
+      disk.stat = async (key) => ({
+        key,
+        size: 1,
+        contentType: 'text/csv',
+        lastModified: new Date(0),
+        metadata: {},
+      });
       const service = new MediaConsoleService(
-        urlStorage({ presign: true }),
+        storageOf({ primary: disk }),
         null,
         null,
         false,
@@ -560,27 +386,44 @@ describe('MediaConsoleService — objectUrls', () => {
         config,
       );
       const detail = await service.objectDetail('primary', 'reports/q1.csv');
-      expect(detail.url).toBe('https://store.example/reports/q1.csv?expires=300');
+      const url = new URL(detail.url);
+      expect(url.pathname).toBe('/reports/q1.csv');
+      expect(url.searchParams.get('X-Amz-Expires')).toBe('300');
     }
   });
 
-  it('falls back to the driver plain URL under auto when it cannot presign', async () => {
-    const service = new MediaConsoleService(urlStorage({ presign: false }), null, null, false);
-    const detail = await service.objectDetail('primary', 'reports/q1.csv');
-    expect(detail.url).toBe('https://store.example/reports/q1.csv');
+  it('uses the public URL when the disk has one', async () => {
+    const disk = await seeded(
+      ['reports/q1.csv'],
+      new InMemoryDisk({ publicUrl: 'https://cdn.example' }),
+    );
+    const service = new MediaConsoleService(storageOf({ primary: disk }), null, null, false);
+    expect((await service.objectDetail('primary', 'reports/q1.csv')).url).toBe(
+      'https://cdn.example/reports/q1.csv',
+    );
+  });
+
+  it('falls back to this server under auto when the disk can neither sign nor publish', async () => {
+    const disk = await seeded(['reports/q1.csv']);
+    const service = new MediaConsoleService(storageOf({ primary: disk }), null, null, false, null, {
+      strategy: 'auto',
+      apiBasePath: '/api/media/console',
+    });
+    expect((await service.objectDetail('primary', 'reports/q1.csv')).url).toBe(
+      '/api/media/console/disks/primary/object/raw?key=reports%2Fq1.csv',
+    );
   });
 
   it('routes through this server under proxy, never touching the store', async () => {
-    const service = new MediaConsoleService(
-      urlStorage({ presign: true }),
-      null,
-      null,
-      false,
-      null,
-      { strategy: 'proxy', apiBasePath: '/api/media/console' },
+    const disk = await seeded(
+      ['reports/q1 final.csv'],
+      new InMemoryDisk({ publicUrl: 'https://store.example' }),
     );
+    const service = new MediaConsoleService(storageOf({ primary: disk }), null, null, false, null, {
+      strategy: 'proxy',
+      apiBasePath: '/api/media/console',
+    });
     const detail = await service.objectDetail('primary', 'reports/q1 final.csv');
-    // Same-origin, rooted at the API mount, and the key survives a space intact.
     expect(detail.url).toBe(
       '/api/media/console/disks/primary/object/raw?key=reports%2Fq1%20final.csv',
     );

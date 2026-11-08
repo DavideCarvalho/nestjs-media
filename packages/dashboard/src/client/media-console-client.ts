@@ -69,47 +69,8 @@ async function sendRaw(path: string, body: Blob): Promise<void> {
   if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
 }
 
-/** A signed-in console user, or a prompt to log in, or "no auth configured" (open console). */
-export type ConsoleAuthState =
-  | { state: 'open' }
-  | { state: 'authenticated'; user: { id: string; name?: string; roles: string[] } }
-  | { state: 'login'; modes: string[] };
-
-/** Typed browser client for the /media console JSON API. Rides ambient cookies (host guards). */
+/** Typed browser client for the /media console JSON API. Rides ambient cookies to whatever protects the routes. */
 export const mediaConsoleClient = {
-  /** Who am I? Resolves the console's gate: open (no auth), authenticated, or "show login". */
-  me: async (): Promise<ConsoleAuthState> => {
-    const response = await fetch(`${apiBase()}/me`, { credentials: 'same-origin' });
-    if (response.status === 401) {
-      const body: unknown = await response.json().catch(() => null);
-      const modes =
-        typeof body === 'object' && body !== null && 'auth' in body
-          ? ((body as { auth?: { modes?: string[] } }).auth?.modes ?? ['login'])
-          : ['login'];
-      return { state: 'login', modes };
-    }
-    if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
-    const body = (await response.json()) as
-      | { authRequired: false }
-      | { user: { id: string; name?: string; roles: string[] } };
-    return 'user' in body ? { state: 'authenticated', user: body.user } : { state: 'open' };
-  },
-  /** Submit credentials to the built-in login; sets the session cookie on success (else throws). */
-  login: async (username: string, password: string): Promise<void> => {
-    const response = await fetch(`${apiBase()}/login`, {
-      method: 'POST',
-      credentials: 'same-origin',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username, password }),
-    });
-    if (!response.ok) {
-      throw new Error(response.status === 401 ? 'Invalid credentials' : `${response.status}`);
-    }
-  },
-  /** Clear the session cookie. */
-  logout: async (): Promise<void> => {
-    await fetch(`${apiBase()}/logout`, { method: 'POST', credentials: 'same-origin' });
-  },
   topology: (): Promise<Topology> => getJson('/topology'),
   disks: (): Promise<DiskListResponse> => getJson('/disks'),
   objects: (
@@ -245,10 +206,10 @@ export const mediaConsoleClient = {
       }),
       file,
     ),
-  /** Create a folder (a zero-byte marker at `<prefix>/`) on the disk. */
+  /** Create a folder (a hidden zero-byte `<prefix>/.keep`) on the disk. */
   createFolder: (disk: string, prefix: string): Promise<void> =>
     send('POST', `/disks/${encodeURIComponent(disk)}/folder`, { prefix }),
-  /** Recursively delete a folder (every object under `<prefix>/` plus the marker). */
+  /** Recursively delete a folder (every object under `<prefix>/`, its `.keep` included). */
   deleteFolder: (disk: string, prefix: string): Promise<void> =>
     send('DELETE', withQuery(`/disks/${encodeURIComponent(disk)}/folder`, { prefix })),
 };

@@ -1,16 +1,16 @@
 import { describe, expect, it } from 'vitest';
 import { UnsupportedOperationError } from './errors';
-import type { DriverCapabilities } from './types';
+import type { MediaDiskCapabilities } from './types';
 import { resolveUploadMode } from './upload-mode';
 
-const s3Caps: DriverCapabilities = {
+const s3Caps: MediaDiskCapabilities = {
   presign: true,
   multipart: true,
   publicUrls: true,
   list: true,
   ranged: true,
 };
-const localCaps: DriverCapabilities = {
+const localCaps: MediaDiskCapabilities = {
   presign: false,
   multipart: false,
   publicUrls: false,

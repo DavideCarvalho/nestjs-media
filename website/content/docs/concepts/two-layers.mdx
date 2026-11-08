@@ -1,66 +1,32 @@
 ---
 title: The two layers
 icon: Layers
-description: Storage (layer 1) is a disk-agnostic filesystem; media-library (layer 2) attaches files to entities on top of it. How they relate, and why they're split.
+description: Storage (layer 1) is @nestjs/storage; the media-library (layer 2) attaches files to entities on top of its disks. How they relate, and where the seam is.
 ---
 
 import { Callout } from 'fumadocs-ui/components/callout';
 
-The package is two layers stacked in one module. Understanding the seam between them is the key to using media well — and to knowing when you only need the bottom half.
+Two layers, and only the top one is nestjs-media. Understanding the seam between them is the key to using media well — and to knowing when you only need the bottom half.
 
 ## Why split at all?
 
 Plenty of file handling is *not* about entities. Writing a generated PDF to disk, caching a rendered image, letting the mail channel attach a buffer — these want a filesystem, nothing more. Meanwhile, "this user's avatar" or "this post's gallery with thumbnails" is genuinely a *media library*: files that belong to records, with rules and variants.
 
-Bundling both into one rigid API would make the simple case carry the weight of the complex one. So media keeps them as two layers with a single, narrow seam: **the media-library writes bytes through a disk and records metadata through a store.** Everything else is independent.
+NestJS's own `@nestjs/storage` is the filesystem; media is the library. The seam is narrow: **the media-library writes bytes through a `@nestjs/storage` disk and records metadata through a store.** Everything else is independent.
 
-## Layer 1 — Storage
+## Layer 1 — Storage (`@nestjs/storage`)
 
-A `StorageManager` holds named disks; each disk is a `StorageDriver`. You get it from `MediaService.disk()`:
+`StorageModule.forRoot({ disks })` configures named disks (`LocalDisk`, `S3Disk`, `InMemoryDisk`, or your own `StorageDisk`); inject `Storage` (`storage.disk(name)`) or a disk with `@InjectDisk(name)`. Writes, reads, ranges, listing, public and signed URLs, `serveFile()`, `uploadToDisk()`, typed errors and the key rule are all documented in [File storage](https://docs.nestjs.com/application/file-storage). media doesn't wrap any of it.
 
-```ts
-const disk = media.disk('s3');           // a named disk
-const def = media.disk();                // the configured default disk
+What media adds next to the disks, in `-core`:
 
-await disk.put('a/b.png', buffer, { contentType: 'image/png', visibility: 'public' });
-await disk.get('a/b.png');               // Buffer
-await disk.stream('a/b.png');            // Readable — stream large files, don't buffer
-await disk.url('a/b.png');               // stable public URL (throws if the disk has none)
-await disk.temporaryUrl('a/b.png', 300); // signed, expiring URL (presign-capable disks)
-await disk.exists('a/b.png');            // boolean
-await disk.size('a/b.png');              // bytes
-await disk.delete('a/b.png');            // idempotent — no error if absent
-await disk.copy(from, to);
-await disk.move(from, to);
-```
-
-### Capabilities
-
-Drivers are honest about what they can do, and the rest of the library reads this rather than special-casing vendors:
-
-```ts
-disk.capabilities; // { presign: boolean; multipart: boolean; publicUrls: boolean; list: boolean; ranged: boolean }
-```
-
-`publicUrls` gates `url()`, `presign` gates `temporaryUrl()` and is consulted by [`uploadMode`](/docs/concepts/uploads) to decide direct vs proxied uploads, `list` gates prefix enumeration, and `ranged` gates `stream(path, { start, end })` — the seek that lets the console read a page out of a multi-gigabyte object instead of transferring it. A driver that can't do something throws `UnsupportedOperationError` instead of silently faking it.
-
-### Errors
-
-The storage layer raises typed errors with stable `code`s — `FileNotFoundError` (`MEDIA_FILE_NOT_FOUND`), `UnknownDiskError` (`MEDIA_UNKNOWN_DISK`), `UnsupportedOperationError` (`MEDIA_UNSUPPORTED_OP`) — so you can branch on `err.code` rather than message strings.
-
-<Callout type="info" title="Raw-storage consumers">
-Other libraries (mail attachments, durable large-file steps) that just need a filesystem import the facade directly via the subpath, without pulling in the media-library layer:
-
-```ts
-import { StorageManager, type StorageDriver } from '@dudousxd/nestjs-media/storage';
-```
-
-This is the whole reason media *absorbed* storage instead of shipping a separate `nestjs-storage`: there's one filesystem abstraction, and the media library is just its biggest consumer.
-</Callout>
+- **Capabilities** — `diskCapabilities(disk, sidecar)` computes `{ presign, multipart, publicUrls, list, ranged }` for the dashboard, telescope and [`uploadMode`](/docs/concepts/uploads): `presign` when `signedUrl()` works, `publicUrls` when `url()` works, `multipart` when a [multipart side-car](/docs/packages/disk-s3) is configured for the disk.
+- **Folders** — `StorageDisk.list()` is flat. `listFolderLevel(disk, prefix, page, sidecar)` asks the side-car for one delimiter level (S3), or folds the flat listing with `foldListing()`.
+- **Keys** — `keySegment(text)` turns untrusted text into one segment the disks accept; `assertMediaKey(key)` checks a whole key against the same rule.
 
 ## Layer 2 — Media-library
 
-`MediaLibrary` (exposed as `media.library`) attaches files to **owning entities** in named **collections**. It writes the bytes through a disk and persists a `MediaRecord` through a `MediaStore`.
+`MediaLibrary` (exposed as `media.library`) attaches files to **owning entities** in named **collections**. It writes the bytes through a `@nestjs/storage` disk and persists a `MediaRecord` through a `MediaStore`.
 
 ```ts
 const record = await media.library.attach({
@@ -75,12 +41,15 @@ const record = await media.library.attach({
 
 await media.library.list('Post', '42', 'gallery'); // ordered MediaRecord[]
 await media.library.list('Post', '42');             // all collections for the owner
-await media.library.url(record.id);                  // url to the original
+await media.library.url(record.id);                  // public URL, else a signed one
 await media.library.url(record.id, 'thumb');         // url to a conversion (lazily generated)
+await media.library.locate(record.id, 'thumb');      // { record, disk, path, fileName }
 await media.library.delete(record.id);               // removes record + bytes + every conversion
 ```
 
-`attach` derives a deterministic storage path (`ownerType/ownerId/collection/<id>/fileName`), writes the bytes, reads the size back if you didn't supply it, computes the next `order` in the collection, and saves the record. `delete` cleans up the original *and* all generated conversion files before removing the row — no orphans.
+`attach` derives a deterministic storage path (`ownerType/ownerId/collection/<id>/fileName`, each segment through `keySegment()`), writes the bytes, takes the size from the write, computes the next `order` in the collection, and saves the record. `delete` removes the original *and* all generated conversion files (one `delete([...])` per disk) before removing the row — no orphans.
+
+`url()` returns the disk's public URL when it has a `publicUrl`, else a signed URL (`signedUrl()`, 15 minutes unless you pass `{ expiresIn }`). To stream files through your app instead, with an authorization check, use [`MediaService.serve()`](/docs/recipes/serving-files).
 
 ### Binding an owner
 
@@ -125,7 +94,7 @@ collections: [
 | Option | Effect |
 |---|---|
 | `single` | Attaching replaces any existing media in the collection (old record + bytes are deleted first) |
-| `disk` | Target disk for this collection (else the module default) |
+| `disk` | Target disk for this collection (else `StorageModule`'s default disk) |
 | `acceptsMimeTypes` | Allow-list; other types are rejected with `MimeNotAllowedError` before any bytes are written |
 | `conversions` | Image presets available for this collection (see [Conversions](/docs/concepts/conversions)) |
 

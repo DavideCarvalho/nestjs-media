@@ -10,6 +10,7 @@ import {
   Put,
   Req,
 } from '@nestjs/common';
+import { OpenToAuthorization } from './controller-decorators';
 import { MEDIA_UPLOADS } from './tokens';
 
 /** Express-like request exposing the raw body Buffer (host must mount a raw parser on the parts path). */
@@ -27,6 +28,9 @@ interface ReqLike {
  * The app MUST mount a raw-body parser with a per-part size cap on
  * `…/media/uploads/:id/parts/:n` so the PUT body arrives as a Buffer.
  */
+// Open to `@nestjs/authorization`'s deny-by-default guard; the host's `decorators` (or its own
+// subclass, with `routes: false`) decide access.
+@OpenToAuthorization()
 @Controller('media/uploads')
 export class MediaMultipartUploadController {
   constructor(@Inject(MEDIA_UPLOADS) private readonly manager: ResumableUploadManager | null) {}

@@ -6,10 +6,10 @@
 // drops that controller's routes entirely (a real 404) instead of leaving a
 // mounted-but-always-501 controller as dead surface.
 import type { AddressInfo } from 'node:net';
-import { InMemoryDriver } from '@dudousxd/nestjs-media-testing';
-import { NotImplementedException } from '@nestjs/common';
+import { Module, NotImplementedException } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import type { NestExpressApplication } from '@nestjs/platform-express';
+import { InMemoryDisk, StorageModule } from '@nestjs/storage';
 import { Test } from '@nestjs/testing';
 import { describe, expect, it } from 'vitest';
 import { MediaDirectUploadController } from './media-direct-upload.controller';
@@ -18,13 +18,16 @@ import { MediaUploadController } from './media-upload.controller';
 import { MediaModule } from './media.module';
 
 function baseOptions() {
-  return { default: 'local', disks: { local: new InMemoryDriver() } };
+  return {};
 }
 
 describe('forRootAsync mount flags', () => {
   it('defaults to mounting all three upload controllers (current behavior)', async () => {
     const mod = await Test.createTestingModule({
-      imports: [MediaModule.forRootAsync({ useFactory: () => baseOptions() })],
+      imports: [
+        StorageModule.forRoot({ disks: { local: new InMemoryDisk() } }),
+        MediaModule.forRootAsync({ useFactory: () => baseOptions() }),
+      ],
     }).compile();
 
     expect(mod.get(MediaUploadController)).toBeInstanceOf(MediaUploadController);
@@ -44,6 +47,7 @@ describe('forRootAsync mount flags', () => {
   it('mount: { direct: false } removes the direct controller from the DI container entirely (a route 404, not a 501)', async () => {
     const mod = await Test.createTestingModule({
       imports: [
+        StorageModule.forRoot({ disks: { local: new InMemoryDisk() } }),
         MediaModule.forRootAsync({
           useFactory: () => baseOptions(),
           mount: { direct: false },
@@ -61,6 +65,7 @@ describe('forRootAsync mount flags', () => {
   it('mount: { tus: false, multipart: false } leaves only the direct controller mounted', async () => {
     const mod = await Test.createTestingModule({
       imports: [
+        StorageModule.forRoot({ disks: { local: new InMemoryDisk() } }),
         MediaModule.forRootAsync({
           useFactory: () => baseOptions(),
           mount: { tus: false, multipart: false },
@@ -74,10 +79,14 @@ describe('forRootAsync mount flags', () => {
   });
 
   it('an unmounted controller 404s over real HTTP (not 501)', async () => {
-    const app = await NestFactory.create<NestExpressApplication>(
-      MediaModule.forRootAsync({ useFactory: () => baseOptions(), mount: { direct: false } }),
-      { logger: false },
-    );
+    @Module({
+      imports: [
+        StorageModule.forRoot({ disks: { local: new InMemoryDisk() } }),
+        MediaModule.forRootAsync({ useFactory: () => baseOptions(), mount: { direct: false } }),
+      ],
+    })
+    class AppModule {}
+    const app = await NestFactory.create<NestExpressApplication>(AppModule, { logger: false });
     await app.listen(0);
     try {
       const address = app.getHttpServer().address() as AddressInfo;

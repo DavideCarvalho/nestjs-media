@@ -1,7 +1,7 @@
 {
   "name": "@dudousxd/nestjs-media-disk-s3",
   "version": "0.8.4",
-  "description": "nestjs-media S3 driver (presign + multipart-capable)",
+  "description": "nestjs-media S3 multipart side-car for @nestjs/storage S3Disk (native multipart + folder listing)",
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -38,28 +38,24 @@
     "dist"
   ],
   "scripts": {
+    "prepack": "node ../../scripts/check-package-exports.mjs",
     "build": "tsup",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.spec.json --noEmit"
   },
-  "dependencies": {
-    "@aws-crypto/sha256-js": "5.2.0",
-    "@smithy/protocol-http": "5.6.2",
-    "@smithy/signature-v4": "5.7.5"
-  },
   "peerDependencies": {
-    "@aws-sdk/client-s3": "^3.0.0",
-    "@aws-sdk/s3-request-presigner": "^3.0.0",
-    "@dudousxd/nestjs-media-core": ">=0.8.0 <1.0.0"
+    "@dudousxd/nestjs-media-core": ">=0.8.0 <1.0.0",
+    "@nestjs/storage": ">=0.0.5 <0.1.0"
   },
   "devDependencies": {
-    "@aws-sdk/client-s3": "3.1161.0",
-    "@aws-sdk/s3-request-presigner": "3.1161.0",
     "@dudousxd/nestjs-media-core": "workspace:*",
     "@dudousxd/nestjs-media-testing": "workspace:*",
-    "@smithy/util-stream": "3.3.4",
-    "aws-sdk-client-mock": "4.1.0",
     "testcontainers": "10.18.0",
     "tsup": "8.5.1",
-    "typescript": "5.9.3"
+    "typescript": "5.9.3",
+    "@nestjs/storage": "0.0.5",
+    "@nestjs/common": "12.3.2",
+    "@nestjs/core": "12.3.2",
+    "reflect-metadata": "0.2.2",
+    "rxjs": "7.8.2"
   }
 }

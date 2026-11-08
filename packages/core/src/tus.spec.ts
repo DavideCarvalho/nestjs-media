@@ -1,18 +1,18 @@
-import { InMemoryDriver, InMemoryUploadSessionStore } from '@dudousxd/nestjs-media-testing';
+import { InMemoryUploadSessionStore, storageOf } from '@dudousxd/nestjs-media-testing';
+import { InMemoryDisk, type Storage } from '@nestjs/storage';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { ResumableUploadManager } from './resumable-upload';
-import { StorageManager } from './storage-manager';
 import { TusUploadHandler, parseTusMetadata } from './tus';
 
-let disk: InMemoryDriver;
+let disk: InMemoryDisk;
 let handler: TusUploadHandler;
 let tokens: number;
 
 beforeEach(() => {
-  disk = new InMemoryDriver();
+  disk = new InMemoryDisk();
   tokens = 0;
   const manager = new ResumableUploadManager({
-    storage: new StorageManager({ default: 'local', disks: { local: disk } }),
+    storage: storageOf({ local: disk }, 'local'),
     sessions: new InMemoryUploadSessionStore(),
     idGenerator: () => `s-${++tokens}`,
   });
@@ -91,7 +91,7 @@ describe('TusUploadHandler', () => {
     });
     expect(p2.headers['Upload-Offset']).toBe('5');
     // auto-completed → final object assembled, session gone
-    expect((await disk.get('up/upload')).toString()).toBe('hello');
+    expect(await disk.getText('up/upload')).toBe('hello');
     expect((await handler.handle({ method: 'HEAD', uploadId: 's-1', headers: {} })).status).toBe(
       404,
     );
@@ -123,5 +123,41 @@ describe('TusUploadHandler', () => {
     expect((await handler.handle({ method: 'HEAD', uploadId: 's-1', headers: {} })).status).toBe(
       404,
     );
+  });
+});
+
+describe('TusUploadHandler key rule', () => {
+  it('the default keyFor turns a hostile file name into one safe segment', async () => {
+    const manager = new ResumableUploadManager({
+      storage: storageOf({ local: disk }),
+      sessions: new InMemoryUploadSessionStore(),
+    });
+    const tus = new TusUploadHandler({ manager, disk: 'local', idGenerator: () => 'tok' });
+    const created = await tus.handle({
+      method: 'POST',
+      headers: { 'upload-length': '2', 'upload-metadata': `filename ${b64('../x/y')}` },
+    });
+    expect(created.status).toBe(201);
+    const id = created.headers.Location?.split('/').pop() ?? '';
+    await tus.handle({
+      method: 'PATCH',
+      uploadId: id,
+      headers: { 'content-type': 'application/offset+octet-stream', 'upload-offset': '0' },
+      body: Buffer.from('hi'),
+    });
+    expect(await disk.getText('uploads/tok/.._x_y')).toBe('hi');
+  });
+
+  it('a custom keyFor returning an invalid key answers 400', async () => {
+    const manager = new ResumableUploadManager({
+      storage: storageOf({ local: disk }),
+      sessions: new InMemoryUploadSessionStore(),
+    });
+    const tus = new TusUploadHandler({ manager, disk: 'local', keyFor: (f) => `/abs/${f}` });
+    const created = await tus.handle({
+      method: 'POST',
+      headers: { 'upload-length': '2', 'upload-metadata': `filename ${b64('a')}` },
+    });
+    expect(created.status).toBe(400);
   });
 });

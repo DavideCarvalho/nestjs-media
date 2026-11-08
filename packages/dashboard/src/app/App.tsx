@@ -1,6 +1,5 @@
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
 import { mediaConsoleClient } from '../client/media-console-client.js';
-import { AuthScreen } from './AuthScreen.js';
 import { Button, Dot } from './ui.js';
 import { useHashRoute } from './useHashRoute.js';
 import { DisksView } from './views/DisksView.js';
@@ -38,22 +37,10 @@ function LogoMark({ className }: { className?: string }): JSX.Element {
 
 export function App(): JSX.Element {
   const route = useHashRoute();
-  const queryClient = useQueryClient();
-  const auth = useQuery({ queryKey: ['me'], queryFn: () => mediaConsoleClient.me() });
-  const authed = auth.data?.state === 'authenticated';
   const topology = useQuery({
     queryKey: ['topology'],
     queryFn: () => mediaConsoleClient.topology(),
-    // Don't hit the (guarded) API until we know we're past the login gate.
-    enabled: auth.data !== undefined && auth.data.state !== 'login',
   });
-
-  async function logout(): Promise<void> {
-    await mediaConsoleClient.logout();
-    await queryClient.invalidateQueries();
-  }
-
-  if (auth.data?.state === 'login') return <AuthScreen modes={auth.data.modes} />;
 
   const stat = (label: string, on: boolean) => (
     <span
@@ -104,17 +91,6 @@ export function App(): JSX.Element {
                 <Dot tone="ok" pulse />
                 live
               </span>
-              {authed && (
-                <Button
-                  tone="ghost"
-                  onClick={logout}
-                  className="ml-1 text-[10px] uppercase tracking-wider"
-                >
-                  {auth.data?.state === 'authenticated' && auth.data.user.name
-                    ? `sign out · ${auth.data.user.name}`
-                    : 'sign out'}
-                </Button>
-              )}
             </div>
           )}
         </header>

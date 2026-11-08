@@ -1,5 +1,9 @@
-import type { DirectUploadCreated, MultipartPart } from '@dudousxd/nestjs-media-core';
-import { NotImplementedException } from '@nestjs/common';
+import {
+  type DirectUploadCreated,
+  InvalidMediaKeyError,
+  type MultipartPart,
+} from '@dudousxd/nestjs-media-core';
+import { BadRequestException, NotImplementedException } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { MediaDirectUploadController } from './media-direct-upload.controller';
@@ -191,5 +195,12 @@ describe('MediaDirectUploadController', () => {
     it('abort throws NotImplementedException', () => {
       expect(() => nullController.abort('u', 'x', undefined, {})).toThrow(NotImplementedException);
     });
+  });
+});
+
+describe('MediaDirectUploadController key errors', () => {
+  it('an invalid client key is a 400, not a 500', async () => {
+    manager.createUpload.mockRejectedValue(new InvalidMediaKeyError('".." segment'));
+    await expect(controller.initiate({ key: '../x' })).rejects.toBeInstanceOf(BadRequestException);
   });
 });

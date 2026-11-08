@@ -4,21 +4,25 @@ import {
   type ImageProcessor,
   type MediaCollectionConfig,
   MediaLibrary,
+  type MediaRecord,
   type MediaStore,
+  type MultipartDrivers,
   ResumableUploadManager,
-  StorageManager,
-  type StorageManagerOptions,
   TusUploadHandler,
   type UploadSessionStore,
 } from '@dudousxd/nestjs-media-core';
 import {
-  type CanActivate,
   type DynamicModule,
+  type FactoryProvider,
   Global,
+  type InjectionToken,
   Module,
+  type OptionalFactoryDependency,
   type Provider,
   type Type,
 } from '@nestjs/common';
+import { Storage } from '@nestjs/storage';
+import { assertRoutesProtected, decoratedController } from './controller-decorators';
 import { MediaDirectUploadController } from './media-direct-upload.controller';
 import { MediaMultipartUploadController } from './media-multipart-upload.controller';
 import { MediaUploadController } from './media-upload.controller';
@@ -27,8 +31,8 @@ import {
   MEDIA_ATTACHMENTS,
   MEDIA_DIRECT,
   MEDIA_LIBRARY,
-  MEDIA_STORAGE,
-  MEDIA_STORAGE_SHARED,
+  MEDIA_MULTIPART,
+  MEDIA_OPTIONS,
   MEDIA_STORE,
   MEDIA_TUS,
   MEDIA_UPLOADS,
@@ -48,334 +52,433 @@ export interface MediaDirectOptions {
   partSize?: number;
 }
 
-export interface MediaModuleOptions extends StorageManagerOptions {
-  /** Enable the media-library layer (layer 2) by providing a persistence store. */
-  store?: MediaStore;
+/** What `MediaService` checks before it acts (see {@link MediaModuleOptions.authorize}). */
+export type MediaAction = 'read' | 'attach' | 'delete';
+
+/** What an `attach` is checked against: the record doesn't exist yet. */
+export interface MediaAttachTarget {
+  ownerType: string;
+  ownerId: string;
+  collection: string;
+}
+
+/**
+ * Throws (or rejects) to refuse. `subject` is the record for `read`/`delete`, the
+ * {@link MediaAttachTarget} for `attach`. `user` is what the caller passed, else `req.user`.
+ */
+export type MediaAuthorize = (
+  user: unknown,
+  action: MediaAction,
+  subject: MediaRecord | MediaAttachTarget,
+) => void | Promise<void>;
+
+/**
+ * A provider-style factory, resolved by Nest: how ORM helpers hand over a store that needs an
+ * injected connection (`typeOrmMediaStore({ connectionName })`, `drizzleMediaStore(...)`).
+ */
+export interface MediaFactory<T> {
+  inject?: Array<InjectionToken | OptionalFactoryDependency>;
+  useFactory: (...args: any[]) => T | Promise<T>;
+}
+
+export interface MediaModuleOptions {
+  /**
+   * Enable the media-library layer (layer 2) by providing a persistence store: an instance, or a
+   * {@link MediaFactory} (e.g. `typeOrmMediaStore({ connectionName: 'media' })`).
+   */
+  store?: MediaStore | MediaFactory<MediaStore>;
   collections?: MediaCollectionConfig[];
   imageProcessor?: ImageProcessor;
-  /** Enable resumable (proxy) uploads by providing a session store. */
-  uploadSessions?: UploadSessionStore;
+  /** Enable resumable (proxy) uploads by providing a session store (instance or factory). */
+  uploadSessions?: UploadSessionStore | MediaFactory<UploadSessionStore>;
   uploadTmpPrefix?: string;
+  /**
+   * Native multipart side-cars by disk name (a disk configured in `StorageModule`), e.g.
+   * `{ s3: s3Multipart(s3Options) }` from `@dudousxd/nestjs-media-disk-s3`. Resumable uploads on
+   * such a disk upload each chunk as a part; direct (presigned) uploads need one. A name that
+   * isn't a configured disk fails at startup.
+   */
+  multipart?: MultipartDrivers;
+  /**
+   * Checks `MediaService.serve()`/`url()` (`read`), `attach()` and `delete()` before they act.
+   * Throw to refuse. Not applied to `MediaService.library`, which stays the unchecked core API.
+   *
+   * ```ts
+   * authorize: (user, action, record) => authorization.authorize(MediaPolicy, action, user, record)
+   * ```
+   */
+  authorize?: MediaAuthorize;
   /** Mount the tus HTTP controller (requires uploadSessions). */
   tus?: MediaTusOptions;
-  /** Mount the direct (S3 multipart presign) upload controller. */
+  /** Mount the direct (S3 multipart presign) upload controller (requires a `multipart` side-car). */
   direct?: MediaDirectOptions;
   /**
-   * Guard(s) for the upload controllers. A plain array gates ALL THREE (tus,
-   * multipart, direct) uniformly; the per-surface object form gates each
-   * controller with its own list (upload surfaces often carry different
-   * sensitivity — e.g. session creation admin-only, part PUTs any authenticated
-   * user). Third-party controller classes can't be annotated with `@UseGuards`
-   * by consumers, so without this option the upload surface is mounted with NO
-   * auth: anyone who can reach the app can upload. **Uploads are
-   * unauthenticated by default — set `guards` (or otherwise gate these routes,
-   * e.g. with a global guard) before exposing this module.**
-   *
-   * Guard classes are added to this module's `providers` so Nest can DI-instantiate
-   * them; if a guard has its own dependencies, pass the modules that provide them
-   * via `imports`.
-   */
-  guards?: Type<CanActivate>[] | MediaUploadGuards;
-  /**
-   * Modules providing dependencies for `guards` (or anything else you inject into
-   * them). `forRoot` doesn't otherwise import anything, so this exists purely as
-   * an `imports` passthrough for guard wiring.
+   * Modules providing the dependencies of a guard you pass through `decorators` (e.g.
+   * `UseGuards(AuthenticationGuard)`), or of a `store`/`uploadSessions` factory.
    */
   imports?: DynamicModule['imports'];
+  /**
+   * Class decorators applied to EVERY upload controller this module mounts (tus, multipart,
+   * direct), e.g. `[UseGuards(AuthenticationGuard), Can(MediaPolicy, 'upload')]` with the
+   * first-party `@nestjs/authentication` / `@nestjs/authorization`. Each registration builds fresh
+   * subclasses of the controllers to decorate, so one registration's decorators never reach
+   * another. Default: none.
+   *
+   * Every upload controller is marked `@Can.Anyone()`-open (`'authorization:can-anyone'`) so
+   * `@nestjs/authorization`'s deny-by-default global guard doesn't refuse it; a `Can(...)` passed
+   * here still applies (the guard only treats `can-anyone` as open when no requirement is
+   * declared).
+   *
+   * In production (`NODE_ENV === 'production'`) a registration that mounts upload routes with no
+   * `decorators` refuses to boot — protect them here, or mount them yourself with `routes: false`.
+   *
+   * With `decorators` set, the mounted controllers are subclasses: resolve them by route, not with
+   * `app.get(MediaUploadController)`.
+   */
+  decorators?: ClassDecorator[];
+  /**
+   * Which upload controllers this module mounts. `forRoot` mounts a controller only when its
+   * feature is configured (`tus` → tus, `uploadSessions` → multipart, `direct` → direct); `mount`
+   * narrows that further (`{ direct: false }`). See {@link MediaUploadMount}. Default: mount what's
+   * configured.
+   */
+  mount?: MediaUploadMount;
+  /**
+   * `false` mounts NO upload controller, while every provider (`MediaService`, `MEDIA_TUS`,
+   * `MEDIA_UPLOADS`, `MEDIA_DIRECT`, …) still works — the way NestJS's own packages leave routes to
+   * you: serve them from a controller of your own, protected with ordinary Nest decorators (`@Can`,
+   * `@UseGuards`), by extending the exported controller classes. The same name as the other Aviary
+   * libraries' `routes: false`.
+   *
+   * ```ts
+   * @Can(MediaPolicy, 'upload')
+   * @Controller('media/uploads')
+   * export class UploadsController extends MediaUploadController {}
+   * ```
+   */
+  routes?: boolean;
 }
+
+/**
+ * `mount` for `MediaModule.forRoot`/`forRootAsync`: turns single surfaces off (`{ direct: false }`).
+ * An omitted key (or `true`) keeps that surface's default. To mount none, `routes: false`.
+ */
+export interface MediaUploadMount {
+  tus?: boolean;
+  multipart?: boolean;
+  direct?: boolean;
+}
+
+/** Whether `surface` is mounted: on by default, off under `routes: false` or `mount[surface]: false`. */
+function mounts(
+  options: { mount?: MediaUploadMount; routes?: boolean },
+  surface: 'tus' | 'multipart' | 'direct',
+) {
+  if (options.routes === false) return false;
+  return options.mount?.[surface] !== false;
+}
+
+/**
+ * What `forRootAsync`'s `useFactory` returns: every option. Static ones (`imports`, `decorators`,
+ * `mount`, `routes`) are ignored there, and stores must be instances: a store needing injection
+ * goes in `forRootAsync({ store })`.
+ */
+export type MediaModuleRuntimeOptions = MediaModuleOptions;
 
 export interface MediaModuleAsyncOptions {
   imports?: any[];
   inject?: any[];
-  useFactory: (...args: any[]) => MediaModuleOptions | Promise<MediaModuleOptions>;
+  useFactory: (...args: any[]) => MediaModuleRuntimeOptions | Promise<MediaModuleRuntimeOptions>;
   /**
-   * Guard(s) for the upload controllers — plain array gates all three
-   * uniformly, the per-surface object form gates each controller with its own
-   * list (see `MediaModuleOptions.guards`). This is a STATIC field on
-   * the async config object itself — NOT part of the options resolved by
-   * `useFactory` — because controllers (and the enhancers bound to them) are
-   * wired at module build time, before any async factory has run. If you need
-   * the guard to read async-resolved config (e.g. a secret from a ConfigService),
-   * have the guard itself inject that service via DI (see `imports`/`inject`
-   * above) rather than trying to pass it through `useFactory`.
-   *
-   * Same default-open caveat as `MediaModuleOptions.guards`: **omitting this
-   * leaves the upload surface unauthenticated.**
+   * A store built by Nest from injected dependencies (`typeOrmMediaStore({ connectionName })`).
+   * Static, next to `useFactory`; it wins over a `store` the factory returns.
    */
-  guards?: Type<CanActivate>[] | MediaUploadGuards;
+  store?: MediaFactory<MediaStore>;
+  /** As {@link MediaModuleAsyncOptions.store}, for the upload session store. */
+  uploadSessions?: MediaFactory<UploadSessionStore>;
   /**
    * Static, build-time control over which upload controllers get mounted at
-   * all. Unlike `guards`, this can't be deferred to the async factory either —
+   * all. This can't be deferred to the async factory either —
    * Nest registers controllers when the module is built, before `useFactory`
    * runs — so `forRootAsync` mounts all three by default (each 501s when its
    * underlying feature is left unconfigured by the factory). Set the ones you
    * never configure to `false` so they don't exist as dead surface at all, e.g.
-   * `mount: { direct: false }` when you don't configure `direct` uploads.
+   * `mount: { direct: false }` when you don't configure `direct` uploads. A `mount` returned by
+   * `useFactory` is ignored.
    */
-  mount?: {
-    tus?: boolean;
-    multipart?: boolean;
-    direct?: boolean;
-  };
+  mount?: MediaUploadMount;
+  /** As {@link MediaModuleOptions.routes}: static, so it lives here, not in `useFactory`'s result. */
+  routes?: boolean;
+  /**
+   * Class decorators applied to every mounted upload controller — see
+   * `MediaModuleOptions.decorators`. Static (not resolved by `useFactory`) for the same reason as
+   * `mount`: they shape the routes when the module is built, before any factory runs.
+   */
+  decorators?: ClassDecorator[];
+}
+
+function isFactory<T>(value: T | MediaFactory<T> | undefined): value is MediaFactory<T> {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    typeof (value as Partial<MediaFactory<T>>).useFactory === 'function'
+  );
 }
 
 /**
- * Per-surface guard lists. Each key gates one upload controller; an omitted key
- * leaves that controller UNGUARDED (equivalent to `[]`), it does not fall back
- * to some other surface's guards. Use the plain-array form of `guards` to gate
- * all three uniformly.
+ * The three upload controller classes to mount for one registration (see `decoratedController`).
  */
-export interface MediaUploadGuards {
-  /** Guards for `MediaUploadController` (tus session create/HEAD/PATCH). */
-  tus?: Type<CanActivate>[];
-  /** Guards for `MediaMultipartUploadController` (part PUTs + /complete). */
-  multipart?: Type<CanActivate>[];
-  /** Guards for `MediaDirectUploadController` (S3 presign endpoints). */
-  direct?: Type<CanActivate>[];
-}
-
-function perSurfaceGuards(
-  guards: Type<CanActivate>[] | MediaUploadGuards | undefined,
-): Required<MediaUploadGuards> {
-  if (Array.isArray(guards)) return { tus: guards, multipart: guards, direct: guards };
+function uploadControllers(decorators: ClassDecorator[] | undefined): {
+  tus: Type;
+  multipart: Type;
+  direct: Type;
+} {
   return {
-    tus: guards?.tus ?? [],
-    multipart: guards?.multipart ?? [],
-    direct: guards?.direct ?? [],
+    tus: decoratedController(MediaUploadController, decorators),
+    multipart: decoratedController(MediaMultipartUploadController, decorators),
+    direct: decoratedController(MediaDirectUploadController, decorators),
   };
 }
 
-/** Every distinct guard class across the three surfaces, for the module's `providers`. */
-function guardProviders(
-  guards: Type<CanActivate>[] | MediaUploadGuards | undefined,
-): Type<CanActivate>[] {
-  const bySurface = perSurfaceGuards(guards);
-  return [...new Set([...bySurface.tus, ...bySurface.multipart, ...bySurface.direct])];
+/** The production rule for one registration — see `assertRoutesProtected`. */
+function assertUploadsProtected(
+  module: string,
+  controllers: Type[],
+  decorators: ClassDecorator[] | undefined,
+): void {
+  assertRoutesProtected({
+    module,
+    mountsRoutes: controllers.length > 0,
+    decorators,
+    decoratorsExample:
+      "MediaModule.forRoot({ ..., decorators: [UseGuards(AuthenticationGuard), Can(MediaPolicy, 'upload')] })",
+    selfMountExample:
+      "MediaModule.forRoot({ ..., routes: false }) + @Can(MediaPolicy, 'upload') @Controller('media/uploads') class UploadsController extends MediaUploadController {}",
+  });
 }
+
+/** `Storage` from `StorageModule`, with a pointed error when the app didn't register it. */
+/** @internal */
+export function requireStorage(storage: Storage | null | undefined): Storage {
+  if (!storage) {
+    throw new Error(
+      'MediaModule stores files on the disks of @nestjs/storage: register StorageModule.forRoot({ disks: { ... } }) ' +
+        '(global by default) before MediaModule. See https://docs.nestjs.com/application/file-storage',
+    );
+  }
+  return storage;
+}
+
+function checkMultipart(
+  storage: Storage,
+  multipart: MultipartDrivers | undefined,
+): MultipartDrivers {
+  const names = storage.names();
+  for (const disk of Object.keys(multipart ?? {})) {
+    if (!names.includes(disk)) {
+      throw new Error(
+        `MediaModule: \`multipart.${disk}\` names no StorageModule disk. Configured disks: ${names.join(', ') || 'none'}.`,
+      );
+    }
+  }
+  return multipart ?? {};
+}
+
+const STORAGE_DEP = { token: Storage, optional: true };
+
+/** A store provider: the static factory when there is one, else the runtime option (or null). */
+function storeProvider<T>(
+  provide: symbol,
+  factory: MediaFactory<T> | undefined,
+  pick: (options: MediaModuleRuntimeOptions) => T | MediaFactory<T> | undefined,
+): FactoryProvider {
+  if (factory) {
+    return { provide, inject: factory.inject ?? [], useFactory: factory.useFactory };
+  }
+  return {
+    provide,
+    inject: [MEDIA_OPTIONS],
+    useFactory: (options: MediaModuleRuntimeOptions) => {
+      const value = pick(options);
+      if (isFactory(value)) {
+        throw new Error(
+          'MediaModule.forRootAsync: the factory returned a store factory ({ inject, useFactory }); ' +
+            'pass it at the top level instead: MediaModule.forRootAsync({ store: ..., useFactory }).',
+        );
+      }
+      return value ?? null;
+    },
+  };
+}
+
+/** Every provider, from the resolved options (`MEDIA_OPTIONS`) and the static store factories. */
+function mediaProviders(
+  optionsProvider: Provider,
+  factories: {
+    store?: MediaFactory<MediaStore>;
+    uploadSessions?: MediaFactory<UploadSessionStore>;
+  },
+): Provider[] {
+  return [
+    optionsProvider,
+    storeProvider(MEDIA_STORE, factories.store, (o) => o.store),
+    storeProvider(MEDIA_UPLOAD_SESSIONS, factories.uploadSessions, (o) => o.uploadSessions),
+    {
+      provide: MEDIA_MULTIPART,
+      inject: [STORAGE_DEP, MEDIA_OPTIONS],
+      useFactory: (storage: Storage | null, options: MediaModuleRuntimeOptions) =>
+        checkMultipart(requireStorage(storage), options.multipart),
+    },
+    {
+      provide: MEDIA_LIBRARY,
+      inject: [STORAGE_DEP, MEDIA_STORE, MEDIA_OPTIONS],
+      useFactory: (
+        storage: Storage | null,
+        store: MediaStore | null,
+        options: MediaModuleRuntimeOptions,
+      ) =>
+        store
+          ? new MediaLibrary({
+              storage: requireStorage(storage),
+              store,
+              ...(options.collections ? { collections: options.collections } : {}),
+              ...(options.imageProcessor ? { imageProcessor: options.imageProcessor } : {}),
+            })
+          : null,
+    },
+    {
+      provide: MEDIA_UPLOADS,
+      inject: [STORAGE_DEP, MEDIA_UPLOAD_SESSIONS, MEDIA_MULTIPART, MEDIA_OPTIONS],
+      useFactory: (
+        storage: Storage | null,
+        sessions: UploadSessionStore | null,
+        multipart: MultipartDrivers,
+        options: MediaModuleRuntimeOptions,
+      ) =>
+        sessions
+          ? new ResumableUploadManager({
+              storage: requireStorage(storage),
+              sessions,
+              multipart,
+              ...(options.uploadTmpPrefix ? { tmpPrefix: options.uploadTmpPrefix } : {}),
+            })
+          : null,
+    },
+    {
+      provide: MEDIA_TUS,
+      inject: [MEDIA_UPLOADS, MEDIA_OPTIONS],
+      useFactory: (uploads: ResumableUploadManager | null, options: MediaModuleRuntimeOptions) =>
+        uploads && options.tus
+          ? new TusUploadHandler({
+              manager: uploads,
+              disk: options.tus.disk,
+              basePath: options.tus.basePath ?? '/media/uploads',
+              ...(options.tus.maxSize ? { maxSize: options.tus.maxSize } : {}),
+              ...(options.tus.keyFor ? { keyFor: options.tus.keyFor } : {}),
+            })
+          : null,
+    },
+    {
+      provide: MEDIA_ATTACHMENTS,
+      inject: [STORAGE_DEP, MEDIA_OPTIONS],
+      useFactory: (storage: Storage | null, options: MediaModuleRuntimeOptions) =>
+        new AttachmentManager({
+          storage: requireStorage(storage),
+          ...(options.imageProcessor ? { imageProcessor: options.imageProcessor } : {}),
+        }),
+    },
+    {
+      provide: MEDIA_DIRECT,
+      inject: [STORAGE_DEP, MEDIA_MULTIPART, MEDIA_OPTIONS],
+      useFactory: (
+        storage: Storage | null,
+        multipart: MultipartDrivers,
+        options: MediaModuleRuntimeOptions,
+      ) =>
+        options.direct
+          ? new DirectUploadManager({
+              storage: requireStorage(storage),
+              multipart,
+              ...(options.direct.partSize ? { defaultPartSize: options.direct.partSize } : {}),
+            })
+          : null,
+    },
+    MediaService,
+  ];
+}
+
+const EXPORTS = [
+  MediaService,
+  MEDIA_LIBRARY,
+  MEDIA_UPLOADS,
+  MEDIA_TUS,
+  MEDIA_ATTACHMENTS,
+  MEDIA_DIRECT,
+  MEDIA_STORE,
+  MEDIA_UPLOAD_SESSIONS,
+  MEDIA_MULTIPART,
+];
 
 /**
- * Nest's `GUARDS_METADATA` key (`@nestjs/common/constants`), inlined as a literal:
- * `@nestjs/common` has no `exports` map and its ESM-facing files are CJS, so a deep
- * `import ... from '@nestjs/common/constants'` in our ESM build is emitted
- * extensionless and rejected by Node's strict ESM resolver (surfaced by a consumer's
- * vitest externalizing this package). `media-guards.spec.ts` asserts this literal
- * still matches the real constant, so upstream drift fails loudly.
+ * The media layer on `@nestjs/storage`: register `StorageModule.forRoot({ disks })` for the disks,
+ * then `MediaModule.forRoot({ store, collections, ... })` for the media library, attachments and
+ * resumable/direct uploads on them.
  */
-const GUARDS_METADATA = '__guards__';
-
-/**
- * Stamp (or clear) `@UseGuards`-equivalent metadata on the three shared upload
- * controller classes.
- *
- * Mechanism: `@UseGuards(...guards)` on a controller just does
- * `Reflect.defineMetadata(GUARDS_METADATA, guards, ControllerClass)` (via Nest's
- * `extendArrayMetadata`, which *appends* to any existing array). We call
- * `Reflect.defineMetadata` directly instead of going through `UseGuards`/`extendArrayMetadata`,
- * so each `forRoot`/`forRootAsync` call REPLACES the metadata rather than
- * appending to it — appending would leak guards across repeated module
- * registrations in the same process (every test file that calls `forRoot`
- * more than once, for instance) since these controller classes are
- * module-level singletons shared by every registration.
- *
- * Nest's `GuardsConsumer` reads this metadata per-request via `Reflector`, not
- * once at boot, so the *last* call to stamp it before a request is served wins
- * for that controller class in this process — replace semantics make that
- * "last write" deterministic instead of an ever-growing guard list. The
- * remaining sharp edge: two Nest applications running CONCURRENTLY in the same
- * process with different `guards` on `MediaModule` would still clobber each
- * other (there is exactly one metadata slot per controller class, process-wide).
- * That's a non-issue for a normal app (one `MediaModule` registration) and for
- * this repo's tests (vitest isolates test files, and within a file tests run
- * sequentially against a freshly-compiled `TestingModule` each time).
- */
-function applyGuards(guards: Type<CanActivate>[] | MediaUploadGuards | undefined): void {
-  const bySurface = perSurfaceGuards(guards);
-  Reflect.defineMetadata(GUARDS_METADATA, bySurface.tus, MediaUploadController);
-  Reflect.defineMetadata(GUARDS_METADATA, bySurface.multipart, MediaMultipartUploadController);
-  Reflect.defineMetadata(GUARDS_METADATA, bySurface.direct, MediaDirectUploadController);
-}
-
-function buildLibrary(manager: StorageManager, options: MediaModuleOptions): MediaLibrary | null {
-  if (!options.store) return null;
-  return new MediaLibrary({
-    storage: manager,
-    store: options.store,
-    ...(options.collections ? { collections: options.collections } : {}),
-    ...(options.imageProcessor ? { imageProcessor: options.imageProcessor } : {}),
-  });
-}
-
-function buildAttachments(manager: StorageManager, options: MediaModuleOptions): AttachmentManager {
-  return new AttachmentManager({
-    storage: manager,
-    ...(options.imageProcessor ? { imageProcessor: options.imageProcessor } : {}),
-  });
-}
-
-function buildUploads(
-  manager: StorageManager,
-  options: MediaModuleOptions,
-): ResumableUploadManager | null {
-  if (!options.uploadSessions) return null;
-  return new ResumableUploadManager({
-    storage: manager,
-    sessions: options.uploadSessions,
-    ...(options.uploadTmpPrefix ? { tmpPrefix: options.uploadTmpPrefix } : {}),
-  });
-}
-
-function buildTus(
-  uploads: ResumableUploadManager | null,
-  options: MediaModuleOptions,
-): TusUploadHandler | null {
-  if (!uploads || !options.tus) return null;
-  return new TusUploadHandler({
-    manager: uploads,
-    disk: options.tus.disk,
-    basePath: options.tus.basePath ?? '/media/uploads',
-    ...(options.tus.maxSize ? { maxSize: options.tus.maxSize } : {}),
-    ...(options.tus.keyFor ? { keyFor: options.tus.keyFor } : {}),
-  });
-}
-
-function buildDirect(
-  manager: StorageManager,
-  options: MediaModuleOptions,
-): DirectUploadManager | null {
-  if (!options.direct) return null;
-  return new DirectUploadManager({
-    storage: manager,
-    ...(options.direct.partSize ? { defaultPartSize: options.direct.partSize } : {}),
-  });
-}
-
 @Global()
 @Module({})
 export class MediaModule {
   static forRoot(options: MediaModuleOptions): DynamicModule {
-    const manager = new StorageManager(options);
-    const uploads = buildUploads(manager, options);
-    const tus = buildTus(uploads, options);
-    const direct = buildDirect(manager, options);
-    applyGuards(options.guards);
+    const controllers = uploadControllers(options.decorators);
+    const hasSessions = options.uploadSessions !== undefined;
+    const mounted = [
+      ...(hasSessions && options.tus && mounts(options, 'tus') ? [controllers.tus] : []),
+      ...(hasSessions && mounts(options, 'multipart') ? [controllers.multipart] : []),
+      ...(options.direct && mounts(options, 'direct') ? [controllers.direct] : []),
+    ];
+    assertUploadsProtected('MediaModule.forRoot', mounted, options.decorators);
+    const { store, uploadSessions, imports, decorators, mount, routes, ...runtime } = options;
+    const factories = {
+      ...(isFactory(store) ? { store } : {}),
+      ...(isFactory(uploadSessions) ? { uploadSessions } : {}),
+    };
+    const resolved: MediaModuleRuntimeOptions = {
+      ...runtime,
+      ...(store && !isFactory(store) ? { store } : {}),
+      ...(uploadSessions && !isFactory(uploadSessions) ? { uploadSessions } : {}),
+    };
     return {
       module: MediaModule,
-      imports: options.imports ?? [],
-      providers: [
-        { provide: MEDIA_STORAGE, useValue: manager },
-        { provide: MEDIA_STORAGE_SHARED, useExisting: MEDIA_STORAGE },
-        { provide: MEDIA_LIBRARY, useValue: buildLibrary(manager, options) },
-        { provide: MEDIA_UPLOADS, useValue: uploads },
-        { provide: MEDIA_TUS, useValue: tus },
-        { provide: MEDIA_ATTACHMENTS, useValue: buildAttachments(manager, options) },
-        { provide: MEDIA_DIRECT, useValue: direct },
-        { provide: MEDIA_STORE, useValue: options.store ?? null },
-        { provide: MEDIA_UPLOAD_SESSIONS, useValue: options.uploadSessions ?? null },
-        ...guardProviders(options.guards),
-        MediaService,
-      ],
-      controllers: [
-        ...(tus ? [MediaUploadController] : []),
-        ...(uploads ? [MediaMultipartUploadController] : []),
-        ...(direct ? [MediaDirectUploadController] : []),
-      ],
-      exports: [
-        MediaService,
-        MEDIA_STORAGE,
-        MEDIA_STORAGE_SHARED,
-        MEDIA_LIBRARY,
-        MEDIA_UPLOADS,
-        MEDIA_TUS,
-        MEDIA_ATTACHMENTS,
-        MEDIA_DIRECT,
-        MEDIA_STORE,
-        MEDIA_UPLOAD_SESSIONS,
-      ],
+      imports: imports ?? [],
+      providers: mediaProviders({ provide: MEDIA_OPTIONS, useValue: resolved }, factories),
+      controllers: mounted,
+      exports: EXPORTS,
     };
   }
 
   static forRootAsync(options: MediaModuleAsyncOptions): DynamicModule {
-    const providers: Provider[] = [
-      {
-        provide: MEDIA_STORAGE,
-        inject: options.inject ?? [],
-        useFactory: async (...args: any[]) => new StorageManager(await options.useFactory(...args)),
-      },
-      { provide: MEDIA_STORAGE_SHARED, useExisting: MEDIA_STORAGE },
-      {
-        provide: MEDIA_LIBRARY,
-        inject: [MEDIA_STORAGE, ...(options.inject ?? [])],
-        useFactory: async (manager: StorageManager, ...args: any[]) =>
-          buildLibrary(manager, await options.useFactory(...args)),
-      },
-      {
-        provide: MEDIA_UPLOADS,
-        inject: [MEDIA_STORAGE, ...(options.inject ?? [])],
-        useFactory: async (manager: StorageManager, ...args: any[]) =>
-          buildUploads(manager, await options.useFactory(...args)),
-      },
-      {
-        provide: MEDIA_TUS,
-        inject: [MEDIA_UPLOADS, ...(options.inject ?? [])],
-        useFactory: async (uploads: ResumableUploadManager | null, ...args: any[]) =>
-          buildTus(uploads, await options.useFactory(...args)),
-      },
-      {
-        provide: MEDIA_ATTACHMENTS,
-        inject: [MEDIA_STORAGE, ...(options.inject ?? [])],
-        useFactory: async (manager: StorageManager, ...args: any[]) =>
-          buildAttachments(manager, await options.useFactory(...args)),
-      },
-      {
-        provide: MEDIA_DIRECT,
-        inject: [MEDIA_STORAGE, ...(options.inject ?? [])],
-        useFactory: async (manager: StorageManager, ...args: any[]) =>
-          buildDirect(manager, await options.useFactory(...args)),
-      },
-      {
-        provide: MEDIA_STORE,
-        inject: options.inject ?? [],
-        useFactory: async (...args: any[]) => (await options.useFactory(...args)).store ?? null,
-      },
-      {
-        provide: MEDIA_UPLOAD_SESSIONS,
-        inject: options.inject ?? [],
-        useFactory: async (...args: any[]) =>
-          (await options.useFactory(...args)).uploadSessions ?? null,
-      },
-      ...guardProviders(options.guards),
-      MediaService,
+    const controllers = uploadControllers(options.decorators);
+    const mounted = [
+      ...(mounts(options, 'tus') ? [controllers.tus] : []),
+      ...(mounts(options, 'multipart') ? [controllers.multipart] : []),
+      ...(mounts(options, 'direct') ? [controllers.direct] : []),
     ];
-    applyGuards(options.guards);
+    assertUploadsProtected('MediaModule.forRootAsync', mounted, options.decorators);
     return {
       module: MediaModule,
       imports: options.imports ?? [],
-      providers,
-      // Unlike `forRoot`, async options are resolved at runtime by `useFactory`,
-      // so we cannot know at module-build time whether `tus`/`direct` are configured
-      // and therefore cannot mount these controllers conditionally. Each mounted
-      // controller injects its nullable manager token (MEDIA_TUS / MEDIA_UPLOADS /
-      // MEDIA_DIRECT) and cleanly responds 501 NotImplemented when its feature is
-      // left unconfigured by the factory. `mount` is a separate, STATIC escape
-      // hatch (see its JSDoc on `MediaModuleAsyncOptions`) for dropping a
-      // controller's route surface entirely instead of leaving it mounted-but-501.
-      controllers: [
-        ...(options.mount?.tus === false ? [] : [MediaUploadController]),
-        ...(options.mount?.multipart === false ? [] : [MediaMultipartUploadController]),
-        ...(options.mount?.direct === false ? [] : [MediaDirectUploadController]),
-      ],
-      exports: [
-        MediaService,
-        MEDIA_STORAGE,
-        MEDIA_STORAGE_SHARED,
-        MEDIA_LIBRARY,
-        MEDIA_UPLOADS,
-        MEDIA_TUS,
-        MEDIA_ATTACHMENTS,
-        MEDIA_DIRECT,
-        MEDIA_STORE,
-        MEDIA_UPLOAD_SESSIONS,
-      ],
+      providers: mediaProviders(
+        { provide: MEDIA_OPTIONS, inject: options.inject ?? [], useFactory: options.useFactory },
+        {
+          ...(options.store ? { store: options.store } : {}),
+          ...(options.uploadSessions ? { uploadSessions: options.uploadSessions } : {}),
+        },
+      ),
+      // Unlike `forRoot`, async options are resolved at runtime by `useFactory`, so we cannot
+      // know at module-build time whether `tus`/`direct` are configured. Each mounted controller
+      // injects its nullable manager token and responds 501 when its feature is left unconfigured.
+      // `mount` is the STATIC escape hatch for dropping a controller's routes entirely.
+      controllers: mounted,
+      exports: EXPORTS,
     };
   }
 }

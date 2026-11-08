@@ -36,6 +36,9 @@ jobs:
       - name: Build (turbo)
         run: pnpm build
 
+      - name: Every package.json entry exists
+        run: pnpm check:exports
+
       - name: Typecheck (turbo)
         run: pnpm typecheck
 

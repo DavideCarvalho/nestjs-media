@@ -13,18 +13,19 @@ Testing code that uploads and attaches files shouldn't need S3 or a database. `@
 ```ts title="photos.service.spec.ts"
 import { Test } from '@nestjs/testing';
 import { MediaModule, MediaService } from '@dudousxd/nestjs-media';
-import { InMemoryDriver, InMemoryMediaStore } from '@dudousxd/nestjs-media-testing';
+import { InMemoryDisk, StorageModule } from '@nestjs/storage';
+import { InMemoryMediaStore } from '@dudousxd/nestjs-media-testing';
 import { PhotosService } from './photos.service';
 
 let media: MediaService;
+const mem = new InMemoryDisk();
 let photos: PhotosService;
 
 beforeEach(async () => {
   const mod = await Test.createTestingModule({
     imports: [
+      StorageModule.forRoot({ disks: { mem } }),
       MediaModule.forRoot({
-        default: 'mem',
-        disks: { mem: new InMemoryDriver() },
         store: new InMemoryMediaStore(),
         collections: [{ name: 'gallery' }],
       }),
@@ -44,7 +45,7 @@ it('attaches and serves a gallery image', async () => {
   const rec = await photos.upload('42', { buffer: Buffer.from('img'), mimetype: 'image/png', originalname: 'a.png' });
 
   // it landed on the disk:
-  expect(await media.disk('mem').exists(rec.path)).toBe(true);
+  expect(await mem.exists(rec.path)).toBe(true); // or mem.keys()
   // and is listed against the entity:
   const list = await media.library.list('Post', '42', 'gallery');
   expect(list).toHaveLength(1);
@@ -65,5 +66,5 @@ MediaModule.forRoot({ /* … */ imageProcessor: processor, collections: [{ name:
 `InMemoryUploadSessionStore` lets you exercise the [resumable engine](/docs/concepts/uploads) (`media.uploads`) end to end in memory.
 
 <Callout type="info">
-The same package exports the [conformance suites](/docs/packages/testing) — use those to test custom [drivers](/docs/recipes/custom-driver) and [stores](/docs/recipes/custom-store).
+The same package exports the [conformance suites](/docs/packages/testing) — use those to check a custom `StorageDisk` against what media relies on, and custom [stores](/docs/recipes/custom-store).
 </Callout>

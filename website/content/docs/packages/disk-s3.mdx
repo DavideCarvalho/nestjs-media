@@ -1,67 +1,56 @@
 ---
 title: '@dudousxd/nestjs-media-disk-s3'
 icon: Cloud
-description: The S3 driver — presigned URLs + native multipart, works with any S3-compatible endpoint.
+description: s3Multipart() — the native multipart and folder listing that @nestjs/storage's S3Disk keeps private, for resumable and direct uploads and the dashboard.
 ---
 
 import { Callout } from 'fumadocs-ui/components/callout';
 
-A `StorageDriver` over Amazon S3 and any S3-compatible service (MinIO, Cloudflare R2, Backblaze B2, …). It's a POJO that receives an `S3Client` — your app owns the client, region, and credentials.
+The files live on `@nestjs/storage`'s [`S3Disk`](https://docs.nestjs.com/application/file-storage) (Amazon S3, Cloudflare R2, MinIO, Backblaze B2, …). `S3Disk` uses multipart uploads internally for large `put()`s, but exposes no part-level API and lists flat only. This package adds exactly that, as a **side-car** for one disk:
 
 ```ts
-import { S3Driver } from '@dudousxd/nestjs-media-disk-s3';
-import { S3Client } from '@aws-sdk/client-s3';
+import { S3Disk, StorageModule, type S3DiskOptions } from '@nestjs/storage';
+import { s3Multipart } from '@dudousxd/nestjs-media-disk-s3';
 
-new S3Driver({
-  client: new S3Client({ region: 'us-east-1' }),
+const s3: S3DiskOptions = {
   bucket: 'app-uploads',
-  keyPrefix: 'uploads',           // optional — prepended to every key
-  publicBaseUrl: 'https://cdn…',  // optional — enables url() (e.g. a CloudFront domain)
-});
-```
-
-## Capabilities
-
-```ts
-{ presign: true, multipart: true, publicUrls: !!publicBaseUrl, list: true, ranged: true }
-```
-
-- `temporaryUrl(path, ttl)` returns a signed GET URL (via `@aws-sdk/s3-request-presigner`).
-- `url(path)` returns `${publicBaseUrl}/${key}` when set, else throws.
-- `presign + multipart` are what [`uploadMode: 'auto'`](/docs/concepts/uploads) reads to choose the **direct** (presigned multipart) upload path.
-
-## Multipart presign surface
-
-Because `capabilities.multipart` is `true`, the driver also implements the optional `MultipartUploadDriver` add-on that backs [direct-to-S3 presigned multipart uploads](/docs/concepts/uploads#direct-presigned-multipart-server):
-
-```ts
-createMultipartUpload(path, options?): Promise<{ uploadId: string }>;
-presignUploadPart(path, uploadId, partNumber, expiresInSeconds): Promise<string>; // PUT URL
-completeMultipartUpload(path, uploadId, parts): Promise<void>;                     // parts: { partNumber, etag }[]
-abortMultipartUpload(path, uploadId): Promise<void>;
-```
-
-You rarely call these directly — `DirectUploadManager` (and the `MediaModule.direct` controller) drives them. `createMultipartUpload` maps to S3's `CreateMultipartUpload`, `presignUploadPart` signs an `UploadPart` command, and `completeMultipartUpload` stitches the collected `ETag`s server-side.
-
-## S3-compatible endpoints
-
-Point the client at any compatible service:
-
-```ts
-new S3Client({
   region: 'auto',
-  endpoint: 'https://<account>.r2.cloudflarestorage.com',
-  forcePathStyle: true,           // MinIO and some others need this
+  endpoint: process.env.R2_ENDPOINT,
   credentials: { accessKeyId, secretAccessKey },
-});
+  prefix: 'tenants/t1/',
+};
+
+StorageModule.forRoot({ disks: { s3: new S3Disk(s3) } });
+MediaModule.forRoot({ multipart: { s3: s3Multipart(s3) }, /* uploadSessions, direct, ... */ });
 ```
 
-## Verified against real S3
+<Callout type="warn" title="Same options, same objects">
+Pass the side-car **the same options object** as the disk. It applies the same `prefix`, endpoint and addressing style (`forcePathStyle`, IP endpoints, bucket names that aren't valid host names), so a key means the same object on both. Options only `S3Disk` uses (retries, timeouts, part size, `publicUrl`) are ignored.
+</Callout>
+
+## What it adds
+
+```ts
+interface S3Multipart extends MultipartUploadDriver {
+  createMultipartUpload(key, { contentType?, cacheControl?, metadata? }?): Promise<{ uploadId }>;
+  uploadPart(key, uploadId, partNumber, body: Buffer): Promise<{ partNumber, etag }>; // proxy path
+  presignUploadPart(key, uploadId, partNumber, expiresInSeconds): Promise<string>;   // direct path
+  completeMultipartUpload(key, uploadId, parts): Promise<void>;
+  abortMultipartUpload(key, uploadId): Promise<void>;      // an upload already gone is not an error
+  listFolders(prefix, { cursor?, limit? }?): Promise<FolderListing>; // ListObjectsV2 + Delimiter '/'
+}
+```
+
+You rarely call these yourself: `ResumableUploadManager` (tus and parallel parts), `DirectUploadManager` (presigned parts) and the dashboard's folder listing use them. Keys go through `@nestjs/storage`'s key rule first, so no object is ever created at a key the disk can't read back. Server-side encryption options (`serverSideEncryption`, `kmsKeyId`) apply to multipart uploads too.
+
+Like `S3Disk`, it runs over `fetch` with Signature Version 4 on `node:crypto` — no AWS SDK. Credentials: the options' `credentials` (an object, or a function called per request), else `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` / `AWS_SESSION_TOKEN`. Transient failures (429, 5xx, network) are retried twice. A failed request throws `S3MultipartError` with S3's `code`.
+
+## Verified against MinIO
 
 <Callout type="info">
-The driver's behavior is validated by the shared conformance suite running against a real **MinIO** server (testcontainers) — not just mocks — so `put/get/stream/copy/move/size/delete` and error semantics match a real backend. See [`-testing`](/docs/packages/testing).
+`describeMediaDiskConformance` from [`-testing`](/docs/packages/testing) runs against `S3Disk` on a real MinIO with this side-car (parts uploaded out of order, abort, presign, `listFolders` agreeing with the folded flat listing), plus resumable uploads end to end.
 </Callout>
 
 ## Peer dependencies
 
-`@aws-sdk/client-s3` and `@aws-sdk/s3-request-presigner` (v3), plus `@dudousxd/nestjs-media-core`.
+`@nestjs/storage` (`>=0.0.5 <0.1.0`) and `@dudousxd/nestjs-media-core`.

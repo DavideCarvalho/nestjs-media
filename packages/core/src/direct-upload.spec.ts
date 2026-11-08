@@ -1,22 +1,16 @@
 import { subscribe, unsubscribe } from 'node:diagnostics_channel';
 import { channelName } from '@dudousxd/nestjs-diagnostics';
 import type { DiagnosticEvent } from '@dudousxd/nestjs-diagnostics';
+import { storageOf } from '@dudousxd/nestjs-media-testing';
+import { InMemoryDisk } from '@nestjs/storage';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { DirectUploadManager } from './direct-upload';
 import { UnsupportedOperationError } from './errors';
-import { StorageManager } from './storage-manager';
-import type {
-  DriverCapabilities,
-  ListOptions,
-  ListResult,
-  MultipartPart,
-  PutOptions,
-  StorageDriver,
-} from './types';
+import type { MultipartCreateOptions, MultipartPart, MultipartUploadDriver } from './types';
 
-// --- Fake multipart-capable driver ---
+// --- Fake multipart side-car ---
 
-interface FakeMultipartDriver extends StorageDriver {
+interface FakeMultipartDriver extends MultipartUploadDriver {
   createMultipartUpload: ReturnType<typeof vi.fn>;
   presignUploadPart: ReturnType<typeof vi.fn>;
   completeMultipartUpload: ReturnType<typeof vi.fn>;
@@ -26,26 +20,8 @@ interface FakeMultipartDriver extends StorageDriver {
 function makeFakeDriver(): FakeMultipartDriver {
   let partCounter = 0;
   return {
-    capabilities: {
-      presign: true,
-      multipart: true,
-      publicUrls: false,
-      list: false,
-      ranged: false,
-    } satisfies DriverCapabilities,
-    put: vi.fn(),
-    get: vi.fn(),
-    stream: vi.fn(),
-    exists: vi.fn(),
-    delete: vi.fn(),
-    copy: vi.fn(),
-    move: vi.fn(),
-    size: vi.fn(),
-    stat: vi.fn(),
-    url: vi.fn(),
-    temporaryUrl: vi.fn(),
-    list: vi.fn<(path: string, options?: ListOptions) => Promise<ListResult>>(),
-    createMultipartUpload: vi.fn((_path: string, _options?: PutOptions) =>
+    uploadPart: vi.fn(),
+    createMultipartUpload: vi.fn((_path: string, _options?: MultipartCreateOptions) =>
       Promise.resolve({ uploadId: 'uid-1' }),
     ),
     presignUploadPart: vi.fn(
@@ -56,32 +32,6 @@ function makeFakeDriver(): FakeMultipartDriver {
       Promise.resolve(),
     ),
     abortMultipartUpload: vi.fn((_path: string, _uploadId: string) => Promise.resolve()),
-  };
-}
-
-// --- Fake non-multipart driver ---
-
-function makeBasicDriver(): StorageDriver {
-  return {
-    capabilities: {
-      presign: false,
-      multipart: false,
-      publicUrls: false,
-      list: false,
-      ranged: false,
-    } satisfies DriverCapabilities,
-    put: vi.fn(),
-    get: vi.fn(),
-    stream: vi.fn(),
-    exists: vi.fn(),
-    delete: vi.fn(),
-    copy: vi.fn(),
-    move: vi.fn(),
-    size: vi.fn(),
-    stat: vi.fn(),
-    url: vi.fn(),
-    temporaryUrl: vi.fn(),
-    list: vi.fn<(path: string, options?: ListOptions) => Promise<ListResult>>(),
   };
 }
 
@@ -113,7 +63,8 @@ describe('DirectUploadManager', () => {
   beforeEach(() => {
     fakeDriver = makeFakeDriver();
     manager = new DirectUploadManager({
-      storage: new StorageManager({ default: 'm', disks: { m: fakeDriver } }),
+      storage: storageOf({ m: new InMemoryDisk() }, 'm'),
+      multipart: { m: fakeDriver },
       defaultPartSize: 8 * 1024 * 1024,
       presignExpirySeconds: 3600,
     });
@@ -211,13 +162,43 @@ describe('DirectUploadManager', () => {
   });
 
   it('createUpload on a non-multipart disk throws UnsupportedOperationError', async () => {
-    const basicDriver = makeBasicDriver();
     const mgr = new DirectUploadManager({
-      storage: new StorageManager({ default: 'basic', disks: { basic: basicDriver } }),
+      storage: storageOf({ basic: new InMemoryDisk() }, 'basic'),
     });
 
     await expect(mgr.createUpload({ key: 'file.bin' })).rejects.toBeInstanceOf(
       UnsupportedOperationError,
     );
+  });
+});
+
+describe('DirectUploadManager key rule', () => {
+  it('refuses a key @nestjs/storage would refuse, before creating anything', async () => {
+    const driver = makeFakeDriver();
+    const mgr = new DirectUploadManager({
+      storage: storageOf({ m: new InMemoryDisk() }),
+      multipart: { m: driver },
+    });
+    await expect(mgr.createUpload({ key: '../escape.bin' })).rejects.toThrow(/Invalid storage key/);
+    expect(driver.createMultipartUpload).not.toHaveBeenCalled();
+  });
+
+  it('refuses a hostile key on presignPart, completeUpload and abortUpload, before the side-car', async () => {
+    const driver = makeFakeDriver();
+    const mgr = new DirectUploadManager({
+      storage: storageOf({ m: new InMemoryDisk() }),
+      multipart: { m: driver },
+    });
+    const key = '../escape.bin';
+    await expect(mgr.presignPart({ key, uploadId: 'u', partNumber: 1 })).rejects.toThrow(
+      /Invalid storage key/,
+    );
+    await expect(mgr.completeUpload({ key, uploadId: 'u', parts: [] })).rejects.toThrow(
+      /Invalid storage key/,
+    );
+    await expect(mgr.abortUpload({ key, uploadId: 'u' })).rejects.toThrow(/Invalid storage key/);
+    expect(driver.presignUploadPart).not.toHaveBeenCalled();
+    expect(driver.completeMultipartUpload).not.toHaveBeenCalled();
+    expect(driver.abortMultipartUpload).not.toHaveBeenCalled();
   });
 });

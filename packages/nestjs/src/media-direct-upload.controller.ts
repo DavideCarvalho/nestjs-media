@@ -9,6 +9,8 @@ import {
   Post,
   Query,
 } from '@nestjs/common';
+import { OpenToAuthorization } from './controller-decorators';
+import { clientKeyErrors } from './http-errors';
 import { MEDIA_DIRECT } from './tokens';
 
 interface InitiateBody {
@@ -25,6 +27,9 @@ interface CompleteBody {
   disk?: string;
 }
 
+// Open to `@nestjs/authorization`'s deny-by-default guard; the host's `decorators` (or its own
+// subclass, with `routes: false`) decide access.
+@OpenToAuthorization()
 @Controller('media/uploads/direct')
 export class MediaDirectUploadController {
   constructor(@Inject(MEDIA_DIRECT) private readonly manager: DirectUploadManager | null) {}
@@ -32,13 +37,16 @@ export class MediaDirectUploadController {
   @Post('initiate')
   initiate(@Body() body: InitiateBody) {
     if (!this.manager) throw new NotImplementedException('Direct uploads are not configured.');
-    return this.manager.createUpload({
-      key: body.key,
-      ...(body.contentType !== undefined ? { contentType: body.contentType } : {}),
-      ...(body.size !== undefined ? { size: body.size } : {}),
-      ...(body.partSize !== undefined ? { partSize: body.partSize } : {}),
-      ...(body.disk !== undefined ? { disk: body.disk } : {}),
-    });
+    const manager = this.manager;
+    return clientKeyErrors(() =>
+      manager.createUpload({
+        key: body.key,
+        ...(body.contentType !== undefined ? { contentType: body.contentType } : {}),
+        ...(body.size !== undefined ? { size: body.size } : {}),
+        ...(body.partSize !== undefined ? { partSize: body.partSize } : {}),
+        ...(body.disk !== undefined ? { disk: body.disk } : {}),
+      }),
+    );
   }
 
   @Post(':uploadId/parts/:partNumber')
@@ -52,27 +60,33 @@ export class MediaDirectUploadController {
     if (!this.manager) throw new NotImplementedException('Direct uploads are not configured.');
     const key = keyQuery ?? body.key;
     if (!key) throw new NotImplementedException('key is required');
-    return this.manager.presignPart({
-      key,
-      uploadId,
-      partNumber: Number(partNumber),
-      ...(diskQuery !== undefined
-        ? { disk: diskQuery }
-        : body.disk !== undefined
-          ? { disk: body.disk }
-          : {}),
-    });
+    const manager = this.manager;
+    return clientKeyErrors(() =>
+      manager.presignPart({
+        key,
+        uploadId,
+        partNumber: Number(partNumber),
+        ...(diskQuery !== undefined
+          ? { disk: diskQuery }
+          : body.disk !== undefined
+            ? { disk: body.disk }
+            : {}),
+      }),
+    );
   }
 
   @Post(':uploadId/complete')
   complete(@Param('uploadId') uploadId: string, @Body() body: CompleteBody) {
     if (!this.manager) throw new NotImplementedException('Direct uploads are not configured.');
-    return this.manager.completeUpload({
-      key: body.key,
-      uploadId,
-      parts: body.parts,
-      ...(body.disk !== undefined ? { disk: body.disk } : {}),
-    });
+    const manager = this.manager;
+    return clientKeyErrors(() =>
+      manager.completeUpload({
+        key: body.key,
+        uploadId,
+        parts: body.parts,
+        ...(body.disk !== undefined ? { disk: body.disk } : {}),
+      }),
+    );
   }
 
   @Delete(':uploadId')
@@ -85,14 +99,17 @@ export class MediaDirectUploadController {
     if (!this.manager) throw new NotImplementedException('Direct uploads are not configured.');
     const key = keyQuery ?? body.key;
     if (!key) throw new NotImplementedException('key is required');
-    return this.manager.abortUpload({
-      key,
-      uploadId,
-      ...(diskQuery !== undefined
-        ? { disk: diskQuery }
-        : body.disk !== undefined
-          ? { disk: body.disk }
-          : {}),
-    });
+    const manager = this.manager;
+    return clientKeyErrors(() =>
+      manager.abortUpload({
+        key,
+        uploadId,
+        ...(diskQuery !== undefined
+          ? { disk: diskQuery }
+          : body.disk !== undefined
+            ? { disk: body.disk }
+            : {}),
+      }),
+    );
   }
 }

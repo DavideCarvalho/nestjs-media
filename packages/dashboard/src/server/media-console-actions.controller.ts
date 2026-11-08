@@ -9,9 +9,8 @@ import {
   Post,
   Query,
   Req,
-  UseGuards,
 } from '@nestjs/common';
-import { MediaConsoleGuard } from './media-console.guard.js';
+import { OpenToAuthorization } from './controller-decorators.js';
 import { MediaConsoleService } from './media-console.service.js';
 
 interface CopyMoveBody {
@@ -28,10 +27,11 @@ interface CreateFolderBody {
 /**
  * Destructive JSON API for the /media console. Only registered when the host opts in with
  * `MediaDashboardModule.forRoot({ actions: true })` (default off). Bare `@Controller()` — the path
- * prefix comes from `RouterModule`, sharing the API base with the read controller. Gated by
- * `MediaConsoleGuard` (session cookie) when the host configured `auth`.
+ * prefix comes from `RouterModule`, sharing the API base with the read controller.
  */
-@UseGuards(MediaConsoleGuard)
+// Open to `@nestjs/authorization`'s deny-by-default guard; the host's `decorators` (or its own
+// subclass, with `routes: false`) decide access.
+@OpenToAuthorization()
 @Controller()
 export class MediaConsoleActionsController {
   constructor(@Inject(MediaConsoleService) private readonly service: MediaConsoleService) {}
@@ -69,17 +69,25 @@ export class MediaConsoleActionsController {
   /**
    * Uploads a file to `key` on the disk. The body is the raw bytes sent as `application/octet-stream`
    * so the host's JSON/urlencoded body parsers never consume the stream; the real MIME rides as the
-   * `type` query param and becomes the stored object's Content-Type. `@Req()` is the request stream.
+   * `type` query param and becomes the stored object's Content-Type. `@Req()` is the request stream,
+   * streamed onto the disk (no size cap, nothing buffered).
    */
   @Post('disks/:disk/upload')
   @HttpCode(204)
   uploadObject(
     @Param('disk') disk: string,
     @Query('key') key: string,
-    @Req() request: Readable,
+    @Req() request: Readable & { headers?: Record<string, string | string[] | undefined> },
     @Query('type') type?: string,
   ): Promise<void> {
-    return this.service.putObject(disk, key, request, type);
+    const declared = Number(request.headers?.['content-length']);
+    return this.service.putObject(
+      disk,
+      key,
+      request,
+      type,
+      Number.isSafeInteger(declared) && declared >= 0 ? declared : undefined,
+    );
   }
 
   @Post('disks/:disk/folder')

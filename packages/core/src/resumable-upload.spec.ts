@@ -1,5 +1,6 @@
 import { Readable } from 'node:stream';
-import { InMemoryDriver, InMemoryUploadSessionStore } from '@dudousxd/nestjs-media-testing';
+import { InMemoryUploadSessionStore, storageOf } from '@dudousxd/nestjs-media-testing';
+import { InMemoryDisk, type StorageDisk, type StorageDownload } from '@nestjs/storage';
 import { beforeEach, describe, expect, it } from 'vitest';
 import {
   InvalidPartNumberError,
@@ -12,19 +13,35 @@ import type {
   UploadSessionListFilter,
   UploadSessionStore,
 } from './resumable-upload';
-import { StorageManager } from './storage-manager';
-import type { MultipartPart, StorageDriver } from './types';
+import type { MultipartPart, MultipartUploadDriver } from './types';
 
-let disk: InMemoryDriver;
+let disk: InMemoryDisk;
 let manager: ResumableUploadManager;
 let ids: number;
 
-/** Build a manager whose only disk ('d') is the given (possibly fake) driver. */
-function makeManager(driver: StorageDriver): ResumableUploadManager {
+/** Build a manager whose only disk ('d') is the given disk, with an optional multipart side-car. */
+function makeManager(
+  driver: StorageDisk,
+  multipart?: MultipartUploadDriver,
+): ResumableUploadManager {
   return new ResumableUploadManager({
-    storage: new StorageManager({ default: 'd', disks: { d: driver } }),
+    storage: storageOf({ d: driver }, 'd'),
+    ...(multipart ? { multipart: { d: multipart } } : {}),
     sessions: new InMemoryUploadSessionStore(),
   });
+}
+
+/** A disk that fails any use: the multipart path must not touch the disk itself. */
+class UntouchableDisk extends InMemoryDisk {
+  override async get(): Promise<never> {
+    throw new Error('must not read parts back in multipart mode');
+  }
+  override async put(): Promise<never> {
+    throw new Error('must not put whole file in multipart mode');
+  }
+  override async delete(): Promise<never> {
+    throw new Error('not used by the multipart resumable-upload path');
+  }
 }
 
 function fakeMultipartDisk() {
@@ -34,76 +51,38 @@ function fakeMultipartDisk() {
   let parts: Buffer[] = [];
   let completed: Buffer | undefined;
   let aborted = false;
-  return {
-    driver: {
-      capabilities: {
-        presign: false,
-        multipart: true,
-        publicUrls: false,
-        list: false,
-        ranged: false,
-      },
-      async createMultipartUpload() {
-        parts = [];
-        return { uploadId: 'u' };
-      },
-      async uploadPart(_p: string, _u: string, n: number, body: Buffer) {
-        parts[n - 1] = body;
-        return { partNumber: n, etag: `etag-${n}` };
-      },
-      async completeMultipartUpload(_p: string, _u: string, ps: MultipartPart[]) {
-        completed = Buffer.concat(ps.map((x) => parts[x.partNumber - 1] ?? Buffer.alloc(0)));
-      },
-      async abortMultipartUpload() {
-        aborted = true;
-      },
-      async get() {
-        throw new Error('must not read parts back in multipart mode');
-      },
-      async put() {
-        throw new Error('must not put whole file in multipart mode');
-      },
-      async stream() {
-        throw new Error('not used by the multipart resumable-upload path');
-      },
-      async exists() {
-        throw new Error('not used by the multipart resumable-upload path');
-      },
-      async delete() {
-        throw new Error('not used by the multipart resumable-upload path');
-      },
-      async copy() {
-        throw new Error('not used by the multipart resumable-upload path');
-      },
-      async move() {
-        throw new Error('not used by the multipart resumable-upload path');
-      },
-      async size() {
-        throw new Error('not used by the multipart resumable-upload path');
-      },
-      async stat() {
-        throw new Error('not used by the multipart resumable-upload path');
-      },
-      async url() {
-        throw new Error('not used by the multipart resumable-upload path');
-      },
-      async temporaryUrl() {
-        throw new Error('not used by the multipart resumable-upload path');
-      },
-      async list() {
-        throw new Error('not used by the multipart resumable-upload path');
-      },
+  const multipart: MultipartUploadDriver = {
+    async createMultipartUpload() {
+      parts = [];
+      return { uploadId: 'u' };
     },
+    async uploadPart(_p: string, _u: string, n: number, body: Buffer) {
+      parts[n - 1] = body;
+      return { partNumber: n, etag: `etag-${n}` };
+    },
+    async presignUploadPart() {
+      throw new Error('not used by the resumable-upload path');
+    },
+    async completeMultipartUpload(_p: string, _u: string, ps: MultipartPart[]) {
+      completed = Buffer.concat(ps.map((x) => parts[x.partNumber - 1] ?? Buffer.alloc(0)));
+    },
+    async abortMultipartUpload() {
+      aborted = true;
+    },
+  };
+  return {
+    disk: new UntouchableDisk(),
+    multipart,
     result: () => completed,
     wasAborted: () => aborted,
   };
 }
 
 beforeEach(() => {
-  disk = new InMemoryDriver();
+  disk = new InMemoryDisk();
   ids = 0;
   manager = new ResumableUploadManager({
-    storage: new StorageManager({ default: 'local', disks: { local: disk } }),
+    storage: storageOf({ local: disk }, 'local'),
     sessions: new InMemoryUploadSessionStore(),
     idGenerator: () => `up-${++ids}`,
   });
@@ -119,32 +98,32 @@ describe('ResumableUploadManager', () => {
 
     const result = await manager.complete(session.id);
     expect(result).toMatchObject({ key: 'videos/clip.bin', disk: 'local', size: 6 });
-    expect((await disk.get('videos/clip.bin')).toString()).toBe('abcdef');
+    expect(await disk.getText('videos/clip.bin')).toBe('abcdef');
   });
 
   it('assembles parts by streaming them into put, opening each part only after the previous one drains', async () => {
     const events: string[] = [];
-    class TracingDriver extends InMemoryDriver {
-      override async get(path: string): Promise<Buffer> {
-        events.push(`get ${path}`);
-        return super.get(path);
+    class TracingDriver extends InMemoryDisk {
+      override async get(key: string): Promise<StorageDownload> {
+        events.push(`open ${key}`);
+        return super.get(key);
       }
-      override async stream(path: string): Promise<Readable> {
-        events.push(`open ${path}`);
-        return Readable.from([await super.get(path)]);
-      }
-      override async put(path: string, contents: Buffer | Readable): Promise<void> {
-        if (path !== 'big.bin') return super.put(path, contents);
-        if (Buffer.isBuffer(contents)) {
+      override async put(
+        key: string,
+        body: Parameters<InMemoryDisk['put']>[1],
+        options?: Parameters<InMemoryDisk['put']>[2],
+      ) {
+        if (key !== 'big.bin') return super.put(key, body, options);
+        if (Buffer.isBuffer(body)) {
           events.push('put buffer');
-          return super.put(path, contents);
+          return super.put(key, body, options);
         }
         const received: Buffer[] = [];
-        for await (const chunk of contents) {
+        for await (const chunk of body as Readable) {
           events.push(`read ${chunk.toString()}`);
           received.push(chunk);
         }
-        return super.put(path, Buffer.concat(received));
+        return super.put(key, Buffer.concat(received), options);
       }
     }
     const tracing = new TracingDriver();
@@ -165,7 +144,7 @@ describe('ResumableUploadManager', () => {
       `open ${prefix}/2`,
       'read cc',
     ]);
-    expect((await tracing.get('big.bin')).toString()).toBe('aabbcc');
+    expect(await tracing.getText('big.bin')).toBe('aabbcc');
   });
 
   it('reports status so a client can resume from the offset', async () => {
@@ -206,7 +185,7 @@ describe('ResumableUploadManager', () => {
 
   it('multipart disk: each chunk is one part, complete stitches without buffering', async () => {
     const multipartDisk = fakeMultipartDisk();
-    const multipartManager = makeManager(multipartDisk.driver);
+    const multipartManager = makeManager(multipartDisk.disk, multipartDisk.multipart);
     const session = await multipartManager.createUpload({ disk: 'd', key: 'k', size: 9 });
     await multipartManager.writeChunk(session.id, 0, Buffer.from('AAAAA')); // part 1
     await multipartManager.writeChunk(session.id, 5, Buffer.from('BBBB')); // part 2 (last, <5MiB ok)
@@ -217,7 +196,7 @@ describe('ResumableUploadManager', () => {
 
   it('multipart disk: abort calls abortMultipartUpload', async () => {
     const multipartDisk = fakeMultipartDisk();
-    const multipartManager = makeManager(multipartDisk.driver);
+    const multipartManager = makeManager(multipartDisk.disk, multipartDisk.multipart);
     const session = await multipartManager.createUpload({ disk: 'd', key: 'k' });
     await multipartManager.writeChunk(session.id, 0, Buffer.from('AAAAA'));
     await multipartManager.abort(session.id);
@@ -227,7 +206,6 @@ describe('ResumableUploadManager', () => {
 
 describe('ResumableUploadManager.writePart (parallel multipart)', () => {
   interface FakeDisk {
-    capabilities: { multipart: boolean };
     uploadPart: (
       key: string,
       uploadId: string,
@@ -282,7 +260,6 @@ describe('ResumableUploadManager.writePart (parallel multipart)', () => {
     completed: { parts?: Array<{ partNumber: number; etag: string }> },
   ) {
     const multipartDisk: FakeDisk = {
-      capabilities: { multipart: true },
       async createMultipartUpload() {
         return { uploadId: 'mp-1' };
       },
@@ -293,8 +270,12 @@ describe('ResumableUploadManager.writePart (parallel multipart)', () => {
         completed.parts = parts;
       },
     };
-    const storage = { disk: () => multipartDisk } as any;
-    return new ResumableUploadManager({ storage, sessions: store, emitDiagnostics: false });
+    return new ResumableUploadManager({
+      storage: storageOf({ s3: new InMemoryDisk() }),
+      multipart: { s3: multipartDisk as unknown as MultipartUploadDriver },
+      sessions: store,
+      emitDiagnostics: false,
+    });
   }
 
   it('records concurrent, out-of-order parts and completes them sorted ascending', async () => {

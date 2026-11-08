@@ -1,37 +1,87 @@
-import {
-  InMemoryDriver,
-  InMemoryMediaStore,
-  InMemoryUploadSessionStore,
-} from '@dudousxd/nestjs-media-testing';
+import { InMemoryMediaStore, InMemoryUploadSessionStore } from '@dudousxd/nestjs-media-testing';
 import { NotImplementedException } from '@nestjs/common';
+import { InMemoryDisk, StorageModule } from '@nestjs/storage';
 import { Test } from '@nestjs/testing';
 import { describe, expect, it } from 'vitest';
 import { MediaDirectUploadController } from './media-direct-upload.controller';
 import { MediaUploadController } from './media-upload.controller';
 import { MediaModule } from './media.module';
 import { MediaService } from './media.service';
-import { MEDIA_STORAGE, MEDIA_STORAGE_SHARED, MEDIA_STORE, MEDIA_UPLOAD_SESSIONS } from './tokens';
+import { MEDIA_MULTIPART, MEDIA_STORE, MEDIA_UPLOAD_SESSIONS } from './tokens';
 
 describe('MediaModule', () => {
-  it('forRoot wires MediaService with the configured disks', async () => {
-    const local = new InMemoryDriver();
+  it('forRoot stores attachments on the StorageModule disks', async () => {
+    const local = new InMemoryDisk();
     const mod = await Test.createTestingModule({
-      imports: [MediaModule.forRoot({ default: 'local', disks: { local } })],
+      imports: [StorageModule.forRoot({ disks: { local } }), MediaModule.forRoot({})],
     }).compile();
 
     const media = mod.get(MediaService);
-    expect(media.disk()).toBe(local);
-    await media.disk().put('hi.txt', Buffer.from('yo'));
-    expect((await media.disk('local').get('hi.txt')).toString()).toBe('yo');
+    const att = await media.attachments.createFromFile({
+      fileName: 'hi.txt',
+      mimeType: 'text/plain',
+      contents: Buffer.from('yo'),
+    });
+    expect(await local.getText(att.path)).toBe('yo');
+  });
+
+  it('without StorageModule, boot fails naming it', async () => {
+    await expect(
+      Test.createTestingModule({ imports: [MediaModule.forRoot({})] }).compile(),
+    ).rejects.toThrow(/StorageModule\.forRoot/);
+  });
+
+  it('a multipart side-car for a disk StorageModule lacks fails at boot', async () => {
+    await expect(
+      Test.createTestingModule({
+        imports: [
+          StorageModule.forRoot({ disks: { local: new InMemoryDisk() } }),
+          MediaModule.forRoot({ multipart: { s3: {} as never } }),
+        ],
+      }).compile(),
+    ).rejects.toThrow(/multipart\.s3/);
+  });
+
+  it('a store factory is resolved by Nest with its injected dependencies', async () => {
+    const store = new InMemoryMediaStore();
+    const CONNECTION = 'CONNECTION';
+    const mod = await Test.createTestingModule({
+      imports: [
+        StorageModule.forRoot({ disks: { local: new InMemoryDisk() } }),
+        MediaModule.forRoot({
+          store: {
+            inject: [CONNECTION],
+            useFactory: (c: { store: InMemoryMediaStore }) => c.store,
+          },
+          imports: [
+            {
+              module: class ConnectionModule {},
+              providers: [{ provide: CONNECTION, useValue: { store } }],
+              exports: [CONNECTION],
+            },
+          ],
+        }),
+      ],
+    }).compile();
+    expect(mod.get(MEDIA_STORE, { strict: false })).toBe(store);
   });
 
   it('forRootAsync resolves options from a factory', async () => {
-    const s3 = new InMemoryDriver();
+    const s3 = new InMemoryDisk();
     const mod = await Test.createTestingModule({
-      imports: [MediaModule.forRootAsync({ useFactory: () => ({ default: 's3', disks: { s3 } }) })],
+      imports: [
+        StorageModule.forRoot({ disks: { s3 } }),
+        MediaModule.forRootAsync({ useFactory: () => ({}) }),
+      ],
     }).compile();
 
-    expect(mod.get(MediaService).disk()).toBe(s3);
+    const att = await mod.get(MediaService).attachments.createFromFile({
+      fileName: 'a.txt',
+      mimeType: 'text/plain',
+      contents: Buffer.from('x'),
+    });
+    expect(att.disk).toBe('s3');
+    expect(await s3.exists(att.path)).toBe(true);
   });
 
   // forRootAsync cannot know at build time whether tus/direct are configured
@@ -39,10 +89,11 @@ describe('MediaModule', () => {
   // controllers. When their feature is unconfigured the mounted handlers must
   // respond with a clear, uniform 501 NotImplemented rather than 404.
   it('forRootAsync mounts both upload controllers and they respond 501 when unconfigured', async () => {
-    const local = new InMemoryDriver();
+    const local = new InMemoryDisk();
     const mod = await Test.createTestingModule({
       imports: [
-        MediaModule.forRootAsync({ useFactory: () => ({ default: 'local', disks: { local } }) }),
+        StorageModule.forRoot({ disks: { local } }),
+        MediaModule.forRootAsync({ useFactory: () => ({}) }),
       ],
     }).compile();
 
@@ -60,12 +111,11 @@ describe('MediaModule', () => {
   it('forRoot exposes the store and upload-session store under stable Symbol.for tokens', async () => {
     const store = new InMemoryMediaStore();
     const sessions = new InMemoryUploadSessionStore();
-    const local = new InMemoryDriver();
+    const local = new InMemoryDisk();
     const mod = await Test.createTestingModule({
       imports: [
+        StorageModule.forRoot({ disks: { local } }),
         MediaModule.forRoot({
-          default: 'local',
-          disks: { local },
           store,
           uploadSessions: sessions,
         }),
@@ -80,46 +130,36 @@ describe('MediaModule', () => {
   });
 
   it('forRoot exposes null tokens when store/uploadSessions are not configured', async () => {
-    const local = new InMemoryDriver();
+    const local = new InMemoryDisk();
     const mod = await Test.createTestingModule({
-      imports: [MediaModule.forRoot({ default: 'local', disks: { local } })],
+      imports: [StorageModule.forRoot({ disks: { local } }), MediaModule.forRoot({})],
     }).compile();
 
     expect(mod.get(MEDIA_STORE, { strict: false })).toBeNull();
     expect(mod.get(MEDIA_UPLOAD_SESSIONS, { strict: false })).toBeNull();
   });
 
-  it('forRoot exposes the StorageManager under MEDIA_STORAGE_SHARED, aliasing MEDIA_STORAGE', async () => {
-    const local = new InMemoryDriver();
+  it('exposes the multipart side-cars under a stable Symbol.for token', async () => {
+    const sidecar = {} as never;
     const mod = await Test.createTestingModule({
-      imports: [MediaModule.forRoot({ default: 'local', disks: { local } })],
+      imports: [
+        StorageModule.forRoot({ disks: { s3: new InMemoryDisk() } }),
+        MediaModule.forRoot({ multipart: { s3: sidecar } }),
+      ],
     }).compile();
-
-    expect(mod.get(MEDIA_STORAGE_SHARED, { strict: false })).toBe(mod.get(MEDIA_STORAGE));
-    expect(mod.get(Symbol.for('nestjs-media:storage'), { strict: false })).toBe(
-      mod.get(MEDIA_STORAGE),
-    );
-  });
-
-  it('forRootAsync exposes the StorageManager under MEDIA_STORAGE_SHARED, aliasing MEDIA_STORAGE', async () => {
-    const s3 = new InMemoryDriver();
-    const mod = await Test.createTestingModule({
-      imports: [MediaModule.forRootAsync({ useFactory: () => ({ default: 's3', disks: { s3 } }) })],
-    }).compile();
-
-    expect(mod.get(MEDIA_STORAGE_SHARED, { strict: false })).toBe(mod.get(MEDIA_STORAGE));
+    expect(mod.get(MEDIA_MULTIPART, { strict: false })).toEqual({ s3: sidecar });
+    expect(mod.get(Symbol.for('nestjs-media:multipart'), { strict: false }).s3).toBe(sidecar);
   });
 
   it('forRootAsync exposes the store and upload-session store under stable Symbol.for tokens', async () => {
     const store = new InMemoryMediaStore();
     const sessions = new InMemoryUploadSessionStore();
-    const local = new InMemoryDriver();
+    const local = new InMemoryDisk();
     const mod = await Test.createTestingModule({
       imports: [
+        StorageModule.forRoot({ disks: { local } }),
         MediaModule.forRootAsync({
           useFactory: () => ({
-            default: 'local',
-            disks: { local },
             store,
             uploadSessions: sessions,
           }),

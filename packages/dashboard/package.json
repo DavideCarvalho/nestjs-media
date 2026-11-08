@@ -1,7 +1,7 @@
 {
   "name": "@dudousxd/nestjs-media-dashboard",
   "version": "0.16.2",
-  "description": "Standalone navigable /media console (disks, live uploads, media library) for nestjs-media — a bundled React SPA served by NestJS",
+  "description": "Standalone navigable /media console (disks, live uploads, media library) for nestjs-media \u2014 a bundled React SPA served by NestJS",
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -37,39 +37,27 @@
       "types": "./dist/client/index.d.ts",
       "import": "./dist/client/index.js",
       "default": "./dist/client/index.js"
-    },
-    "./react": {
-      "types": "./dist/react/index.d.ts",
-      "import": "./dist/react/index.js",
-      "default": "./dist/react/index.js"
     }
   },
   "files": [
     "dist"
   ],
   "scripts": {
-    "build": "vite build && tsup && tsc -p tsconfig.client.json && tsc -p tsconfig.react.json",
-    "typecheck": "tsc -p tsconfig.server.json --noEmit && tsc -p tsconfig.app.json --noEmit && tsc -p tsconfig.react.json --noEmit && tsc -p tsconfig.spec.json --noEmit"
+    "prepack": "node ../../scripts/check-package-exports.mjs",
+    "build": "vite build && tsup && tsc -p tsconfig.client.json",
+    "typecheck": "tsc -p tsconfig.server.json --noEmit && tsc -p tsconfig.app.json --noEmit && tsc -p tsconfig.spec.json --noEmit"
   },
   "peerDependencies": {
     "@dudousxd/nestjs-media-core": ">=0.8.0 <1.0.0",
-    "@nestjs/common": "^10.0.0 || ^11.0.0 || ^12.0.0",
-    "@nestjs/core": "^10.0.0 || ^11.0.0 || ^12.0.0",
-    "react": "^18.0.0 || ^19.0.0",
-    "react-dom": "^18.0.0 || ^19.0.0",
-    "rxjs": "^7.0.0"
-  },
-  "peerDependenciesMeta": {
-    "react": {
-      "optional": true
-    },
-    "react-dom": {
-      "optional": true
-    }
+    "@nestjs/common": "^12.1.0",
+    "@nestjs/core": "^12.1.0",
+    "rxjs": "^7.0.0",
+    "@nestjs/storage": ">=0.0.5 <0.1.0"
   },
   "devDependencies": {
     "@base-ui/react": "1.9.0",
     "@dudousxd/nestjs-media-core": "workspace:*",
+    "@nestjs/authorization": "0.1.3",
     "@nestjs/common": "12.3.2",
     "@nestjs/core": "12.3.2",
     "@nestjs/platform-express": "12.3.2",
@@ -102,6 +90,8 @@
     "typescript": "5.9.3",
     "vite": "5.4.21",
     "vitest": "2.1.9",
-    "xlsx": "0.18.5"
+    "xlsx": "0.18.5",
+    "@nestjs/storage": "0.0.5",
+    "@dudousxd/nestjs-media-testing": "workspace:*"
   }
 }

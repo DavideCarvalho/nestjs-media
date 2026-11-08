@@ -10,13 +10,14 @@ client-facing packages a consumer actually imports.
 
 ## Skills (flat; all type `core`; <5 per package so no router skill)
 
-1. **media-module-setup** (packages/nestjs) — Register `MediaModule.forRoot` /
-   `forRootAsync`: `default` + `disks` (LocalDriver, S3Driver), optional `store`
+1. **media-module-setup** (packages/nestjs) — Register `StorageModule.forRoot`
+   (`@nestjs/storage`: `default` + `disks`, LocalDisk / S3Disk) then `MediaModule.forRoot` /
+   `forRootAsync`: optional `store` (instance or `{ inject, useFactory }`)
    (TypeOrmMediaStore / MikroOrmMediaStore / DrizzleMediaStore / PrismaMediaStore),
    `imageProcessor` (SharpImageProcessor), `collections`, `uploadSessions`, `tus`,
-   `direct`. `@Global()` module, inject `MediaService`. Tokens. forRoot vs
-   forRootAsync (DI). Mistakes: default disk missing, forRoot when DI needed,
-   importing module per-feature-module.
+   `direct`, `multipart` side-cars, `authorize`. `@Global()` module, inject `MediaService`. Tokens.
+   Mistakes: no StorageModule, default/disks on MediaModule, side-car options differing from the
+   disk's, importing module per-feature-module.
 
 2. **media-library-attachments** (packages/nestjs) — Layer-2 table model via
    `media.library`: `attach`, `for(ownerType,id)`, `list`, `url(id, conversion?)`,
@@ -25,13 +26,7 @@ client-facing packages a consumer actually imports.
    `Attachment.fromJSON`. Mistakes: `media.library` without `store`, conversion
    without imageProcessor, undefined conversion preset.
 
-3. **raw-storage** (packages/nestjs) — Layer-1 disk-agnostic storage via
-   `media.disk(name?)`: put/get/stream/exists/delete/copy/move/size/url/
-   temporaryUrl/list; multi-disk; the `@dudousxd/nestjs-media/storage` subpath for
-   libraries that only need filesystem. Mistakes: temporaryUrl on local,
-   url on local without baseUrl, unknown disk.
-
-4. **resumable-and-direct-uploads** (packages/nestjs) — proxy/tus
+3. **resumable-and-direct-uploads** (packages/nestjs) — proxy/tus
    (`uploadSessions` + `tus`, raw-body parser, RedisUploadSessionStore) vs direct
    presigned multipart (`direct`, S3). `resolveUploadMode` precedence. Engine
    access via `media.uploads` / `media.directUploads`. Mistakes: missing
@@ -58,7 +53,10 @@ See `domain_map.yaml` `gaps:`. Highlights:
   shipped and are excluded.
 
 ## Uncovered public packages (intentionally out of scope for this pass)
-core, disk-local, disk-s3, image-sharp, database-typeorm, database-mikro-orm,
+core, disk-s3, image-sharp, database-typeorm, database-mikro-orm,
 database-drizzle, database-prisma, upload-redis, client, codegen, telescope,
 testing. Their constructors are referenced (and grounded) inside the covered
 skills, but they do not each receive their own SKILL.md in this focused pass.
+
+Note: raw storage (layer 1) is `@nestjs/storage` and documented at
+https://docs.nestjs.com/application/file-storage; the former raw-storage skill was removed.

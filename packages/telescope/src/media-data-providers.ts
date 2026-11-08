@@ -1,12 +1,15 @@
-import type {
-  MediaStore,
-  StorageManager,
-  UploadSession,
-  UploadSessionStore,
+import {
+  type MediaStore,
+  type MultipartDrivers,
+  type UploadSession,
+  type UploadSessionStore,
+  diskCapabilities,
+  multipartFor,
 } from '@dudousxd/nestjs-media-core';
 import type { DataProvider, Entry, ExtensionContext } from '@dudousxd/nestjs-telescope';
 import { TELESCOPE_STORAGE } from '@dudousxd/nestjs-telescope';
-import { MEDIA_STORAGE_SHARED, MEDIA_STORE, MEDIA_UPLOAD_SESSIONS } from './media-tokens';
+import { Storage } from '@nestjs/storage';
+import { MEDIA_MULTIPART, MEDIA_STORE, MEDIA_UPLOAD_SESSIONS } from './media-tokens';
 
 // ─── Shared helpers ───────────────────────────────────────────────────────────
 
@@ -360,28 +363,40 @@ export function mediaStorageByDiskProvider(): DataProvider {
   };
 }
 
-// ─── Disks & config (MEDIA_STORAGE_SHARED token) ───────────────────────────────
+// ─── Disks & config (`Storage` from @nestjs/storage) ───────────────────────────
 
-/** Configured disks + capability badges. [live] — empty rows when the manager isn't reachable. */
+function optional<T>(ctx: ExtensionContext, token: unknown): T | null {
+  try {
+    return ctx.moduleRef.get<T>(token as never, { strict: false }) ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/** Configured disks + capability badges. [live] — empty rows when `StorageModule` isn't reachable. */
 export function mediaDisksProvider(): DataProvider {
   return {
     name: 'media.disks',
     async resolve(_query, ctx) {
-      const manager = ctx.moduleRef.get<StorageManager | null>(MEDIA_STORAGE_SHARED, {
-        strict: false,
-      });
-      if (!manager) return { rows: [] };
-      const rows = manager.diskNames().map((name) => {
-        const capabilities = manager.disk(name).capabilities;
-        return {
-          name,
-          default: name === manager.defaultDisk ? 'yes' : 'no',
-          presign: capabilities.presign ? 'yes' : 'no',
-          multipart: capabilities.multipart ? 'yes' : 'no',
-          publicUrls: capabilities.publicUrls ? 'yes' : 'no',
-          list: capabilities.list ? 'yes' : 'no',
-        };
-      });
+      const storage = optional<Storage>(ctx, Storage);
+      if (!storage) return { rows: [] };
+      const multipart = optional<MultipartDrivers>(ctx, MEDIA_MULTIPART) ?? undefined;
+      const rows = await Promise.all(
+        storage.names().map(async (name) => {
+          const capabilities = await diskCapabilities(
+            storage.disk(name),
+            multipartFor(multipart, name),
+          );
+          return {
+            name,
+            default: name === storage.defaultDisk ? 'yes' : 'no',
+            presign: capabilities.presign ? 'yes' : 'no',
+            multipart: capabilities.multipart ? 'yes' : 'no',
+            publicUrls: capabilities.publicUrls ? 'yes' : 'no',
+            list: capabilities.list ? 'yes' : 'no',
+          };
+        }),
+      );
       return { rows };
     },
   };

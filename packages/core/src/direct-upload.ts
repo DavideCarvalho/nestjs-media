@@ -1,11 +1,13 @@
 import { publishMedia } from './diagnostics';
-import { UnsupportedOperationError } from './errors';
-import { isMultipartCapable } from './multipart';
-import type { StorageManager } from './storage-manager';
-import type { MultipartPart } from './types';
+import { assertMediaKey } from './keys';
+import { type MultipartDrivers, requireMultipart } from './multipart';
+import type { MediaDisks, MultipartPart } from './types';
 
 export interface DirectUploadManagerOptions {
-  storage: StorageManager;
+  /** The disks: `Storage` from `@nestjs/storage`, or any {@link MediaDisks} (for the default disk). */
+  storage: MediaDisks;
+  /** Native multipart side-cars by disk name. Direct uploads work only on these disks. */
+  multipart?: MultipartDrivers;
   /** default 8 MiB */
   defaultPartSize?: number;
   /** default 3600 */
@@ -34,13 +36,15 @@ const DEFAULT_PART_SIZE = 8 * 1024 * 1024; // 8 MiB
 const DEFAULT_EXPIRY_SECONDS = 3600;
 
 export class DirectUploadManager {
-  private readonly storage: StorageManager;
+  private readonly storage: MediaDisks;
+  private readonly multipart: MultipartDrivers | undefined;
   private readonly defaultPartSize: number;
   private readonly presignExpirySeconds: number;
   private readonly emitDiagnostics: boolean;
 
   constructor(options: DirectUploadManagerOptions) {
     this.storage = options.storage;
+    this.multipart = options.multipart;
     this.defaultPartSize = options.defaultPartSize ?? DEFAULT_PART_SIZE;
     this.presignExpirySeconds = options.presignExpirySeconds ?? DEFAULT_EXPIRY_SECONDS;
     this.emitDiagnostics = options.emitDiagnostics ?? true;
@@ -48,12 +52,9 @@ export class DirectUploadManager {
 
   async createUpload(input: CreateDirectUploadInput): Promise<DirectUploadCreated> {
     const diskName = input.disk ?? this.storage.defaultDisk;
-    const driver = this.storage.disk(diskName);
+    const driver = requireMultipart(this.multipart, diskName, 'direct upload');
 
-    if (!isMultipartCapable(driver)) {
-      throw new UnsupportedOperationError(diskName, 'direct upload');
-    }
-
+    assertMediaKey(input.key);
     const putOptions = input.contentType ? { contentType: input.contentType } : undefined;
     const { uploadId } = await driver.createMultipartUpload(input.key, putOptions);
 
@@ -86,12 +87,9 @@ export class DirectUploadManager {
     partNumber: number;
   }): Promise<{ url: string }> {
     const diskName = input.disk ?? this.storage.defaultDisk;
-    const driver = this.storage.disk(diskName);
+    const driver = requireMultipart(this.multipart, diskName, 'direct upload');
 
-    if (!isMultipartCapable(driver)) {
-      throw new UnsupportedOperationError(diskName, 'direct upload');
-    }
-
+    assertMediaKey(input.key);
     const url = await driver.presignUploadPart(
       input.key,
       input.uploadId,
@@ -109,12 +107,9 @@ export class DirectUploadManager {
     parts: MultipartPart[];
   }): Promise<{ key: string; disk: string }> {
     const diskName = input.disk ?? this.storage.defaultDisk;
-    const driver = this.storage.disk(diskName);
+    const driver = requireMultipart(this.multipart, diskName, 'direct upload');
 
-    if (!isMultipartCapable(driver)) {
-      throw new UnsupportedOperationError(diskName, 'direct upload');
-    }
-
+    assertMediaKey(input.key);
     await driver.completeMultipartUpload(input.key, input.uploadId, input.parts);
 
     if (this.emitDiagnostics) {
@@ -135,12 +130,9 @@ export class DirectUploadManager {
     uploadId: string;
   }): Promise<void> {
     const diskName = input.disk ?? this.storage.defaultDisk;
-    const driver = this.storage.disk(diskName);
+    const driver = requireMultipart(this.multipart, diskName, 'direct upload');
 
-    if (!isMultipartCapable(driver)) {
-      throw new UnsupportedOperationError(diskName, 'direct upload');
-    }
-
+    assertMediaKey(input.key);
     await driver.abortMultipartUpload(input.key, input.uploadId);
 
     if (this.emitDiagnostics) {

@@ -1,25 +1,36 @@
 import type { Readable } from 'node:stream';
-import type {
-  MediaRecord,
-  MediaStore,
-  ReadRangeOptions,
-  StorageDriver,
-  StorageManager,
-  UploadSession,
-  UploadSessionStore,
+import {
+  type MediaRecord,
+  type MediaStore,
+  type MultipartDrivers,
+  type UploadSession,
+  type UploadSessionStore,
+  assertMediaKey,
+  canPresign,
+  diskCapabilities,
+  folderPrefix,
+  hasPublicUrl,
+  listFolderLevel,
+  multipartFor,
 } from '@dudousxd/nestjs-media-core';
 import {
   BadRequestException,
   HttpException,
-  HttpStatus,
   Inject,
   Injectable,
   Logger,
   NotFoundException,
-  NotImplementedException,
   Optional,
-  PayloadTooLargeException,
+  type StreamableFile,
 } from '@nestjs/common';
+import {
+  type ServeFileOptions,
+  Storage,
+  type StorageDisk,
+  StorageError,
+  StorageFileNotFoundError,
+  serveFile,
+} from '@nestjs/storage';
 import type {
   CollectionsResponse,
   DiskListResponse,
@@ -45,22 +56,21 @@ import {
   MEDIA_CONSOLE_OBJECT_INSIGHTS,
   MEDIA_CONSOLE_OBJECT_URLS,
   MEDIA_DASHBOARD_ACTIONS,
-  MEDIA_STORAGE_SHARED,
+  MEDIA_MULTIPART,
   MEDIA_STORE,
   MEDIA_UPLOAD_SESSIONS,
 } from './tokens.js';
 
-/** Seconds a presigned object URL stays valid. */
+/** Seconds a signed object URL stays valid. */
 const URL_TTL_SECONDS = 300;
 const DEFAULT_PAGE_LIMIT = 50;
-/** Ceiling for a console (direct) upload — buffered in memory, so bounded to protect the heap. */
-const MAX_UPLOAD_BYTES = 100 * 1024 * 1024;
-/** Page size when sweeping a folder's objects for a recursive delete. */
-const DELETE_SWEEP_LIMIT = 1000;
-/** Ceiling for a cross-disk copy/move. The driver has no server-side cross-bucket copy, so the object
- *  is streamed through the pod (get→put, buffered) — bounded to protect the heap. Same-disk transfers
- *  use the driver's native copy/move and are not subject to this cap. */
-const MAX_CROSS_DISK_BYTES = 100 * 1024 * 1024;
+/** Page size when sweeping a folder's objects for a recursive delete/copy/move. */
+const SWEEP_LIMIT = 1000;
+/**
+ * The zero-byte file `createFolder` writes so an empty folder exists: `@nestjs/storage` refuses keys
+ * ending in `/`, so the S3-style `prefix/` marker can't be written. Hidden from listings.
+ */
+export const FOLDER_KEEP_FILE = '.keep';
 
 /** Last path segment of a folder prefix, ignoring a trailing slash. */
 function lastSegment(prefix: string): string {
@@ -69,72 +79,58 @@ function lastSegment(prefix: string): string {
   return slash === -1 ? trimmed : trimmed.slice(slash + 1);
 }
 
-/**
- * A range as the CLIENT asked for it, before the object's size is known.
- *
- * Either an absolute {@link ReadRangeOptions}, or HTTP's suffix form (`Range: bytes=-500`, "the last
- * 500 bytes") — which cannot be made absolute without the size, and the size is `stat`'s to give.
- * Resolving it here rather than in the controller saves a second `stat` on the request path.
- */
-export type RequestedReadRange = ReadRangeOptions | { suffixLength: number };
+/** A folder path from the client (`a/b`, `a/b/`, `/a/b`) as `a/b/`; 400 when it can't be a key. */
+function clientFolder(prefix: string, what: string): string {
+  const trimmed = prefix.trim().replace(/^\/+/, '');
+  let normalized: string;
+  try {
+    normalized = folderPrefix(trimmed);
+  } catch (error) {
+    throw new BadRequestException(`${what}: ${(error as Error).message}`);
+  }
+  if (normalized === '') throw new BadRequestException(`${what} is required`);
+  return normalized;
+}
 
-/**
- * The requested range cannot be satisfied against this object (start at/past EOF, or start > end).
- *
- * A dedicated class rather than a bare `HttpException` because RFC 9110 requires a 416 to carry an
- * unsatisfied-range `Content-Range` naming the object's real size, so the client learns the size and
- * can retry — and only the controller can set a header. This carries the size across that boundary.
- */
-export class RangeNotSatisfiableException extends HttpException {
-  constructor(readonly size: number) {
-    super(
-      {
-        statusCode: HttpStatus.REQUESTED_RANGE_NOT_SATISFIABLE,
-        message: `Requested range is not satisfiable for an object of ${size} bytes`,
-        error: 'Range Not Satisfiable',
-      },
-      HttpStatus.REQUESTED_RANGE_NOT_SATISFIABLE,
-    );
+/** Whether `key` is one `@nestjs/storage` can address (a legacy `prefix/` marker isn't). */
+function isAddressable(key: string): boolean {
+  try {
+    assertMediaKey(key);
+    return true;
+  } catch {
+    return false;
   }
 }
 
-/** What {@link MediaConsoleService.objectStream} hands the controller. `range` is present only when
- *  a range was requested AND satisfied, already absolute and clamped to the object — so the
- *  controller can write `Content-Range`/`Content-Length` without re-deriving anything. */
-export interface ObjectStreamResult {
-  stream: Readable;
-  contentType: string;
-  /** Total size of the OBJECT, not of the slice — the `/<size>` in `Content-Range`. */
-  size: number;
-  /** Absolute inclusive bounds actually being streamed. Absent on a full-body read. */
-  range?: { start: number; end: number };
-}
+/** Core errors that carry a client `status` (400). */
+const CORE_CLIENT_ERRORS = new Set(['InvalidMediaKeyError', 'InvalidListingCursorError']);
 
 /**
- * Resolve a requested range into absolute, inclusive, in-bounds bounds — or `null` when it is
- * unsatisfiable and the answer has to be a 416.
- *
- * Unsatisfiable means a start at or past EOF (there is no such byte) or a start past the end; a
- * zero-byte object consequently rejects every range, which is what RFC 9110 prescribes. An `end`
- * beyond EOF is NOT unsatisfiable — it is clamped, because "the next 64 KB from offset N" is how
- * every paging reader asks for the tail of a file, and erroring there would make the last page of
- * every object unreadable.
+ * Storage errors as HTTP: `@nestjs/storage`'s errors carry a `status` (404 missing file, 400
+ * invalid key, 409 key conflict, 416 range) that Nest's exception filter doesn't read on its own;
+ * so do the core's `InvalidMediaKeyError` and `InvalidListingCursorError` (400).
+ * An object store failure (`StorageServiceError`, no status) stays a 500.
  */
-function resolveRange(
-  range: RequestedReadRange,
-  size: number,
-): { start: number; end: number } | null {
-  if ('suffixLength' in range) {
-    // `bytes=-N`: the last N bytes. A suffix longer than the object is the whole object; `bytes=-0`
-    // asks for nothing, which RFC 9110 defines as unsatisfiable rather than as an empty 206.
-    if (!Number.isInteger(range.suffixLength) || range.suffixLength <= 0 || size === 0) return null;
-    return { start: Math.max(0, size - range.suffixLength), end: size - 1 };
+function toHttp(error: unknown): unknown {
+  if (error instanceof HttpException) return error;
+  if (error instanceof StorageFileNotFoundError) return new NotFoundException(error.message);
+  const status = (error as { status?: unknown } | null)?.status;
+  if (
+    (error instanceof StorageError ||
+      CORE_CLIENT_ERRORS.has((error as Error | null)?.name ?? '')) &&
+    typeof status === 'number'
+  ) {
+    return new HttpException((error as Error).message, status);
   }
-  const { start } = range;
-  if (!Number.isInteger(start) || start < 0 || start >= size) return null;
-  const end = range.end === undefined ? size - 1 : Math.min(range.end, size - 1);
-  if (!Number.isInteger(end) || end < start) return null;
-  return { start, end };
+  return error;
+}
+
+async function http<T>(run: () => Promise<T>): Promise<T> {
+  try {
+    return await run();
+  } catch (error) {
+    throw toHttp(error);
+  }
 }
 
 function mapUpload(session: UploadSession): UploadInfo {
@@ -172,134 +168,140 @@ function mapRecord(record: MediaRecord): LibraryRecord {
 }
 
 /**
- * Read + action logic behind the console's JSON API. Resolves the three by-value media tokens
- * with `@Optional()` so a host without a `MediaStore`/upload store still boots — every method
- * degrades to an empty shape instead of throwing when its capability is absent.
+ * Read + action logic behind the console's JSON API, on the disks of `@nestjs/storage` (`Storage`).
+ * Resolves the store, upload store and multipart side-cars with `@Optional()` so a host without
+ * them still boots — every method degrades to an empty shape instead of throwing.
  */
 @Injectable()
 export class MediaConsoleService {
   constructor(
-    @Optional() @Inject(MEDIA_STORAGE_SHARED) private readonly storage: StorageManager | null,
+    @Optional() @Inject(Storage) private readonly storage: Storage | null,
     @Optional() @Inject(MEDIA_STORE) private readonly store: MediaStore | null,
     @Optional() @Inject(MEDIA_UPLOAD_SESSIONS) private readonly uploads: UploadSessionStore | null,
     @Optional() @Inject(MEDIA_DASHBOARD_ACTIONS) private readonly actionsEnabled: boolean | null,
     // Defaulted, not merely `@Optional()`: the console service is constructed directly in unit
-    // tests (and by any host wiring it by hand), so a required 5th argument would break every one
-    // of those call sites for a feature they do not use.
+    // tests (and by any host wiring it by hand).
     @Optional()
     @Inject(MEDIA_CONSOLE_OBJECT_INSIGHTS)
     private readonly insightProviders: ObjectInsightProvider[] | null = null,
-    // Strategy and mount path travel as ONE value: a strategy without the path it needs would be a
-    // half-configured state that builds `/disks/...` URLs rooted at nothing. `null` means `auto`.
+    // Strategy and mount path travel as ONE value. `null` means `auto`.
     @Optional()
     @Inject(MEDIA_CONSOLE_OBJECT_URLS)
     private readonly objectUrls: ObjectUrlConfig | null = null,
+    /** `MediaModuleOptions.multipart`: native folder listing and the multipart badge. */
+    @Optional()
+    @Inject(MEDIA_MULTIPART)
+    private readonly multipart: MultipartDrivers | null = null,
   ) {}
-
-  /**
-   * The URL to report for an object's bytes, under the host's {@link ObjectUrlStrategy}. `auto`
-   * prefers a presigned URL straight to the store; `proxy` routes through this server, for a host
-   * whose browser cannot reach the store at all.
-   */
-  private objectUrl(driver: StorageDriver, disk: string, key: string): Promise<string> {
-    if (this.objectUrls?.strategy === 'proxy') {
-      return Promise.resolve(objectProxyUrl(this.objectUrls.apiBasePath, 'raw', disk, key));
-    }
-    return driver.capabilities.presign
-      ? driver.temporaryUrl(key, URL_TTL_SECONDS)
-      : driver.url(key);
-  }
 
   private readonly logger = new Logger(MediaConsoleService.name);
 
-  private diskOrThrow(disk: string): StorageDriver {
-    if (!this.storage || !this.storage.diskNames().includes(disk)) {
+  /**
+   * The URL to report for an object's bytes, under the host's {@link ObjectUrlStrategy}. `auto`
+   * prefers the disk's public URL, then a signed one (S3 presigns; a local disk signs with
+   * `signedUrls`), and falls back to this server's own route for a disk that can do neither.
+   * `proxy` always routes through this server.
+   */
+  private async objectUrl(disk: StorageDisk, name: string, key: string): Promise<string> {
+    const proxy = () => objectProxyUrl(this.objectUrls?.apiBasePath ?? '', 'raw', name, key);
+    if (this.objectUrls?.strategy === 'proxy') return proxy();
+    if (hasPublicUrl(disk)) return disk.url(key);
+    if (await canPresign(disk)) return disk.signedUrl(key, { expiresIn: URL_TTL_SECONDS * 1000 });
+    return proxy();
+  }
+
+  private diskOrThrow(disk: string): StorageDisk {
+    if (!this.storage || !this.storage.names().includes(disk)) {
       throw new NotFoundException(`Unknown disk: ${disk}`);
     }
     return this.storage.disk(disk);
   }
 
-  listDisks(): DiskListResponse {
+  async listDisks(): Promise<DiskListResponse> {
     const storage = this.storage;
     if (!storage) return { disks: [] };
-    const defaultDisk = storage.defaultDisk;
     return {
-      disks: storage.diskNames().map((name) => ({
-        name,
-        default: name === defaultDisk,
-        capabilities: storage.disk(name).capabilities,
-      })),
-    };
-  }
-
-  async listObjects(
-    disk: string,
-    options: { prefix?: string; cursor?: string; limit?: number },
-  ): Promise<ObjectListResponse> {
-    const driver = this.diskOrThrow(disk);
-    const result = await driver.list(options.prefix ?? '', {
-      delimiter: '/',
-      ...(options.cursor ? { cursor: options.cursor } : {}),
-      limit: options.limit ?? DEFAULT_PAGE_LIMIT,
-    });
-    return {
-      // Drop phantom folders whose name is empty — a CommonPrefix of only slashes (`/`, `//`),
-      // produced by a stray key with a leading slash. The S3 driver normalizes such a prefix back to
-      // the root, so listing INTO one returns the root again (the phantom included) — a self-reference
-      // that infinite-loops the folder tree. Filtering it out removes the trap; those leading-slash
-      // keys are unreachable from the console anyway (the driver strips the leading slash).
-      folders: result.folders
-        .map((prefix) => ({ name: lastSegment(prefix), prefix }))
-        .filter((folder) => folder.name !== ''),
-      // Drop the zero-byte "folder marker" (a key ending in `/`, whose name is empty after the
-      // prefix) that `createFolder` writes — it's the folder itself, not a file inside it.
-      files: result.files
-        .filter((entry) => entry.name !== '')
-        .map((entry) => ({
-          key: entry.key,
-          name: entry.name,
-          sizeBytes: entry.sizeBytes,
-          lastModified: entry.lastModified ? entry.lastModified.toISOString() : null,
+      disks: await Promise.all(
+        storage.names().map(async (name) => ({
+          name,
+          default: name === storage.defaultDisk,
+          capabilities: await diskCapabilities(
+            storage.disk(name),
+            multipartFor(this.multipart ?? undefined, name),
+          ),
         })),
-      ...(result.cursor ? { cursor: result.cursor } : {}),
-    };
-  }
-
-  async objectDetail(disk: string, key: string): Promise<ObjectDetailResponse> {
-    const driver = this.diskOrThrow(disk);
-    const stat = await driver.stat(key);
-    const url = await this.objectUrl(driver, disk, key);
-    return {
-      key,
-      size: stat.size,
-      ...(stat.contentType ? { contentType: stat.contentType } : {}),
-      ...(stat.lastModified ? { lastModified: stat.lastModified.toISOString() } : {}),
-      url,
+      ),
     };
   }
 
   /**
-   * What the HOST knows about this object, from every registered provider.
-   *
-   * Its own call rather than a field on `objectDetail`, for the same reason the RAG index-status
-   * endpoint is separate from its document listing: `objectDetail` is on the path of every preview
-   * and every navigation, and providers reach into host databases. Folding them in would put a host
-   * query on reads that only wanted a presigned URL.
-   *
-   * Failures are contained per provider. A provider that throws is logged and dropped, and the
-   * others still render — annotation must never be able to stop an admin opening a file, and one
-   * host lookup being down says nothing about the rest.
-   *
-   * Providers run concurrently: they are independent host lookups, and running them in series would
-   * make the panel as slow as their sum for no gain.
+   * One folder level. `StorageDisk.list()` is flat; a disk whose multipart side-car lists with a
+   * delimiter (S3) asks the store for folders, any other disk folds its flat listing.
+   */
+  async listObjects(
+    disk: string,
+    options: { prefix?: string; cursor?: string; limit?: number },
+  ): Promise<ObjectListResponse> {
+    const store = this.diskOrThrow(disk);
+    const raw = (options.prefix ?? '').replace(/^\/+/, '');
+    let prefix: string;
+    try {
+      prefix = folderPrefix(raw);
+    } catch (error) {
+      throw new BadRequestException((error as Error).message);
+    }
+    const level = await http(() =>
+      listFolderLevel(
+        store,
+        prefix,
+        {
+          limit: options.limit ?? DEFAULT_PAGE_LIMIT,
+          ...(options.cursor ? { cursor: options.cursor } : {}),
+        },
+        multipartFor(this.multipart ?? undefined, disk),
+      ),
+    );
+    return {
+      folders: level.folders
+        .map((folder) => ({ name: lastSegment(folder), prefix: folder }))
+        .filter((folder) => folder.name !== ''),
+      files: level.files
+        .map((entry) => ({ entry, name: entry.key.slice(prefix.length) }))
+        .filter(({ name }) => name !== '' && name !== FOLDER_KEEP_FILE)
+        .map(({ entry, name }) => ({
+          key: entry.key,
+          name,
+          sizeBytes: entry.size,
+          lastModified: entry.lastModified.toISOString(),
+        })),
+      ...(level.cursor ? { cursor: level.cursor } : {}),
+    };
+  }
+
+  async objectDetail(disk: string, key: string): Promise<ObjectDetailResponse> {
+    const store = this.diskOrThrow(disk);
+    return http(async () => {
+      const stat = await store.stat(key);
+      return {
+        key,
+        size: stat.size,
+        contentType: stat.contentType,
+        lastModified: stat.lastModified.toISOString(),
+        url: await this.objectUrl(store, disk, key),
+      };
+    });
+  }
+
+  /**
+   * What the HOST knows about this object, from every registered provider. Its own call rather
+   * than a field on `objectDetail`, so host lookups stay off the preview path. A provider that
+   * throws is logged and dropped; providers run concurrently.
    */
   async objectInsights(disk: string, key: string): Promise<ObjectInsightsResponse> {
     const providers = this.insightProviders ?? [];
     if (providers.length === 0) {
       return { insights: [] };
     }
-    // Validates the disk the same way every other object read does, so an unknown disk 404s here
-    // too rather than silently handing host providers a key from nowhere.
     this.diskOrThrow(disk);
 
     const settled = await Promise.all(
@@ -325,120 +327,86 @@ export class MediaConsoleService {
   }
 
   /**
-   * The object's raw byte stream plus the metadata the controller needs to serve it inline. Used by
-   * the console's same-origin preview proxy so text/PDF render in the browser instead of downloading
-   * (and so a CORS-locked bucket is still previewable).
-   *
-   * With `range`, only that slice — which is what makes previewing a multi-hundred-MB object (a
-   * SQLite database read a page at a time) possible at all. The range is resolved HERE, not in the
-   * driver, because it has to be checked against the object's size and the `stat` for that is
-   * already on this path: the suffix form is made absolute, an overrunning `end` is clamped to the
-   * last byte, and anything genuinely unsatisfiable becomes a {@link RangeNotSatisfiableException}
-   * (HTTP 416) instead of a surprise empty body.
-   *
-   * A driver that reports `ranged: false` REFUSES a range request rather than quietly returning the
-   * whole object: the caller asked for 64 KB out of 400 MB, and silently answering with all 400 MB
-   * — which the caller would then read as if it were the slice — is the exact failure the `ranged`
-   * capability exists to make impossible.
+   * Streams an object as the response through `@nestjs/storage`'s `serveFile()`: a single `Range`
+   * gets a 206 with `Content-Range` (how a SQLite/ZIP/Parquet preview reads a few KB out of a huge
+   * object), `If-None-Match` a 304, a range past the end a 416, a missing file a 404. `inline`
+   * applies only to types that can't run script in this origin; others download.
    */
-  async objectStream(
+  serveObject(
     disk: string,
     key: string,
-    range?: RequestedReadRange,
-  ): Promise<ObjectStreamResult> {
-    const driver = this.diskOrThrow(disk);
-    const stat = await driver.stat(key);
-    const contentType = stat.contentType ?? 'application/octet-stream';
-    if (!range) {
-      return { stream: await driver.stream(key), contentType, size: stat.size };
-    }
-    if (!driver.capabilities.ranged) {
-      throw new NotImplementedException(`Disk "${disk}" cannot serve byte ranges`);
-    }
-    const resolved = resolveRange(range, stat.size);
-    if (!resolved) throw new RangeNotSatisfiableException(stat.size);
-    return {
-      stream: await driver.stream(key, resolved),
-      contentType,
-      size: stat.size,
-      range: resolved,
-    };
+    options: ServeFileOptions,
+  ): Promise<StreamableFile | undefined> {
+    return http(() => serveFile(this.diskOrThrow(disk), key, options));
   }
 
-  /** Writes an object from a byte stream (a browser upload). The caller supplies the full key
-   *  (prefix + filename); an unknown disk 404s via {@link diskOrThrow}. Actions-gated.
-   *
-   *  The request stream is buffered before the write: S3's PutObject needs a known Content-Length,
-   *  which a raw request stream doesn't carry, so passing the stream straight through fails. Bounded
-   *  at {@link MAX_UPLOAD_BYTES} so a runaway upload can't exhaust the pod's heap — larger files
-   *  belong on the resumable upload path, not this console convenience upload. */
-  async putObject(disk: string, key: string, body: Readable, contentType?: string): Promise<void> {
-    const driver = this.diskOrThrow(disk);
-    const chunks: Buffer[] = [];
-    let total = 0;
-    for await (const chunk of body) {
-      const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
-      total += buffer.length;
-      if (total > MAX_UPLOAD_BYTES) {
-        throw new PayloadTooLargeException(
-          `Upload exceeds the ${MAX_UPLOAD_BYTES / (1024 * 1024)} MB console limit.`,
-        );
-      }
-      chunks.push(buffer);
-    }
-    await driver.put(key, Buffer.concat(chunks), contentType ? { contentType } : undefined);
+  /**
+   * Writes an object from a byte stream (a browser upload), streamed onto the disk: S3Disk turns a
+   * body of unknown length into a multipart upload itself, so nothing is buffered here. With the
+   * request's `Content-Length`, a body that ends short fails and nothing is written.
+   */
+  async putObject(
+    disk: string,
+    key: string,
+    body: Readable,
+    contentType?: string,
+    contentLength?: number,
+  ): Promise<void> {
+    const store = this.diskOrThrow(disk);
+    await http(() =>
+      store.put(key, body, {
+        ...(contentType ? { contentType } : {}),
+        ...(contentLength !== undefined ? { contentLength } : {}),
+      }),
+    );
   }
 
-  /** Creates a "folder" — a zero-byte marker object at `<prefix>/`, which S3-style listing surfaces
-   *  as a navigable folder. Normalizes to exactly one trailing slash; rejects an empty prefix. */
+  /**
+   * Creates a folder: a zero-byte `<prefix>/.keep` file (hidden from listings), since
+   * `@nestjs/storage` keys can't end with `/`. Listings show the folder because a key lives in it.
+   */
   async createFolder(disk: string, prefix: string): Promise<void> {
-    const normalized = prefix.replace(/^\/+/, '').replace(/\/+$/, '');
-    if (normalized === '') throw new BadRequestException('Folder name is required');
-    await this.diskOrThrow(disk).put(`${normalized}/`, Buffer.alloc(0));
+    const folder = clientFolder(prefix, 'Folder name');
+    await http(() => this.diskOrThrow(disk).put(`${folder}${FOLDER_KEEP_FILE}`, ''));
   }
 
   async deleteObject(disk: string, key: string): Promise<void> {
-    await this.diskOrThrow(disk).delete(key);
+    await http(() => this.diskOrThrow(disk).delete(key));
   }
 
-  /** Recursively deletes a "folder": every object under `<prefix>/` (nested included) plus the
-   *  zero-byte marker itself. Passes an empty delimiter so the driver lists keys FLAT — the default
-   *  `/` delimiter would group nested keys into CommonPrefixes and the sweep would miss them, only
-   *  deleting direct children. Paginates until the disk reports no more. The marker's own key equals
-   *  the sweep prefix, which `list` filters out (Key === Prefix), so it's deleted explicitly at the
-   *  end. Actions-gated. */
+  /**
+   * Recursively deletes a folder: every file under `<prefix>/`, nested included (its `.keep`
+   * too), a batch of keys per `delete()`. A legacy `prefix/` marker object written by another tool
+   * can't be addressed through `@nestjs/storage`; it is skipped.
+   */
   async deleteFolder(disk: string, prefix: string): Promise<void> {
-    const driver = this.diskOrThrow(disk);
-    const normalized = prefix.replace(/^\/+/, '').replace(/\/+$/, '');
-    if (normalized === '') throw new BadRequestException('Folder is required');
-    const sweepPrefix = `${normalized}/`;
-    let cursor: string | undefined;
-    do {
-      const result = await driver.list(sweepPrefix, {
-        delimiter: '',
-        limit: DELETE_SWEEP_LIMIT,
-        ...(cursor ? { cursor } : {}),
-      });
-      const keys = result.files.map((entry) => entry.key);
-      if (driver.deleteMany) await driver.deleteMany(keys);
-      else for (const key of keys) await driver.delete(key);
-      cursor = result.cursor;
-    } while (cursor);
-    await driver.delete(sweepPrefix);
+    const store = this.diskOrThrow(disk);
+    const folder = clientFolder(prefix, 'Folder');
+    await http(async () => {
+      const keys: string[] = [];
+      for await (const entry of store.listAll({ prefix: folder, limit: SWEEP_LIMIT })) {
+        if (isAddressable(entry.key)) keys.push(entry.key);
+      }
+      for (let start = 0; start < keys.length; start += SWEEP_LIMIT) {
+        await store.delete(keys.slice(start, start + SWEEP_LIMIT));
+      }
+    });
   }
 
   async copyObject(fromDisk: string, from: string, toDisk: string, to: string): Promise<void> {
-    await this.transferKey('copy', fromDisk, from, toDisk, to);
+    await http(() => this.transferKey('copy', fromDisk, from, toDisk, to));
   }
 
   async moveObject(fromDisk: string, from: string, toDisk: string, to: string): Promise<void> {
-    await this.transferKey('move', fromDisk, from, toDisk, to);
+    await http(() => this.transferKey('move', fromDisk, from, toDisk, to));
   }
 
-  /** Copies or moves a single object, on the same disk or across disks. Same-disk uses the driver's
-   *  native `copy`/`move` (server-side, no bytes through the pod). Cross-disk has no driver primitive,
-   *  so the object is streamed through the pod (get→put, buffered), preserving its content type and
-   *  bounded at {@link MAX_CROSS_DISK_BYTES}; a `move` then deletes the source. */
+  /**
+   * Copies or moves one object. Same disk: the disk's own `copy`/`move` (server-side on S3, a
+   * rename on a local disk). Across disks: the source's body streams into the destination's
+   * `put()` (no size limit, nothing buffered), keeping its content type, cache control,
+   * disposition and metadata; a `move` then deletes the source.
+   */
   private async transferKey(
     op: 'copy' | 'move',
     fromDisk: string,
@@ -446,43 +414,44 @@ export class MediaConsoleService {
     toDisk: string,
     to: string,
   ): Promise<void> {
-    const fromDriver = this.diskOrThrow(fromDisk);
+    const source = this.diskOrThrow(fromDisk);
     if (fromDisk === toDisk) {
-      if (op === 'move') await fromDriver.move(from, to);
-      else await fromDriver.copy(from, to);
+      if (op === 'move') await source.move(from, to);
+      else await source.copy(from, to);
       return;
     }
-    const toDriver = this.diskOrThrow(toDisk);
-    const stat = await fromDriver.stat(from);
-    if (stat.size > MAX_CROSS_DISK_BYTES) {
-      throw new PayloadTooLargeException(
-        `"${from}" is ${Math.round(stat.size / (1024 * 1024))} MB — over the ${
-          MAX_CROSS_DISK_BYTES / (1024 * 1024)
-        } MB limit for copying across disks from the console.`,
-      );
+    const target = this.diskOrThrow(toDisk);
+    const download = await source.get(from);
+    try {
+      await target.put(to, download.body, {
+        contentType: download.contentType,
+        contentLength: download.size,
+        ...(download.cacheControl ? { cacheControl: download.cacheControl } : {}),
+        ...(download.contentDisposition ? { contentDisposition: download.contentDisposition } : {}),
+        metadata: download.metadata,
+      });
+    } finally {
+      download.body.destroy();
     }
-    const bytes = await fromDriver.get(from);
-    await toDriver.put(to, bytes, stat.contentType ? { contentType: stat.contentType } : undefined);
-    if (op === 'move') await fromDriver.delete(from);
+    if (op === 'move') await source.delete(from);
   }
 
-  /** Moves a whole "folder" (every object under `<from>/`, nested included) to `<to>/`, on the same
-   *  disk or across disks, preserving each key's path relative to the source. */
+  /** Moves a whole folder (every file under `<from>/`, nested included) to `<to>/`. */
   async moveFolder(fromDisk: string, from: string, toDisk: string, to: string): Promise<void> {
-    await this.transferFolder('move', fromDisk, from, toDisk, to);
+    await http(() => this.transferFolder('move', fromDisk, from, toDisk, to));
   }
 
-  /** Copies a whole "folder" (every object under `<from>/`, nested included) to `<to>/`, same disk or
-   *  across disks, preserving each key's path relative to the source. */
+  /** Copies a whole folder (every file under `<from>/`, nested included) to `<to>/`. */
   async copyFolder(fromDisk: string, from: string, toDisk: string, to: string): Promise<void> {
-    await this.transferFolder('copy', fromDisk, from, toDisk, to);
+    await http(() => this.transferFolder('copy', fromDisk, from, toDisk, to));
   }
 
-  /** Shared engine for {@link moveFolder}/{@link copyFolder}. Same flat-listing sweep as
-   *  {@link deleteFolder}; each key is relocated via {@link transferKey} (so cross-disk transfers work
-   *  transparently). On the SAME disk, rejects a destination inside the source (which would recurse
-   *  forever); across disks that constraint doesn't apply. The destination folder marker is written,
-   *  and for a move the source marker is removed, so both listings stay consistent. Actions-gated. */
+  /**
+   * Shared engine for {@link moveFolder}/{@link copyFolder}: a flat sweep of the source, each key
+   * relocated via {@link transferKey}, keeping its path relative to the folder (an empty folder's
+   * `.keep` goes along). On the SAME disk, a destination inside the source is refused (it would
+   * recurse forever).
+   */
   private async transferFolder(
     op: 'copy' | 'move',
     fromDisk: string,
@@ -490,34 +459,27 @@ export class MediaConsoleService {
     toDisk: string,
     to: string,
   ): Promise<void> {
-    const fromDriver = this.diskOrThrow(fromDisk);
-    const toDriver = this.diskOrThrow(toDisk);
-    const fromNormalized = from.replace(/^\/+/, '').replace(/\/+$/, '');
-    const toNormalized = to.replace(/^\/+/, '').replace(/\/+$/, '');
-    if (fromNormalized === '') throw new BadRequestException('Source folder is required');
-    if (toNormalized === '') throw new BadRequestException('Destination folder is required');
-    const fromPrefix = `${fromNormalized}/`;
-    const toPrefix = `${toNormalized}/`;
-    if (fromDisk === toDisk && (toPrefix === fromPrefix || toPrefix.startsWith(fromPrefix))) {
+    const source = this.diskOrThrow(fromDisk);
+    this.diskOrThrow(toDisk);
+    const fromPrefix = clientFolder(from, 'Source folder');
+    const toPrefix = clientFolder(to, 'Destination folder');
+    if (fromDisk === toDisk && toPrefix.startsWith(fromPrefix)) {
       throw new BadRequestException(`Cannot ${op} a folder into itself`);
     }
-    let cursor: string | undefined;
-    do {
-      const result = await fromDriver.list(fromPrefix, {
-        delimiter: '',
-        limit: DELETE_SWEEP_LIMIT,
-        ...(cursor ? { cursor } : {}),
-      });
-      for (const entry of result.files) {
-        const destKey = `${toPrefix}${entry.key.slice(fromPrefix.length)}`;
-        await this.transferKey(op, fromDisk, entry.key, toDisk, destKey);
-      }
-      cursor = result.cursor;
-    } while (cursor);
-    // Relocate/replicate the zero-byte marker (its key equals the sweep prefix, so the sweep skips it):
-    // write the destination marker, and for a move drop the source one. Idempotent if there was none.
-    await toDriver.put(toPrefix, Buffer.alloc(0));
-    if (op === 'move') await fromDriver.delete(fromPrefix);
+    // The keys first, then the transfers: a move changes the listing it would be paging through.
+    const keys: string[] = [];
+    for await (const entry of source.listAll({ prefix: fromPrefix, limit: SWEEP_LIMIT })) {
+      if (isAddressable(entry.key)) keys.push(entry.key);
+    }
+    for (const key of keys) {
+      await this.transferKey(
+        op,
+        fromDisk,
+        key,
+        toDisk,
+        `${toPrefix}${key.slice(fromPrefix.length)}`,
+      );
+    }
   }
 
   async listUploads(filter: { disk?: string; prefix?: string }): Promise<UploadListResponse> {
@@ -584,10 +546,12 @@ export class MediaConsoleService {
     if (!record) throw new NotFoundException(`Unknown media record: ${id}`);
     const variants = await Promise.all(
       Object.entries(record.conversions).map(async ([name, conversion]) => {
-        const driver = this.storage?.diskNames().includes(conversion.disk)
+        const disk = this.storage?.names().includes(conversion.disk)
           ? this.storage.disk(conversion.disk)
           : null;
-        const url = driver ? await this.objectUrl(driver, conversion.disk, conversion.path) : '';
+        const url = disk
+          ? await this.objectUrl(disk, conversion.disk, conversion.path).catch(() => '')
+          : '';
         // `disk`/`path` ride along so the UI can reach the object routes (download, and a proxied
         // read) for a variant — `url` alone is opaque, and under `auto` points off this origin.
         return { name, url, disk: conversion.disk, path: conversion.path };
@@ -605,7 +569,7 @@ export class MediaConsoleService {
     return {
       hasStore: this.store !== null && typeof this.store.list === 'function',
       hasUploads: this.uploads !== null && typeof this.uploads.list === 'function',
-      disks: this.storage ? this.storage.diskNames().length : 0,
+      disks: this.storage ? this.storage.names().length : 0,
       actions: this.actionsEnabled === true,
     };
   }

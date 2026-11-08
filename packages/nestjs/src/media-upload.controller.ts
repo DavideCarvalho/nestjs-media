@@ -13,6 +13,7 @@ import {
   Req,
   Res,
 } from '@nestjs/common';
+import { OpenToAuthorization } from './controller-decorators';
 import { MEDIA_TUS } from './tokens';
 
 /** Minimal Express-like response surface this controller writes to. */
@@ -31,6 +32,9 @@ interface ReqLike {
  * `application/offset+octet-stream` (e.g. `express.raw({ type: 'application/offset+octet-stream' })`)
  * so PATCH bodies arrive as Buffers.
  */
+// Open to `@nestjs/authorization`'s deny-by-default guard; the host's `decorators` (or its own
+// subclass, with `routes: false`) decide access.
+@OpenToAuthorization()
 @Controller('media/uploads')
 export class MediaUploadController {
   constructor(@Inject(MEDIA_TUS) private readonly handler: TusUploadHandler | null) {}

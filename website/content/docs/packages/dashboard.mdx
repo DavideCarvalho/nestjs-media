@@ -1,22 +1,25 @@
 ---
 title: '@dudousxd/nestjs-media-dashboard'
 icon: LayoutDashboard
-description: Standalone /media console — disks, live uploads, and the media library, with your choice of auth.
+description: Standalone /media console — disks, live uploads, and the media library, protected with NestJS's first-party auth tools.
 ---
 
 import { Callout } from 'fumadocs-ui/components/callout';
 
-A bundled React SPA + JSON API you mount alongside [`MediaModule`](/docs/packages/nestjs) to browse disks, watch live uploads, and inspect the media library — without writing an admin UI of your own.
+A bundled React SPA + JSON API you mount alongside [`MediaModule`](/docs/packages/nestjs) to browse the `@nestjs/storage` disks, watch live uploads, and inspect the media library — without writing an admin UI of your own. It reads the disks from `StorageModule`'s `Storage`, and the multipart side-cars, store and upload sessions from `MediaModule`.
 
 ```ts
 import { MediaDashboardModule } from '@dudousxd/nestjs-media-dashboard';
 
 @Module({
   imports: [
+    StorageModule.forRoot({ disks: { /* … */ } }),
     MediaModule.forRoot({ /* … */ }),
     MediaDashboardModule.forRoot({
       basePath: '/media',
       apiBasePath: '/api/media/console',
+      // Required in production — see "Protecting the routes".
+      decorators: [UseGuards(AuthenticationGuard), Can(MediaPolicy, 'console')],
     }),
   ],
 })
@@ -32,9 +35,9 @@ interface MediaDashboardOptions {
   basePath?: string;       // default '/media'
   apiBasePath?: string;    // default '<basePath>/api'
   actions?: boolean;       // enable delete/copy/move/abort — default false (read-only)
-  auth?: ConsoleAuthOptions;                 // built-in session-cookie login
-  guards?: Array<Type<CanActivate> | CanActivate>; // bring-your-own guard(s)
-  imports?: DynamicModule['imports'];        // DI resolution path for `guards`
+  imports?: DynamicModule['imports'];        // DI resolution path for a decorator guard's deps
+  decorators?: ClassDecorator[];             // applied to every console controller, e.g. Can(...)
+  routes?: boolean;                           // false → mount no controller (mount them yourself)
   objectInsights?: ObjectInsightProvider[];  // host context shown in the preview
   objectUrls?: 'auto' | 'proxy';             // presigned store URLs, or same-origin — default 'auto'
 }
@@ -43,89 +46,94 @@ interface MediaDashboardOptions {
 | Option | Purpose |
 |---|---|
 | `basePath` | Where the SPA is served. Keep it out of an `/api` prefix so it reads as a UI, not an endpoint. |
-| `apiBasePath` | Where the JSON API is mounted (what the SPA fetches). Put it under your app's `/api` prefix so it inherits the app's proxy/auth rules. |
+| `apiBasePath` | Where the JSON API is mounted (what the SPA fetches). Put it under your app's `/api` prefix so it inherits the app's proxy rules. |
 | `actions` | Enables the destructive endpoints (delete object/record, copy/move, abort upload). The read API is always available. |
-| `auth` | Telescope-style built-in session-cookie login — see below. |
-| `guards` / `imports` | Front the console with your own `CanActivate`(s) instead of, or alongside, `auth` — see [Securing the console](#securing-the-console-with-your-own-guards). |
+| `decorators` | Class decorators applied to every console controller — see [Protecting the routes](#protecting-the-routes). |
+| `routes` | `false` mounts no controller, for serving the console from your own — see [Mount it yourself](#1-mount-it-yourself). Default `true`. |
+| `imports` | Modules providing the dependencies of a guard you pass through `decorators`. |
 | `objectInsights` | Annotate an object in the preview with what *your app* knows about it — see [Object insights](#object-insights). |
 | `objectUrls` | Whether an object's reported `url` is presigned straight to the store or routed through this server — see [Reaching an object's bytes](#reaching-an-objects-bytes). |
 
-`MediaDashboardModule.forRootAsync(options)` mirrors this, resolving `auth` through an injected `useAuth(...deps)` factory (for hooks that need your DB/services). `guards` and the mount paths stay static fields on the async options object — guard stamping happens at module-build time, before any factory runs.
+`MediaDashboardModule.forRootAsync(options)` mirrors this, building `objectInsights` through an injected `useObjectInsights(...deps)` factory (`inject` lists the deps). `decorators`, `routes`, `actions` and the mount paths stay static fields on the async options object, since they shape the routes when the module is built.
 
-## Built-in auth
+## Protecting the routes
 
-Omit `auth` to leave the console open (front it another way — a reverse proxy, or `guards` below). Set it to gate the console behind a signed session cookie with your own `login`/`session` hooks:
+The console mounts a page/asset controller and the read and action JSON APIs, with **no auth of their own**: you protect them with NestJS's first-party tools (`@nestjs/authentication`, `@nestjs/authorization`), one of two ways:
+
+1. **Mount it yourself**: `routes: false`, then extend the exported controllers.
+2. **`decorators`** on the controllers this module mounts.
+
+**Production rule.** When `NODE_ENV === 'production'`, a registration that mounts the console without `decorators` (an empty array counts as none) refuses to boot:
+
+```txt
+MediaDashboardModule.forRoot() mounts routes with no protection, which is refused when NODE_ENV=production. Protect them one of two ways:
+  1. decorators on the mounted controllers: MediaDashboardModule.forRoot({ decorators: [UseGuards(AuthenticationGuard), Can(MediaPolicy, 'console')] })
+  2. routes: false, and mount them yourself: MediaDashboardModule.forRoot({ routes: false }) + @Can(MediaPolicy, 'console') @Controller('media/api') class ConsoleApiController extends MediaConsoleReadController {}
+```
+
+Outside production, undecorated routes mount open.
+
+`@nestjs/authorization`'s `AuthorizationModule.forRoot()` registers a global `AuthorizationGuard` that **denies by default** any route with no `@Can(...)` and no `@Can.Anyone()`. Every console controller is marked `@Can.Anyone()`-open (`'authorization:can-anyone'` metadata, no dependency on that package), so the console keeps working when you adopt it. The mark only opens a route that declares no requirement: a `@Can(...)` you add is still checked (a guest gets 401, a user the policy denies 403).
+
+### 1. Mount it yourself
+
+`routes: false` registers **no** console controller, while every provider keeps working and is exported (`MediaConsoleService` and the resolved paths). Serve the console by extending the exported controller classes in a module of your own and protect them like any of your routes. Keep `basePath`/`apiBasePath` equal to where you mount them, since the SPA reads both:
 
 ```ts
+import { Can } from '@nestjs/authorization';
+import { Controller, Module } from '@nestjs/common';
+import {
+  MediaConsoleActionsController,
+  MediaConsoleReadController,
+  MediaDashboardModule,
+  MediaDashboardUiController,
+} from '@dudousxd/nestjs-media-dashboard';
+
+@Can(MediaPolicy, 'console')
+@Controller('media')
+export class ConsolePageController extends MediaDashboardUiController {}
+
+@Can(MediaPolicy, 'console')
+@Controller('media/api')
+export class ConsoleApiController extends MediaConsoleReadController {}
+
+@Can(MediaPolicy, 'console')
+@Controller('media/api')
+export class ConsoleActionsController extends MediaConsoleActionsController {} // only with `actions: true`
+
+@Module({
+  imports: [
+    AuthorizationModule.forRoot(),
+    MediaDashboardModule.forRoot({ basePath: '/media', apiBasePath: '/media/api', routes: false }),
+  ],
+  controllers: [ConsolePageController, ConsoleApiController, ConsoleActionsController],
+  providers: [MediaPolicy],
+})
+export class AppModule {}
+```
+
+The subclasses inherit every route and the constructor's injection, so they need no constructor of their own. `routes` is a static field on `forRootAsync` too.
+
+### 2. `decorators`
+
+To keep the routes this module mounts and gate them with the official tools, pass `decorators` — class decorators applied to **every** controller the console mounts (default: none):
+
+```ts
+import { AuthenticationGuard } from '@nestjs/authentication';
+import { Can } from '@nestjs/authorization';
+import { UseGuards } from '@nestjs/common';
+
 MediaDashboardModule.forRoot({
-  auth: {
-    secret: process.env.CONSOLE_SECRET!,
-    ttl: '8h',
-    login: async (username, password) => {
-      const user = await accounts.verify(username, password);
-      return user ? { id: user.id, roles: user.roles } : null;
-    },
-  },
+  decorators: [UseGuards(AuthenticationGuard), Can(MediaPolicy, 'console')],
 });
 ```
 
-The SPA renders a login screen until a valid cookie exists. A cookie past half its TTL is silently renewed on the next request (sliding session).
-
-The password submitted is passed through to `login` verbatim — including an empty string, since the built-in login screen never requires one — the hook owns whether it matters.
-
-### Re-checking the user on renewal with `revalidate`
-
-Sliding renewal alone never consults the host again — a deactivated or demoted operator would keep console access for as long as the tab stayed open. Add `revalidate` to re-check on that same renewal path:
-
-```ts
-MediaDashboardModule.forRoot({
-  auth: {
-    secret: process.env.CONSOLE_SECRET!,
-    login: async (username, password) => {
-      const user = await accounts.verify(username, password);
-      return user ? { id: user.id, roles: user.roles } : null;
-    },
-    revalidate: async ({ id }) => {
-      const account = await accounts.findById(id);
-      return account?.active === true;
-    },
-  },
-});
-```
-
-`revalidate` receives the already-minted session user (`{ id, name?, roles }`), not the raw request — the console's own XHRs carry no host credential, so re-running `session` here would just return `null` and log everyone out. Returning `false`, or throwing, clears the cookie and denies the request with the same 401 an absent cookie gets.
+A `Can(...)` passed here is still checked by the official guard (it treats `can-anyone` as open only when no requirement is declared): a guest gets 401, a user the policy denies 403. Each registration decorates fresh subclasses of the controllers, so decorators never leak from one registration into another.
 
 <Callout type="warn">
-  `revalidate` only runs when a cookie is renewed (past half its TTL), so revocation isn't immediate — a revoked operator can keep console access for up to `ttl / 2` after the change lands. It's also not an auth mode on its own: it can't mint a session, so it doesn't count toward the `login`/`session` "at least one required" boot check.
+  The guard fronts BOTH the page (a full-page `GET` to `basePath`) and the JSON API (the SPA's `fetch` calls, which send cookies with `credentials: 'same-origin'`). A full-page navigation carries only **cookies**, never an `Authorization` header — an authentication strategy that only reads a bearer token will 401 every browser visit to the console. Authenticate the console from a cookie.
 </Callout>
 
-### Your own page for an unauthenticated visit with `unauthenticatedPage`
-
-Under Mode A (`session`), a visitor who navigates straight to `/media` with no cookie gets the SPA, which then renders its built-in auth screen: *"open this console from your application"*. That copy is generic because the library cannot know who hosts it — it can't name your launcher, link to it, or look like the rest of your product.
-
-`unauthenticatedPage` hands that response to you instead — and, because the decision happens **before** the shell is served, the bundle never loads at all for someone with no session:
-
-```ts
-MediaDashboardModule.forRoot({
-  auth: {
-    secret: process.env.CONSOLE_SECRET!,
-    session: (request) => resolveAdmin(request),
-    unauthenticatedPage: ({ request, response, basePath }) => {
-      // `request`/`response` are your platform's own objects (Express here). Render however you
-      // already render — a template engine, @dudousxd/nestjs-inertia, a plain string.
-      (response as Response).status(401).render('console-locked', { returnTo: basePath });
-    },
-  },
-});
-```
-
-The hook **owns** the response: it must write AND end it. The page is served at the console's own URL, so `/media` stays `/media`.
-
-It cannot open the console — it only runs when the request has no valid session, and every data route stays behind the console's own guard regardless. If it throws, or returns without writing, the library logs one warning and serves the SPA as before, so a broken page can't hang the request or turn a navigation into a `500`.
-
-<Callout type="info">
-  Mode-A-only. With `login` configured the hook is ignored, because under Mode B the login form the visitor needs is **inside** the bundle this page would replace — gating the shell would lock you out of your own console. To ship your own *login* UI, use Mode A plus this hook and `POST <apiBasePath>/session` from your page.
-</Callout>
 
 ## Previews
 
@@ -137,7 +145,7 @@ describes nothing.
 | Renderer | Opened for | How it reads |
 |---|---|---|
 | Image / video / audio | `image/*`, `video/*`, `audio/*` and the usual extensions | The object's own URL |
-| PDF | `application/pdf`, `.pdf` | Streamed inline through the same-origin proxy, so a signed URL carrying `Content-Disposition: attachment` still renders instead of downloading |
+| PDF | `application/pdf`, `.pdf` | Streamed inline through the same-origin `/raw` route (PDF is one of the types `serveFile()` serves inline), so a signed URL carrying `Content-Disposition: attachment` still renders instead of downloading |
 | Text | `text/*`, `.txt` `.json` `.csv` `.tsv` `.log` `.xml` `.yaml` `.sql` | Head sample (8 MB), rendered raw, as pretty JSON, or as a CSV/TSV grid |
 | Markdown | `text/markdown`, `.md` | Head sample, rendered and sanitized, with a source toggle |
 | NDJSON | `.ndjson` `.jsonl` | Head sample, one object per line, columns unioned across rows |
@@ -151,9 +159,8 @@ describes nothing.
 The last row is the important one: there is no "no preview available" state any more. Whatever the
 console cannot identify is still bytes, and bytes render as hex.
 
-The range-backed renderers need a disk whose driver reports [`capabilities.ranged`](/docs/recipes/custom-driver#capabilities-are-a-promise).
-Both bundled drivers do. On a disk that doesn't, they say so rather than pulling the whole object
-down.
+The range-backed renderers read `Range` requests answered by `@nestjs/storage`'s `serveFile()`; every
+`StorageDisk` serves byte ranges, so every disk gets them.
 
 Everything past the plain media types is code-split: opening the console does not load the SQLite
 engine, the Parquet reader, SheetJS, the inflater, the X.509 parser or the Markdown renderer. Each
@@ -189,10 +196,8 @@ MediaDashboardModule.forRoot({
 });
 ```
 
-Use `forRootAsync({ useObjectInsights, injectObjectInsights })` when a provider needs injected
-services — which is the usual case, since a provider that says anything interesting needs a
-repository. `injectObjectInsights` defaults to `inject` (the list `useAuth` uses) but is its own
-option, because insight providers rarely want the same dependencies the auth hooks do.
+Use `forRootAsync({ useObjectInsights, inject })` when a provider needs injected services — which
+is the usual case, since a provider that says anything interesting needs a repository.
 
 **Data, not components.** A provider returns an `ObjectInsight` — `title`, plus optional `facts`
 (label/value rows), `links` and a one-line `note` — and the console renders it. It is not a slot you
@@ -211,33 +216,6 @@ Three behaviours worth knowing:
 Link `href`s must be relative (`/ctrl/...`) or `http(s)`. Protocol-relative (`//host`) and other
 schemes (`javascript:`, `data:`) are dropped rather than rendered — the guard for a provider that
 interpolated user-supplied text into a URL.
-
-## Securing the console with your own guards
-
-`auth` is the console's own turnkey login. If your app already has an auth guard — a session/cookie check, an `InertiaAuthGuard`, whatever fronts the rest of your app — you don't need a second login system. `guards` (+ `imports` for its dependencies) lets you front the console with THAT guard instead, on a single `forRoot`/`forRootAsync` call:
-
-```ts
-MediaDashboardModule.forRoot({
-  guards: [ConsoleAuthGuard],
-  imports: [AuthModule], // resolves ConsoleAuthGuard's own dependencies
-});
-```
-
-<Callout type="warn">
-  The guard fronts BOTH the page (a full-page `GET` to `basePath`) and the JSON API (`fetch`/XHR calls the SPA makes). A full-page navigation carries only **cookies**, never an `Authorization` header — a guard that only reads a bearer token will 401 every browser visit to the console, even an already-logged-in admin's. Authenticate from a cookie (optionally falling back to a header for callers that do carry one), and respond differently per surface: a **redirect** for the page, a plain **401/403** for the API.
-</Callout>
-
-`guards` is stamped on the read + action JSON API controllers **alongside** their own built-in `MediaConsoleGuard` (a no-op unless you also configured `auth`) — a request must pass BOTH. It is deliberately **not** applied to the auth controller that mints the `auth` session cookie itself (`/login`, `/session`, `/logout`, `/me`): that controller can't be made to require the very auth it grants. `guards` and `auth` compose — set one, the other, or both:
-
-```ts
-MediaDashboardModule.forRoot({
-  auth: { secret: process.env.CONSOLE_SECRET!, login: /* … */ },
-  guards: [ConsoleAuthGuard], // e.g. "must already be signed into the app"
-  imports: [AuthModule],
-});
-```
-
-With both configured, a request needs a valid `ConsoleAuthGuard` pass **and** a valid console session cookie — useful when the console should require your app's own SSO on top of its own separate login.
 
 ## Programmatic access with `MediaConsoleService`
 
@@ -265,17 +243,17 @@ export class HousekeepingService {
 }
 ```
 
-It resolves the storage manager, the `MediaStore`, and the upload-session store as **optional** dependencies, so a host missing any of them still boots — each method degrades to an empty shape (`{ disks: [] }`, `{ records: [] }`, …) instead of throwing. The full surface:
+It resolves `Storage` (from `StorageModule`), the multipart side-cars, the `MediaStore`, and the upload-session store as **optional** dependencies, so a host missing any of them still boots — each method degrades to an empty shape (`{ disks: [] }`, `{ records: [] }`, …) instead of throwing. The full surface:
 
 | Method | Returns | Notes |
 |---|---|---|
-| `listDisks()` | `DiskListResponse` | Registered disks + each one's capabilities. |
+| `listDisks()` | `Promise<DiskListResponse>` | Registered disks + each one's capabilities, computed by core's `diskCapabilities()` from the disk and its side-car. |
 | `listObjects(disk, { prefix, cursor, limit })` | `ObjectListResponse` | One level of a disk — `{ folders, files, cursor }`. See [Folders](/docs/concepts/folders). |
-| `objectDetail(disk, key)` | `ObjectDetailResponse` | Size, content type, and a preview/download URL (signed on presign-capable disks). |
-| `objectStream(disk, key, range?)` | `{ stream, contentType, size, range? }` | Raw byte stream for the inline preview proxy. With a `range` it streams just that slice (both bounds inclusive); `size` stays the whole object, so the controller can build `Content-Range`. Unsatisfiable → `RangeNotSatisfiableException` (416). |
-| `putObject(disk, key, body, contentType?)` | `void` | Writes an object from a stream. Buffered + size-capped. **Action.** |
-| `createFolder` / `deleteFolder` | `void` | Folder marker create / recursive delete. **Action.** |
-| `copyObject` / `moveObject` | `void` | Single-object copy/move, same disk or cross-disk. **Action.** |
+| `objectDetail(disk, key)` | `ObjectDetailResponse` | Size, content type, and a URL: the public one, else a signed one, else the console's `/raw` route. |
+| `serveObject(disk, key, { req, res, disposition?, filename? })` | `StreamableFile \| undefined` | The object as the response, through `serveFile()`: `Range` → 206, `If-None-Match` → 304, past the end → 416, missing → 404. |
+| `putObject(disk, key, body, contentType?, contentLength?)` | `void` | Streams an object onto the disk (no size cap, nothing buffered). **Action.** |
+| `createFolder` / `deleteFolder` | `void` | Create (a hidden `.keep`) / recursive delete. **Action.** |
+| `copyObject` / `moveObject` | `void` | Single-object copy/move, same disk or cross-disk (streamed). **Action.** |
 | `moveFolder` / `copyFolder` | `void` | Whole-subtree copy/move. **Action.** See [Folders](/docs/concepts/folders#the-dashboard-folder-feature). |
 | `listUploads({ disk?, prefix? })` | `UploadListResponse` | In-progress resumable sessions. |
 | `uploadDetail(id)` / `abortUpload(id)` | `UploadDetailResponse` / `void` | Inspect / cancel a session (`abort` is an **action**). |
@@ -290,7 +268,7 @@ It resolves the storage manager, the `MediaStore`, and the upload-session store 
 
 ## The JSON API
 
-The SPA talks to the service over a small JSON API mounted at `apiBasePath`. It's split across three controllers, and every route below is **relative to `apiBasePath`** (e.g. `/media/api`). The [read controller](#read-endpoints) is always mounted; the [action controller](#actions) only when `actions: true`; the auth controller (`/me`, `/login`, `/logout`, `/session`) is always mounted and never guarded (it mints the very session the guard checks).
+The SPA talks to the service over a small JSON API mounted at `apiBasePath`. It's split across two controllers, and every route below is **relative to `apiBasePath`** (e.g. `/media/api`). The [read controller](#read-endpoints) is always mounted; the [action controller](#actions) only when `actions: true`.
 
 The response shapes are exported as types — see [the client subpath](#the-typed-browser-client-client-subpath).
 
@@ -301,7 +279,7 @@ The response shapes are exported as types — see [the client subpath](#the-type
 | `GET disks` | — | `DiskListResponse` |
 | `GET disks/:disk/objects` | `prefix?`, `cursor?`, `limit?` | `ObjectListResponse` |
 | `GET disks/:disk/object` | `key` | `ObjectDetailResponse` |
-| `GET disks/:disk/object/raw` | `key` | raw bytes, `Content-Disposition: inline` |
+| `GET disks/:disk/object/raw` | `key` | raw bytes; `inline` for types that can't run script (images, PDF, audio, video, plain text), else `attachment` |
 | `GET disks/:disk/object/download` | `key` | raw bytes, `Content-Disposition: attachment` |
 | `GET disks/:disk/object/insights` | `key` | `ObjectInsightsResponse` |
 | `GET uploads` | `disk?`, `prefix?` | `UploadListResponse` |
@@ -336,8 +314,8 @@ There are two ways the console gets at a file, and they answer different questio
 
 **Downloading** — the `Download` button on a file row, in the preview header, and on a library record
 — always goes through `GET disks/:disk/object/download`, this server's own same-origin route. It
-answers with `Content-Disposition: attachment` named after the key's last segment (in both RFC 6266
-forms, so a non-ASCII name survives), and it honours `Range`, so an interrupted download of a large
+answers with `Content-Disposition: attachment` named after the key's last segment (with the RFC 6266
+`filename*` form for a non-ASCII name), and it honours `Range`, so an interrupted download of a large
 object resumes rather than restarting. It is a read: it needs no `actions: true`.
 
 Being same-origin is the point. Saving a file is the console's own action, so it has to work on a
@@ -355,14 +333,14 @@ MediaDashboardModule.forRoot({
 
 | Value | `url` is | Use it when |
 |---|---|---|
-| `auto` (default) | a presigned, expiring URL straight to the store (5 min), or the driver's plain URL when it cannot presign | the browser can reach the store. The URL survives a copy-paste out of the console and needs nothing from this server. |
+| `auto` (default) | the disk's public URL when it has a `publicUrl`; else a signed, expiring URL (5 min); else the console's own `object/raw` route, for a disk that can do neither | the browser can reach the store. The URL survives a copy-paste out of the console and needs nothing from this server. |
 | `proxy` | the console's own `object/raw` route, same-origin | the browser cannot reach the store. The trade: the URL only means anything to a session that can reach this server, and every byte travels through it. |
 
 `objectUrls` does not affect downloading — that route is same-origin either way.
 
 ## The typed browser client (`/client` subpath)
 
-`@dudousxd/nestjs-media-dashboard/client` is a **pure-types + tiny-runtime** entry, safe to import into any browser bundle — it carries no NestJS. It exports `mediaConsoleClient`, a typed wrapper over every endpoint above (it rides the session cookie via `credentials: 'same-origin'`), plus every response type. This is what the bundled SPA uses, and what you'd import to build your own admin screen against the same API:
+`@dudousxd/nestjs-media-dashboard/client` is a **pure-types + tiny-runtime** entry, safe to import into any browser bundle — it carries no NestJS. It exports `mediaConsoleClient`, a typed wrapper over every endpoint above (it sends cookies via `credentials: 'same-origin'`, so whatever protects the routes sees the page's session), plus every response type. This is what the bundled SPA uses, and what you'd import to build your own admin screen against the same API:
 
 ```ts
 import {
@@ -370,9 +348,6 @@ import {
   type MediaConsoleClient,
   type ObjectListResponse,
 } from '@dudousxd/nestjs-media-dashboard/client';
-
-// Auth gate: 'open' | 'authenticated' | 'login'
-const state = await mediaConsoleClient.me();
 
 const { disks } = await mediaConsoleClient.disks();
 const page: ObjectListResponse = await mediaConsoleClient.objects('s3', { prefix: 'photos/' });
@@ -390,14 +365,14 @@ By default it fetches from `/media/api`; the UI controller injects the real base
 
 ## `MediaConsoleApiModule`
 
-`MediaDashboardModule` is the batteries-included mount — SPA **plus** API at fixed paths. Underneath it sits `MediaConsoleApiModule`, the API-only dynamic module that holds the three controllers and `MediaConsoleService`. `MediaDashboardModule` composes it (and re-exports it, which is why `MediaConsoleService` is injectable in importers). You rarely register it yourself, but it's exported for hosts that serve the SPA their own way (a separate static host, a different framework) and only want the JSON API wired into Nest with custom routing:
+`MediaDashboardModule` is the batteries-included mount — SPA **plus** API at fixed paths. Underneath it sits `MediaConsoleApiModule`, the API-only dynamic module that holds the read/action controllers and `MediaConsoleService`. `MediaDashboardModule` composes it (and re-exports it, which is why `MediaConsoleService` is injectable in importers). You rarely register it yourself, but it's exported for hosts that serve the SPA their own way (a separate static host, a different framework) and only want the JSON API wired into Nest with custom routing:
 
 ```ts
 import { MediaConsoleApiModule } from '@dudousxd/nestjs-media-dashboard';
 ```
 
-Its `register()` takes the same building blocks `MediaDashboardModule` feeds it — `actions`, the auth provider, `guards`/`imports`, and the cookie `Path` — and exports `MediaConsoleService`. Prefer `MediaDashboardModule.forRoot`/`forRootAsync` unless you specifically need to own the mount.
+Its `register()` takes the same building blocks `MediaDashboardModule` feeds it — `actions`, `objectUrls`, `decorators`, `routes` and `imports` — and exports `MediaConsoleService`. The same [production rule](#protecting-the-routes) applies to it. Prefer `MediaDashboardModule.forRoot`/`forRootAsync` unless you specifically need to own the mount.
 
 ## Peer dependencies
 
-`@dudousxd/nestjs-media-core`, `@nestjs/common` / `@nestjs/core` (^10, ^11 or ^12), and `rxjs`. The bundled SPA ships its own React copy — no extra frontend install needed.
+`@dudousxd/nestjs-media-core`, `@nestjs/storage` (`>=0.0.5 <0.1.0`), `@nestjs/common` / `@nestjs/core` (^12.1), and `rxjs`. The bundled SPA ships its own React copy — no extra frontend install needed.

@@ -4,24 +4,24 @@
 
 library: nestjs-media
 one_liner: >-
-  Filesystem + media-library for NestJS (Laravel/spatie feel), in one umbrella
-  package. Two layers: disk-agnostic storage (put/get/url/temporaryUrl/stream)
-  and a media-library (attach files to entities, collections, image conversions),
-  plus resumable (tus proxy) and direct (presigned S3 multipart) uploads.
+  Media-library for NestJS (spatie feel) on top of @nestjs/storage's disks
+  (StorageModule, LocalDisk/S3Disk/InMemoryDisk): attach files to entities,
+  collections, image conversions, plus resumable (tus proxy) and direct
+  (presigned S3 multipart via the s3Multipart side-car) uploads.
 
 primary_packages:
   - name: "@dudousxd/nestjs-media"
     dir: packages/nestjs
     role: >-
       The NestJS adapter consumers import. MediaModule.forRoot/forRootAsync,
-      MediaService (disk/library/attachments/uploads/directUploads), tus +
-      direct upload controllers, /storage subpath, injection tokens.
+      MediaService (library/attachments/uploads/directUploads, serve/url/attach/delete),
+      tus + direct upload controllers, injection tokens.
     entry_exports:
       - MediaModule (forRoot, forRootAsync)
       - MediaService
       - MediaUploadController
       - MediaDirectUploadController
-      - tokens: MEDIA_STORAGE MEDIA_LIBRARY MEDIA_ATTACHMENTS MEDIA_UPLOADS MEDIA_TUS MEDIA_DIRECT
+      - tokens: MEDIA_LIBRARY MEDIA_ATTACHMENTS MEDIA_UPLOADS MEDIA_TUS MEDIA_DIRECT
   - name: "@dudousxd/nestjs-media-react"
     dir: packages/react
     role: >-
@@ -31,9 +31,9 @@ primary_packages:
 supporting_packages_used_in_examples:
   # Plugged into MediaModule config; their constructors are real and grounded,
   # but they get their own (uncovered) skills only if scope expands.
-  - "@dudousxd/nestjs-media-core"          # SPIs + framework-agnostic engines (StorageManager, MediaLibrary, AttachmentManager, ResumableUploadManager, DirectUploadManager, TusUploadHandler)
-  - "@dudousxd/nestjs-media-disk-local"    # LocalDriver({ root, baseUrl? })
-  - "@dudousxd/nestjs-media-disk-s3"       # S3Driver({ client, bucket, keyPrefix?, publicBaseUrl? })
+  - "@dudousxd/nestjs-media-core"          # SPIs + framework-agnostic engines (MediaLibrary, AttachmentManager, ResumableUploadManager, DirectUploadManager, TusUploadHandler)
+  - "@nestjs/storage"                      # StorageModule, Storage, LocalDisk, S3Disk, InMemoryDisk, serveFile (first-party)
+  - "@dudousxd/nestjs-media-disk-s3"       # s3Multipart(sameOptionsAsS3Disk): multipart + listFolders
   - "@dudousxd/nestjs-media-image-sharp"   # SharpImageProcessor()
   - "@dudousxd/nestjs-media-database-typeorm"   # TypeOrmMediaStore(dataSource, { autoCreateSchema? })
   - "@dudousxd/nestjs-media-database-mikro-orm" # MikroOrmMediaStore(em)
@@ -41,14 +41,14 @@ supporting_packages_used_in_examples:
   - "@dudousxd/nestjs-media-database-prisma"    # PrismaMediaStore(prisma)
   - "@dudousxd/nestjs-media-upload-redis"  # RedisUploadSessionStore(redis, { keyPrefix?, ttlSeconds? })
   - "@dudousxd/nestjs-media-client"        # uploadMedia, mediaUrl (framework-agnostic browser)
-  - "@dudousxd/nestjs-media-testing"       # InMemory driver/store/UploadSessionStore + conformance suites
+  - "@dudousxd/nestjs-media-testing"       # InMemory store/UploadSessionStore, storageOf(), conformance suites
   - "@dudousxd/nestjs-media-telescope"     # diagnostics watcher
   - "@dudousxd/nestjs-media-codegen"       # typed media client codegen
 
 concepts:
   two_layers:
-    layer1_storage: "media.disk(name?).put/get/stream/exists/delete/copy/move/size/url/temporaryUrl/list"
-    layer2_library: "media.library.attach/list/url/delete/ensureConversion + library.for(ownerType, ownerId)"
+    layer1_storage: "@nestjs/storage: storage.disk(name?).put/get/stat/delete/list/url/signedUrl (not part of media)"
+    layer2_library: "media.library.attach/list/url/locate/delete/ensureConversion + library.for(ownerType, ownerId); MediaService.serve/url/attach/delete (authorize hook)"
     column_model: "media.attachments.createFromFile(...) -> Attachment value object stored in a model column; Attachment.fromJSON to rehydrate"
   collections:
     config: MediaCollectionConfig { name, single?, disk?, acceptsMimeTypes?, conversions? }
@@ -70,11 +70,11 @@ concepts:
 key_failure_modes:  # grounded in errors.ts + docs Troubleshooting/Callouts
   - "media.library throws 'MediaLibrary is not configured' when no store passed"
   - "media.uploads / media.directUploads throw when their option was omitted"
-  - "temporaryUrl on local disk fails (presign needs S3); url on local needs baseUrl"
+  - "MediaModule without StorageModule fails at boot; library.url on a LocalDisk without publicUrl/signedUrls throws (use MediaService.serve)"
   - "tus PATCH bodies must be parsed raw (application/offset+octet-stream) or chunks never assemble — single most common mistake"
-  - "forcing uploadMode 'direct' on a non-presign disk throws UnsupportedOperationError (fails loud, not silent)"
+  - "direct uploads on a disk without a multipart side-car throw UnsupportedOperationError (fails loud, not silent)"
   - "requesting a conversion with no imageProcessor -> ImageProcessorMissingError; undefined preset -> ConversionNotDefinedError"
-  - "unknown disk name -> UnknownDiskError; default disk must exist in disks map"
+  - "unknown disk name -> StorageError from Storage.disk(); keys from user input go through keySegment()"
   - "UploadOffsetConflictError (409) when client PATCHes wrong Upload-Offset"
 
 gaps:  # what a maintainer interview would have answered; could NOT be derived from repo

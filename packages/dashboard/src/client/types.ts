@@ -2,18 +2,22 @@
 // server (which produces these shapes) and any host app (which may want the types) import them
 // from `@dudousxd/nestjs-media-dashboard/client`. Pure types — no runtime.
 
+/**
+ * What a disk can do, computed by the server from the `@nestjs/storage` disk and its multipart
+ * side-car (`MediaDiskCapabilities` in `-core`).
+ */
 export interface DiskCapabilities {
+  /** `signedUrl()` works (S3, or a local disk with `signedUrls`). */
   presign: boolean;
+  /** A multipart side-car is configured for the disk. */
   multipart: boolean;
+  /** The disk has a `publicUrl`. */
   publicUrls: boolean;
   list: boolean;
   /**
-   * Can the disk serve a byte range without transferring the whole object (a ranged `object/raw`)?
-   *
-   * Optional HERE, unlike the required `ranged` on the driver's own `DriverCapabilities`, because
-   * this is a WIRE shape: the console bundle can be served by a host still running an older server
-   * build that never emits the field. `undefined` means "this server didn't say", which a caller
-   * should treat as "don't count on it" — not as `false`.
+   * Can the disk serve a byte range (a ranged `object/raw`)? Every `@nestjs/storage` disk can, so
+   * current servers always send `true`. Optional because this is a WIRE shape: an older server may
+   * not emit it, and `undefined` means "don't count on it", not `false`.
    */
   ranged?: boolean;
 }

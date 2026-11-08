@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import type { Readable } from 'node:stream';
+import type { StorageSignedUrlRequest } from '@nestjs/storage';
 import { type MediaDiagnosticPayloads, publishMedia } from './diagnostics';
 import {
   ConversionNotDefinedError,
@@ -8,13 +9,16 @@ import {
   MimeNotAllowedError,
 } from './errors';
 import type { ConversionPreset, ImageProcessor } from './image-processor';
+import { keySegment } from './keys';
 import { type MediaCollectionConfig, MediaCollectionRegistry } from './media-collection';
 import type { MediaConversion, MediaRecord } from './media-record';
 import type { MediaStore } from './media-store';
-import type { StorageManager } from './storage-manager';
+import { deleteKeys, fileUrl } from './storage-helpers';
+import type { MediaDisks } from './types';
 
 export interface MediaLibraryOptions {
-  storage: StorageManager;
+  /** The disks: `Storage` from `@nestjs/storage`, or any {@link MediaDisks}. */
+  storage: MediaDisks;
   store: MediaStore;
   collections?: MediaCollectionConfig[];
   /** Engine for image conversions. Required only if collections define conversions. */
@@ -55,7 +59,7 @@ export interface OwnerMediaBinding {
 }
 
 export class MediaLibrary {
-  private readonly storage: StorageManager;
+  private readonly storage: MediaDisks;
   private readonly store: MediaStore;
   private readonly collections: MediaCollectionRegistry;
   private readonly imageProcessor: ImageProcessor | undefined;
@@ -100,10 +104,17 @@ export class MediaLibrary {
 
     const disk = input.disk ?? config.disk ?? this.storage.defaultDisk;
     const id = this.newId();
-    const path = `${input.ownerType}/${input.ownerId}/${input.collection}/${id}/${input.fileName}`;
+    // Every segment goes through keySegment(): the file name (and owner ids) come from users,
+    // and @nestjs/storage refuses `..`, empty segments, backslashes and control characters.
+    const path = [input.ownerType, input.ownerId, input.collection, id, input.fileName]
+      .map(keySegment)
+      .join('/');
 
-    await this.storage.disk(disk).put(path, input.contents, { contentType: input.mimeType });
-    const size = input.size ?? (await this.storage.disk(disk).size(path));
+    const written = await this.storage.disk(disk).put(path, input.contents, {
+      contentType: input.mimeType,
+      ...(input.size !== undefined ? { contentLength: input.size } : {}),
+    });
+    const size = input.size ?? written.size;
     const order = await this.store.nextOrder(input.ownerType, input.ownerId, input.collection);
     const timestamp = this.now();
 
@@ -143,7 +154,7 @@ export class MediaLibrary {
     if (!this.imageProcessor) throw new ImageProcessorMissingError();
     const original = Buffer.isBuffer(input.contents)
       ? input.contents
-      : await this.storage.disk(disk).get(path);
+      : await this.storage.disk(disk).getBuffer(path);
     const generated: Record<string, MediaConversion> = {};
     try {
       for (const preset of eager) {
@@ -183,7 +194,7 @@ export class MediaLibrary {
     if (!preset) throw new ConversionNotDefinedError(record.collection, conversionName);
     if (!this.imageProcessor) throw new ImageProcessorMissingError();
 
-    const original = await this.storage.disk(record.disk).get(record.path);
+    const original = await this.storage.disk(record.disk).getBuffer(record.path);
     const conversion = await this.generateConversion(record, preset, original);
     return this.saveConversions(record, { [conversionName]: conversion });
   }
@@ -239,28 +250,49 @@ export class MediaLibrary {
   async delete(id: string): Promise<void> {
     const record = await this.store.find(id);
     if (!record) return;
-    await this.storage.disk(record.disk).delete(record.path);
-    for (const conversion of Object.values(record.conversions)) {
-      await this.storage.disk(conversion.disk).delete(conversion.path);
-    }
+    await deleteKeys(this.storage, [
+      { disk: record.disk, path: record.path },
+      ...Object.values(record.conversions),
+    ]);
     await this.store.delete(id);
     this.emit('delete', { id, ownerType: record.ownerType, ownerId: record.ownerId });
   }
 
   /**
-   * Public URL for a media record or one of its conversions. When a conversion is
-   * requested and not yet generated, it is produced lazily (and cached) first.
+   * Where a record (or one of its conversions) is stored, with the file name to serve it under.
+   * A conversion not generated yet is generated first (and cached), as with {@link url}.
    */
-  async url(id: string, conversion?: string): Promise<string> {
+  async locate(
+    id: string,
+    conversion?: string,
+  ): Promise<{ record: MediaRecord; disk: string; path: string; fileName: string }> {
     if (conversion) {
       const record = await this.ensureConversion(id, conversion);
       const variant = record.conversions[conversion];
       if (!variant) throw new MediaNotFoundError(`${id}#${conversion}`);
-      return this.storage.disk(variant.disk).url(variant.path);
+      const ext = variant.path.slice(variant.path.lastIndexOf('.'));
+      return {
+        record,
+        disk: variant.disk,
+        path: variant.path,
+        fileName: `${stripExtension(record.fileName)}-${conversion}${ext}`,
+      };
     }
     const record = await this.store.find(id);
     if (!record) throw new MediaNotFoundError(id);
-    return this.storage.disk(record.disk).url(record.path);
+    return { record, disk: record.disk, path: record.path, fileName: record.fileName };
+  }
+
+  /**
+   * A URL for a media record or one of its conversions: the disk's public URL when it has a
+   * `publicUrl`, else a signed, expiring one (`signedUrl()`, 15 minutes unless `options` say
+   * otherwise). A disk with neither (a local disk without `signedUrls`) throws the disk's own
+   * `StorageError`; serve those files through your app with `MediaService.serve()`.
+   * A conversion not generated yet is produced lazily (and cached) first.
+   */
+  async url(id: string, conversion?: string, options?: StorageSignedUrlRequest): Promise<string> {
+    const target = await this.locate(id, conversion);
+    return fileUrl(this.storage.disk(target.disk), target.path, options);
   }
 }
 

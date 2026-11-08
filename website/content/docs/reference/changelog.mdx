@@ -6,6 +6,20 @@ description: Release history for the nestjs-media packages.
 
 All packages are versioned together via [changesets](https://github.com/changesets/changesets).
 
+## Next release — on `@nestjs/storage`
+
+Breaking (0.x minor). nestjs-media drops its own storage layer and works on the disks of NestJS's
+first-party [`@nestjs/storage`](https://docs.nestjs.com/application/file-storage). See
+[Migrating](/docs/reference/migration).
+
+- **Removed:** `StorageManager`, the `StorageDriver` interface, `-disk-local`, `S3Driver`, `InMemoryDriver`, `runStorageDriverConformance`, `MediaService.disk()`/`diskNames()`, `MEDIA_STORAGE`/`MEDIA_STORAGE_SHARED`, the `@dudousxd/nestjs-media/storage` entry, `FileNotFoundError`, `UnknownDiskError`.
+- **`MediaModule`** injects `Storage` from `StorageModule`; `multipart: { disk: s3Multipart(opts) }` adds native S3 multipart; `store`/`uploadSessions` accept `{ inject, useFactory }`.
+- **`MediaService.serve()`** streams a record through `serveFile()`; an optional **`authorize`** hook checks `serve`/`url`/`attach`/`delete`.
+- **`-disk-s3`** is the `s3Multipart()` side-car (part-level multipart + delimiter listing, no AWS SDK).
+- **Dashboard:** folders from the side-car or folded from the flat listing, `.keep` folders, `serveFile()` previews, streamed uploads and cross-disk copies.
+- **ORM helpers:** `typeOrmMediaStore({ connectionName })`, `drizzlePgMediaStore(...)` and friends on `/nest` entries.
+- **Testing:** `describeMediaDiskConformance()` (run on `LocalDisk`, `InMemoryDisk`, and `S3Disk` on MinIO) and `storageOf()`.
+
 ## 0.8.0
 
 Guards can now be scoped **per upload surface**.

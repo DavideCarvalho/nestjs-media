@@ -6,23 +6,23 @@ description: Register several disks and route collections (or individual uploads
 
 import { Callout } from 'fumadocs-ui/components/callout';
 
-A real app often wants more than one disk — a fast public CDN bucket for images, a private bucket for documents, local disk in dev. media holds any number of named disks and lets you route per collection or per call.
+A real app often wants more than one disk — a fast public CDN bucket for images, a private bucket for documents, local disk in dev. `StorageModule` holds any number of named disks; media routes per collection or per call.
 
 ## Register them
 
 ```ts
-MediaModule.forRoot({
+StorageModule.forRoot({
   default: 's3',
   disks: {
-    s3: new S3Driver({ client: s3, bucket: 'public-assets', publicBaseUrl: 'https://cdn…' }),
-    private: new S3Driver({ client: s3, bucket: 'private-docs' }),
-    local: new LocalDriver({ root: './storage' }),
+    s3: new S3Disk({ bucket: 'public-assets', publicUrl: 'https://cdn…' }),
+    private: new S3Disk({ bucket: 'private-docs' }),
+    local: new LocalDisk({ root: './storage' }),
   },
-  store,
 });
+MediaModule.forRoot({ store });
 ```
 
-`default` is what `media.disk()` returns with no name, and the disk a collection uses unless it overrides.
+`StorageModule`'s `default` is the disk a collection uses unless it overrides. `url()` gives CDN URLs on `s3` and signed ones on `private`.
 
 ## Route by collection
 
@@ -49,17 +49,19 @@ await media.library.attach({
 });
 ```
 
-## Raw storage across disks
+## Moving files between disks
 
-The same naming works without the library:
+A disk's `copy`/`move` stay on that disk. Across disks, stream one into the other:
 
 ```ts
-await media.disk('private').put(`invoices/${id}.pdf`, pdf);
-await media.disk().put(`thumbs/${id}.webp`, webp); // the default disk
+const source = await storage.disk('local').get(key);
+await storage.disk('s3').put(key, source.body, { contentType: source.contentType, contentLength: source.size });
 ```
+
+The [console](/docs/packages/dashboard) does this for cross-disk copies and moves, folders included.
 
 <Callout type="info">
 Conversions are written to the **same disk** as their original, so a private collection's variants stay private too.
 </Callout>
 
-Upload behavior also follows the disk: an S3 disk defaults to the [`direct`/presigned path](/docs/concepts/uploads), a local disk to `proxy` — each overridable via `uploadMode`.
+Upload behavior also follows the disk: a disk with a multipart side-car (or that presigns) defaults to the [`direct` path](/docs/concepts/uploads), a local disk to `proxy` — each overridable via `uploadMode`.

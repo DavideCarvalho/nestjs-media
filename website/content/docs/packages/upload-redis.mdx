@@ -22,8 +22,6 @@ import Redis from 'ioredis';
 const redis = new Redis(process.env.REDIS_URL);
 
 MediaModule.forRoot({
-  default: 's3',
-  disks: { s3 },
   uploadSessions: new RedisUploadSessionStore(redis),
   tus: { disk: 's3', basePath: '/media/uploads' },
 });
@@ -35,8 +33,6 @@ MediaModule.forRoot({
 MediaModule.forRootAsync({
   inject: ['REDIS'],
   useFactory: (redis: Redis) => ({
-    default: 's3',
-    disks: { s3 },
     uploadSessions: new RedisUploadSessionStore(redis, { keyPrefix: 'app:upload', ttlSeconds: 3600 }),
     tus: { disk: 's3' },
   }),

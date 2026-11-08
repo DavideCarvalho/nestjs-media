@@ -1,0 +1,136 @@
+---
+title: Migrating to @nestjs/storage
+icon: ArrowRightLeft
+description: nestjs-media now stores files on the disks of NestJS's first-party @nestjs/storage. What changed, what replaces what, and what was dropped.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+NestJS ships file storage of its own: [`@nestjs/storage`](https://docs.nestjs.com/application/file-storage) (`StorageModule`, `Storage`, `@InjectDisk()`, `LocalDisk`, `S3Disk`, `InMemoryDisk`, signed URLs, `serveFile()`, `uploadToDisk()`). nestjs-media no longer has a storage layer of its own: the media library, attachments, resumable and direct uploads, and the dashboard work on those disks. Everything `@nestjs/storage` documents is documented there; these pages cover only what nestjs-media adds.
+
+There are no compatibility shims: every removed name below is gone, not deprecated.
+
+## Requirements
+
+- `@nestjs/storage` `>=0.0.5 <0.1.0`, which needs **NestJS 12.1+** and **Node 20.19+**.
+- Like Nest 12, `@nestjs/storage` is ESM-only; the CommonJS builds of nestjs-media load it through Node's `require(esm)`.
+
+## Module configuration
+
+**Before**
+
+```ts
+MediaModule.forRoot({
+  default: 's3',
+  disks: {
+    s3: new S3Driver({ client: s3Client, bucket: 'app', keyPrefix: 'uploads', publicBaseUrl: cdn }),
+    local: new LocalDriver({ root: './storage', baseUrl: 'http://localhost:3000/files' }),
+  },
+  store: new TypeOrmMediaStore(dataSource),
+  uploadSessions,
+  direct: { disk: 's3' },
+});
+```
+
+**After**
+
+```ts
+import { LocalDisk, S3Disk, StorageModule } from '@nestjs/storage';
+import { s3Multipart } from '@dudousxd/nestjs-media-disk-s3';
+import { typeOrmMediaStore } from '@dudousxd/nestjs-media-database-typeorm/nest';
+
+const s3 = { bucket: 'app', region: 'eu-west-1', prefix: 'uploads/', publicUrl: cdn };
+
+StorageModule.forRoot({
+  default: 's3',
+  disks: {
+    s3: new S3Disk(s3),
+    local: new LocalDisk({
+      root: './storage',
+      signedUrls: { baseUrl: 'http://localhost:3000/files', keys: [process.env.FILES_KEY!] },
+    }),
+  },
+});
+
+MediaModule.forRoot({
+  store: typeOrmMediaStore(),            // or an instance, as before
+  uploadSessions,
+  multipart: { s3: s3Multipart(s3) },    // native multipart for resumable + direct uploads
+  direct: { disk: 's3' },
+});
+```
+
+- `default` and `disks` leave `MediaModule`; they are `StorageModule`'s. `MediaModule` injects `Storage` and fails at boot, naming `StorageModule`, when it isn't registered.
+- Native S3 multipart is no longer a capability of the disk: `S3Disk` uses multipart internally for large `put()`s but doesn't expose parts. Pass the `s3Multipart()` side-car per disk, **with the same options object as the `S3Disk`**, so keys, prefix and endpoint line up. Without one, resumable uploads still work (chunks are written as temporary files and streamed into the final file), and direct uploads are refused.
+- `store` and `uploadSessions` also accept `{ inject, useFactory }` (`typeOrmMediaStore({ connectionName })`, `drizzlePgMediaStore(...)`).
+
+## Removed packages and names
+
+| Removed | Use instead |
+| --- | --- |
+| `@dudousxd/nestjs-media-disk-local` (`LocalDriver`) | `LocalDisk` from `@nestjs/storage` |
+| `S3Driver` (`@dudousxd/nestjs-media-disk-s3`) | `S3Disk` from `@nestjs/storage` + `s3Multipart()` for multipart |
+| `InMemoryDriver` (`-testing`) | `InMemoryDisk` from `@nestjs/storage`; `storageOf({ name: disk })` builds a `Storage` for unit tests |
+| `runStorageDriverConformance` (`-testing`) | `describeMediaDiskConformance(name, makeDisk, { multipart })` |
+| `StorageManager`, `StorageManagerOptions` | `Storage` from `@nestjs/storage` (or core's `MediaDisks` interface) |
+| `StorageDriver`, `DriverCapabilities` | `StorageDisk`; `diskCapabilities(disk, sidecar)` in core computes the badges |
+| `PutOptions`, `ListOptions`, `ListResult`, `ListEntry`, `StatResult`, `ReadRangeOptions`, `TemporaryUrlOptions`, `Visibility` | `@nestjs/storage`'s `StoragePutOptions`, `StorageListOptions`, `StorageListPage`, `StorageListEntry`, `StorageFile`, `StorageRange`, `StorageSignedUrlRequest`; folders: core's `FolderListing` |
+| `isMultipartCapable()` | `multipartFor(drivers, disk)` |
+| `collectStream()` | `disk.getBuffer(key)` |
+| `FileNotFoundError` | `StorageFileNotFoundError` |
+| `UnknownDiskError` | the `StorageError` that `Storage.disk(name)` throws |
+| `MediaService.disk()`, `MediaService.diskNames()` | inject `Storage` (`storage.disk(name)`, `storage.names()`) or `@InjectDisk(name)` |
+| `MEDIA_STORAGE`, `MEDIA_STORAGE_SHARED` tokens | the `Storage` class token |
+| `@dudousxd/nestjs-media/storage` entry | `@dudousxd/nestjs-media-core`, `@nestjs/storage` |
+| `AttachmentManager.temporaryUrl(att, seconds, variant)` | `attachments.signedUrl(att, variant, { expiresIn })`; `attachments.url()` now falls back to a signed URL itself |
+
+## `StorageDriver` → `StorageDisk`
+
+| `StorageDriver` | `StorageDisk` |
+| --- | --- |
+| `put(path, Buffer \| Readable, { contentType, visibility, metadata })` → `void` | `put(key, body, { contentType, metadata, cacheControl, contentDisposition, contentLength, signal })` → `{ key, size, contentType, etag }`. `body` may also be a string, `Uint8Array`, web stream or async iterable. |
+| `get(path)` → `Buffer` | `getBuffer(key)`, `getText(key)`; `get(key)` → `{ body: Readable, ...metadata }` |
+| `stream(path, { start, end })` | `get(key, { range: { start, end } })` or `{ range: { suffix } }`; `.body` |
+| `exists(path)` | `exists(key)` |
+| `size(path)` | `(await stat(key)).size` |
+| `stat(path)` → `{ size, contentType?, lastModified? }` | `stat(key)` → `{ key, size, contentType, lastModified, etag?, cacheControl?, contentDisposition?, metadata }` |
+| `delete(path)`, `deleteMany(paths)` | `delete(key)`, `delete(keys)` |
+| `copy(from, to)`, `move(from, to)` | `copy(from, to)`, `move(from, to)` (same disk; resolve to the write result). Across disks: `put(to, (await a.get(from)).body, ...)` |
+| `url(path)` → `Promise<string>` | `url(key)` → `string`, synchronous; throws without `publicUrl` |
+| `temporaryUrl(path, seconds, { responseContentDisposition })` | `signedUrl(key, { expiresIn: '5m', filename, disposition })`; a local disk needs `signedUrls` and a route with `serveSignedUrl()` |
+| `list(prefix, { delimiter, cursor, limit })` → `{ folders, files, cursor }` | `list({ prefix, cursor, limit })` → `{ entries, cursor }`, **flat**; `listAll({ prefix })`. One folder level: `s3Multipart(...).listFolders(prefix)` or core's `foldListing(disk, prefix)` |
+| `capabilities` | `diskCapabilities(disk, sidecar)` (core): `presign`, `multipart`, `publicUrls`, `list`, `ranged` |
+| `createMultipartUpload`/`uploadPart`/`presignUploadPart`/`completeMultipartUpload`/`abortMultipartUpload` | the same methods on the `s3Multipart()` side-car |
+
+## Dropped, with alternatives
+
+<Callout type="warn" title="visibility (S3 ACLs)">
+`put(path, body, { visibility: 'public' })` set `ACL: public-read`. `@nestjs/storage` has no ACLs (most buckets have them disabled anyway). Make files public with a bucket policy on a prefix or a public bucket behind a CDN, and set `publicUrl` on that disk so `url()` works; keep private files on a disk without `publicUrl`, served with signed URLs or `MediaService.serve()`.
+</Callout>
+
+<Callout type="warn" title="the `bucket` list option">
+`list(prefix, { bucket })` browsed another bucket through one driver. Configure one `S3Disk` per bucket instead; the dashboard lists every configured disk.
+</Callout>
+
+<Callout type="warn" title="responseContentType">
+`temporaryUrl(..., { responseContentType })` overrode the type S3 answered with. Store the right type when writing (`put(key, body, { contentType })`); `signedUrl()` still sets the download name and disposition (`filename`, `disposition`).
+</Callout>
+
+## Keys
+
+`@nestjs/storage` applies one key rule on every disk: no leading or trailing `/`, no empty, `.` or `..` segments, no backslashes or control characters, at most 1024 bytes.
+
+- The media library, attachments and the default tus `keyFor` now pass client file names (and owner ids) through `keySegment()`: `../a/b.png` is stored as `.._a_b.png`. `MediaRecord.fileName` keeps the original name. Ordinary names are unchanged, so existing records keep resolving.
+- `S3Driver` stripped a leading `/` from keys; `S3Disk` refuses it. `keyPrefix: 'uploads'` becomes `prefix: 'uploads/'` (the prefix is prepended as is).
+- A custom tus `keyFor` returning an invalid key answers `400`; the direct-upload routes answer `400` for an invalid client key.
+
+## Dashboard
+
+- **Folders.** A new folder is a hidden `<folder>/.keep` file, since `prefix/` marker objects are invalid keys. Folders come from the S3 side-car's delimiter listing when there is one, else from folding the flat listing. Existing `prefix/` markers in a bucket still show as folders but can't be deleted through `@nestjs/storage`; remove them with a lifecycle rule or the S3 CLI.
+- **Previews, ranges and downloads** go through `serveFile()`: `/raw` is `inline` only for types that can't run script (images, PDF, audio, video, plain text) and `attachment` otherwise; `If-None-Match` answers 304; `X-Content-Type-Options: nosniff` is set.
+- **Uploads and cross-disk copies stream** with no size cap (the 100 MB limits are gone).
+- **Object URLs** under `auto`: the public URL, else a signed one, else the console's own `/raw` route (it used to throw for disks with neither).
+
+## Errors
+
+Storage errors are `@nestjs/storage`'s (`StorageFileNotFoundError` 404, `StorageInvalidKeyError` 400, `StorageKeyConflictError` 409, `StorageRangeNotSatisfiableError` 416, `StorageServiceError` for store failures). Nest's default exception filter doesn't read their `status`; the dashboard and `MediaService.serve()` map them, your own controllers should too.

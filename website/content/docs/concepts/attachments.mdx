@@ -80,7 +80,7 @@ export class UsersService {
   }
 
   async signedAvatar(user: User) {
-    return user.avatar && this.media.attachments.temporaryUrl(user.avatar, 300); // 5-min signed URL
+    return user.avatar && this.media.attachments.signedUrl(user.avatar, undefined, { expiresIn: '5m' });
   }
 
   async removeAvatar(user: User) {
@@ -93,9 +93,9 @@ export class UsersService {
 
 | Method | What it does |
 |---|---|
-| `createFromFile(input, options?)` | Uploads bytes under `attachments/<id>/<fileName>`, generates any requested `variants` eagerly, returns an `Attachment` |
-| `url(att, variant?)` | Public URL for the original or a named variant (throws if the variant is unknown) |
-| `temporaryUrl(att, ttl, variant?)` | Signed, expiring URL on presign-capable disks |
+| `createFromFile(input, options?)` | Uploads bytes under `attachments/<id>/<fileName>` (the file name made one safe key segment), generates any requested `variants` eagerly, returns an `Attachment` |
+| `url(att, variant?, { expiresIn }?)` | The disk's public URL for the original or a named variant, else a signed one (throws if the variant is unknown) |
+| `signedUrl(att, variant?, { expiresIn, filename, disposition }?)` | A signed, expiring URL even on a disk with a public one |
 | `delete(att)` | Removes the original **and** every variant from storage |
 
 `createFromFile` options mirror the library: `disk` (override the default), `keyPrefix` (default `attachments`), `variants` (image presets — requires an image processor), `name`, `meta`, and `id` (see below).

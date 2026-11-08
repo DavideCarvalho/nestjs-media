@@ -1,27 +1,30 @@
 ---
 title: '@dudousxd/nestjs-media'
 icon: Server
-description: The umbrella package — MediaModule, MediaService, the tus controller, and the /storage subpath.
+description: The umbrella package — MediaModule on StorageModule, MediaService (serve, authorize), and the upload controllers.
 ---
 
 import { Callout } from 'fumadocs-ui/components/callout';
 
-`@dudousxd/nestjs-media` is the package you import in a Nest app. It wires [core](/docs/packages/core) into NestJS DI and exposes everything through one service.
+`@dudousxd/nestjs-media` is the package you import in a Nest app. It wires [core](/docs/packages/core) into NestJS DI on the disks of `StorageModule` ([`@nestjs/storage`](https://docs.nestjs.com/application/file-storage)) and exposes everything through one service.
 
 ## `MediaModule`
 
-`forRoot` / `forRootAsync` register a `@Global()` module. It always provides the storage layer; pass `store` for the media-library, `uploadSessions` for resumable uploads, `tus` to mount the proxy HTTP controller, and `direct` to mount the direct presigned-multipart controller. See [Reference → Configuration](/docs/reference/configuration) for every option.
+`forRoot` / `forRootAsync` register a `@Global()` module that injects `Storage` from `StorageModule` (register that first; MediaModule fails at boot naming it otherwise). Pass `store` for the media-library, `uploadSessions` for resumable uploads, `multipart` side-cars for native S3 multipart, `tus` to mount the proxy HTTP controller, `direct` to mount the direct presigned-multipart controller, and `authorize` to check `MediaService`'s reads and writes. See [Reference → Configuration](/docs/reference/configuration) for every option.
 
 ```ts
+StorageModule.forRoot({ default: 'local', disks: { local: new LocalDisk({ root: './storage' }), s3: new S3Disk(s3) } });
+
 MediaModule.forRoot({
-  default: 'local',
-  disks: { local },
-  store,                  // → media.library
-  uploadSessions,         // → media.uploads
-  tus: { disk: 'local' }, // → mounts MediaUploadController
-  direct: { disk: 's3' }, // → mounts MediaDirectUploadController (S3)
+  store,                              // → media.library (an instance, or typeOrmMediaStore({ connectionName }))
+  uploadSessions,                     // → media.uploads
+  multipart: { s3: s3Multipart(s3) }, // native multipart on the s3 disk
+  tus: { disk: 'local' },             // → mounts MediaUploadController
+  direct: { disk: 's3' },             // → mounts MediaDirectUploadController (needs the side-car)
 });
 ```
+
+`store` and `uploadSessions` accept an instance or `{ inject, useFactory }`, which Nest resolves (the ORM packages' `/nest` helpers return one). On `forRootAsync` that factory form goes at the top level (`forRootAsync({ store, useFactory })`), since the factory's result can't inject anything.
 
 ## `MediaService`
 
@@ -29,23 +32,46 @@ The single injectable surface:
 
 ```ts
 class MediaService {
-  disk(name?: string): StorageDriver;        // layer 1
-  get library(): MediaLibrary;               // layer 2, table model (throws if no store)
+  serve(id, conversion?, { req, res, user?, disposition?, filename?, cacheControl? }): Promise<StreamableFile | undefined>;
+  url(id, conversion?, { user?, expiresIn?, filename?, disposition? }?): Promise<string>;
+  attach(input: AttachInput, { user? }?): Promise<MediaRecord>;
+  delete(id, { user? }?): Promise<void>;
+  get library(): MediaLibrary;               // table model, unchecked (throws if no store)
   get attachments(): AttachmentManager;      // layer 2, column model (always available)
   get uploads(): ResumableUploadManager;     // resumable proxy (throws if no uploadSessions)
   get directUploads(): DirectUploadManager;  // direct presigned multipart (throws if no direct)
 }
 ```
 
-`media.attachments` is the [attachment column model](/docs/concepts/attachments) and is always provided — it only needs storage (and an [image processor](/docs/packages/image-sharp) for variants), no store or table. `media.library` is the [media table](/docs/concepts/two-layers#layer-2--media-library) and throws until you pass a `store`.
+`media.attachments` is the [attachment column model](/docs/concepts/attachments) and is always provided — it only needs the disks (and an [image processor](/docs/packages/image-sharp) for variants), no store or table. `media.library` is the [media table](/docs/concepts/two-layers#layer-2--media-library) and throws until you pass a `store`. For the disks themselves, inject `Storage` or `@InjectDisk(name)` from `@nestjs/storage`.
+
+### `serve()`
+
+Streams a record (or a conversion, generated on first use) through `@nestjs/storage`'s `serveFile()`: `Range` → 206, `If-None-Match` → 304, `ETag`, `nosniff`, `inline` only for types that can't run script, the record's file name in `Content-Disposition`, 404 for an unknown id. See [Serving files](/docs/recipes/serving-files).
+
+### `authorize`
+
+An optional hook, checked by `serve()`/`url()` (`'read'`), `attach()` (`'attach'`, on `{ ownerType, ownerId, collection }`) and `delete()` (`'delete'`). It throws to refuse. `user` is what the caller passed, else `req.user` for `serve()`. `media.library` stays the unchecked core API. With the first-party `@nestjs/authorization`:
 
 ```ts
-@Injectable()
-export class Files {
-  constructor(private readonly media: MediaService) {}
-  save = (p: string, b: Buffer) => this.media.disk('s3').put(p, b);
+@Policy()
+export class MediaPolicy {
+  read(user: User | null, media: MediaRecord) { return media.ownerId === user?.id || user?.role === 'admin'; }
+  attach(user: User | null, target: MediaAttachTarget) { return target.ownerId === user?.id; }
+  delete(user: User | null, media: MediaRecord) { return media.ownerId === user?.id; }
 }
+
+MediaModule.forRootAsync({
+  imports: [AuthorizationModule],
+  inject: [AuthorizationService],
+  useFactory: (authorization: AuthorizationService) => ({
+    store,
+    authorize: (user, action, record) => authorization.authorize(MediaPolicy, action, user, record),
+  }),
+});
 ```
+
+`AuthorizationService.authorize()` throws an `AuthorizationError` that `@nestjs/authorization` turns into a 401 (no user) or 403.
 
 ## tus controller
 
@@ -55,22 +81,88 @@ When `tus` is configured, `MediaUploadController` is mounted at `media/uploads`,
 app.use('/media/uploads', express.raw({ type: 'application/offset+octet-stream' }));
 ```
 
-<Callout type="warn" title="Uploads are unauthenticated unless you set `guards`">
-`MediaUploadController` (tus), `MediaMultipartUploadController`, and `MediaDirectUploadController` carry no guard by default. Pass `guards` to `MediaModule.forRoot`/`forRootAsync` to gate them — a plain array gates all three uniformly, or a per-surface object gates each independently, since the surfaces often carry different sensitivity (session creation admin-only, part PUTs any authenticated user):
+## Protecting the routes
+
+The upload controllers (`MediaUploadController` for tus, `MediaMultipartUploadController`, `MediaDirectUploadController`) carry **no auth of their own**: you protect them with NestJS's first-party tools (`@nestjs/authentication`, `@nestjs/authorization`), one of two ways:
+
+1. **Mount them yourself**: `routes: false`, then extend the exported controllers.
+2. **`decorators`** on the routes this module mounts.
+
+**Production rule.** When `NODE_ENV === 'production'`, a registration that mounts upload routes without `decorators` (an empty array counts as none) refuses to boot:
+
+```txt
+MediaModule.forRoot() mounts routes with no protection, which is refused when NODE_ENV=production. Protect them one of two ways:
+  1. decorators on the mounted controllers: MediaModule.forRoot({ ..., decorators: [UseGuards(AuthenticationGuard), Can(MediaPolicy, 'upload')] })
+  2. routes: false, and mount them yourself: MediaModule.forRoot({ ..., routes: false }) + @Can(MediaPolicy, 'upload') @Controller('media/uploads') class UploadsController extends MediaUploadController {}
+```
+
+A registration that mounts nothing (`routes: false`, every surface off through `mount`, or no upload feature configured on `forRoot`) boots as usual. Outside production, undecorated routes mount open.
+
+Every upload controller is marked `@Can.Anyone()`-open (it defines `'authorization:can-anyone'` metadata, with no dependency on `@nestjs/authorization`), so the official deny-by-default global `AuthorizationGuard` doesn't refuse it. That mark only opens a route that declares no requirement: a `@Can(...)` you add, either way, is still checked (401 for a guest, 403 for a user the policy denies).
+
+### 1. Mount it yourself
+
+This is how NestJS's first-party packages work: they give you the service, you write the controller, and you protect it like any other route of yours. `routes: false` mounts **no** upload controller, while every provider keeps working (`MediaService`, and the `MEDIA_TUS` / `MEDIA_UPLOADS` / `MEDIA_DIRECT` handlers). You then serve the same routes by extending the exported controller classes, at a path you pick, with ordinary Nest decorators:
 
 ```ts
+import { Can } from '@nestjs/authorization';
+import { Controller } from '@nestjs/common';
+import {
+  MediaDirectUploadController,
+  MediaModule,
+  MediaMultipartUploadController,
+  MediaUploadController,
+} from '@dudousxd/nestjs-media';
+
+@Can(MediaPolicy, 'upload')
+@Controller('api/uploads')
+export class UploadsController extends MediaUploadController {} // tus
+
+@Can(MediaPolicy, 'upload')
+@Controller('api/uploads')
+export class UploadPartsController extends MediaMultipartUploadController {} // parallel parts
+
+@Can(MediaPolicy, 'upload')
+@Controller('api/uploads/direct')
+export class DirectUploadsController extends MediaDirectUploadController {} // S3 presign
+
+@Module({
+  imports: [
+    AuthorizationModule.forRoot(),
+    MediaModule.forRoot({
+      // …
+      tus: { disk: 'local', basePath: '/api/uploads' }, // the tus Location header points here
+      routes: false,
+    }),
+  ],
+  controllers: [UploadsController, UploadPartsController, DirectUploadsController],
+  providers: [MediaPolicy],
+})
+export class AppModule {}
+```
+
+Mount only the ones you use, and put the raw-body parser on your path (`app.use('/api/uploads', express.raw(...))`). The subclasses inherit every route, parameter and the constructor's injection, so they need no constructor of their own; anything you add (`@UseGuards(AuthenticationGuard)`, a per-method `@Can`, an interceptor) is plain Nest. For full control, skip the classes and inject the handlers into a controller of your own: `@Inject(MEDIA_TUS) tus: TusUploadHandler` (`tus.handle({ method, uploadId, headers, body })` returns the status, headers and body to send), `MediaService.uploads` and `MediaService.directUploads`. `mount` works the same on `forRootAsync` (a static field, see below).
+
+### 2. `decorators`
+
+To keep the routes this module mounts (`media/uploads`, `media/uploads/direct`), pass `decorators`: class decorators applied to **every** upload controller the module mounts. Default: none.
+
+```ts
+import { AuthenticationGuard } from '@nestjs/authentication';
+import { Can } from '@nestjs/authorization';
+import { UseGuards } from '@nestjs/common';
+
 MediaModule.forRoot({
   // …
-  guards: { tus: [AdminGuard], multipart: [AuthenticatedGuard] }, // direct omitted → unguarded
+  decorators: [UseGuards(AuthenticationGuard), Can(MediaPolicy, 'upload')],
 });
 ```
 
-An omitted key (or the whole option) leaves that surface unguarded — **uploads remain unauthenticated by default**. On `forRootAsync`, `guards` is a *static* field on the config object, not resolved via `useFactory`, since controllers are wired at module-build time; a guard that needs async-resolved config (e.g. a `ConfigService` secret) should inject it itself via DI, with its providing module passed through `imports`.
-</Callout>
+On `forRootAsync` it is a static field on the config object, like `mount`, since it shapes the routes before any factory runs. Each registration decorates a fresh subclass of each controller, so one registration's decorators never leak into another. With `decorators` set, resolve the controllers by route, not with `app.get(MediaUploadController)`.
 
 ## Mounting only what you use
 
-`forRootAsync` mounts all three upload controllers unconditionally by default — each one 501s if you never configure its feature in the factory — since Nest wires controllers at module-build time, before the async factory runs. Pass a static `mount` object to drop the ones you never use entirely, so they 404 instead of existing as dead, always-501 surface:
+`forRoot` mounts a controller only when its feature is configured (`tus` → tus, `uploadSessions` → multipart, `direct` → direct). `forRootAsync` can't know that in time, so it mounts all three by default and each one 501s if you never configure its feature in the factory. Either way, `mount` turns surfaces off, so they 404 instead of existing as dead surface:
 
 ```ts
 MediaModule.forRootAsync({
@@ -79,47 +171,40 @@ MediaModule.forRootAsync({
 });
 ```
 
-`forRoot` doesn't need this: it already only mounts a controller when the matching option (`tus`/`direct`) is present.
+`routes: false` turns them all off (see [Mount it yourself](#1-mount-it-yourself)).
 
 ## Direct upload controller
 
-When `direct` is configured (with a presign/multipart-capable disk like S3), `MediaDirectUploadController` is mounted at `media/uploads/direct`, orchestrating browser-to-S3 [presigned multipart uploads](/docs/concepts/uploads#direct-presigned-multipart-server) over `DirectUploadManager` (`media.directUploads`). It exposes `initiate` / per-part presign / `complete` / `abort` — no raw-body parser is needed, since the bytes go straight to S3.
+When `direct` is configured (with a `multipart` side-car for its disk), `MediaDirectUploadController` is mounted at `media/uploads/direct`, orchestrating browser-to-S3 [presigned multipart uploads](/docs/concepts/uploads#direct-presigned-multipart-server) over `DirectUploadManager` (`media.directUploads`). It exposes `initiate` / per-part presign / `complete` / `abort` — no raw-body parser is needed, since the bytes go straight to S3.
 
 ```ts
 direct: { disk: 's3', partSize: 8 * 1024 * 1024 } // partSize optional, default 8 MiB
-```
-
-## The `/storage` subpath
-
-For consumers that want only the filesystem facade, without the media-library layer:
-
-```ts
-import { StorageManager, type StorageDriver } from '@dudousxd/nestjs-media/storage';
 ```
 
 ## Injection tokens
 
 ```ts
 import {
-  MEDIA_STORAGE, MEDIA_LIBRARY, MEDIA_ATTACHMENTS, MEDIA_UPLOADS, MEDIA_TUS, MEDIA_DIRECT,
+  MEDIA_LIBRARY, MEDIA_ATTACHMENTS, MEDIA_UPLOADS, MEDIA_TUS, MEDIA_DIRECT,
+  MEDIA_STORE, MEDIA_UPLOAD_SESSIONS, MEDIA_MULTIPART,
 } from '@dudousxd/nestjs-media';
 ```
 
 <Callout type="info">
-Inject `MediaService` for normal use; reach for the tokens only when you need the raw `StorageManager`/`MediaLibrary`/`ResumableUploadManager`/`DirectUploadManager` (e.g. wiring a custom controller).
+Inject `MediaService` for normal use; reach for the tokens only when you need the raw `MediaLibrary`/`ResumableUploadManager`/`DirectUploadManager` (e.g. wiring a custom controller). The disks are `@nestjs/storage`'s `Storage`. `MEDIA_STORE`, `MEDIA_UPLOAD_SESSIONS` and `MEDIA_MULTIPART` are `Symbol.for` tokens the dashboard and telescope read.
 </Callout>
 
 ## Facade re-exports
 
-`@dudousxd/nestjs-media`'s entrypoint also re-exports the error classes (`FileNotFoundError`, etc.), `ResumableUploadManager`, `mediaDiagnosticKey`, `MediaDiagnosticEvent`, `publishMedia`, and the storage-consumer/upload-session types (`StatResult`, `TemporaryUrlOptions`, `ListResult`, `ListEntry`, `ListOptions`, `MultipartPart`, `UploadSession`, `UploadSessionStore`, `UploadSessionListFilter`, `CreateUploadInput`) from `@dudousxd/nestjs-media-core` — so a consumer app doesn't need its own dependency on `-core` just to reach these:
+`@dudousxd/nestjs-media`'s entrypoint also re-exports the error classes (`MediaNotFoundError`, `InvalidMediaKeyError`, etc.), the managers, `keySegment`, `mediaDiagnosticKey`, `MediaDiagnosticEvent`, `publishMedia`, and the upload/multipart types (`MultipartPart`, `MultipartUploadDriver`, `FolderListing`, `MediaDiskCapabilities`, `UploadSession`, `UploadSessionStore`, `UploadSessionListFilter`, `CreateUploadInput`) from `@dudousxd/nestjs-media-core` — so a consumer app doesn't need its own dependency on `-core` just to reach these:
 
 ```ts
 import {
-  FileNotFoundError, ResumableUploadManager, mediaDiagnosticKey, publishMedia,
+  MediaNotFoundError, ResumableUploadManager, mediaDiagnosticKey, publishMedia,
   type MediaDiagnosticEvent, type UploadSession, type UploadSessionStore,
 } from '@dudousxd/nestjs-media';
 ```
 
 ## Peer dependencies
 
-`@nestjs/common` and `@nestjs/core` (v10, v11 or v12), `reflect-metadata`, and `@dudousxd/nestjs-media-core`. Disks, stores, and the image engine are separate installs.
+`@nestjs/common` and `@nestjs/core` (`^12.1`, which `@nestjs/storage` requires), `@nestjs/storage` (`>=0.0.5 <0.1.0`), `reflect-metadata`, and `@dudousxd/nestjs-media-core`. Stores, the S3 side-car and the image engine are separate installs.

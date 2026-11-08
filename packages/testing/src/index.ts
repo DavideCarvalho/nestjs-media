@@ -1,4 +1,4 @@
-export * from './in-memory-driver';
+export * from './storage-of';
 export * from './conformance';
 export * from './in-memory-media-store';
 export * from './media-store-conformance';
