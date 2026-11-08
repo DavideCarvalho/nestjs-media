@@ -14,14 +14,14 @@ primary_packages:
     dir: packages/nestjs
     role: >-
       The NestJS adapter consumers import. MediaModule.forRoot/forRootAsync,
-      MediaService (disk/library/attachments/uploads/directUploads), tus +
-      direct upload controllers, /storage subpath, injection tokens.
+      MediaService (library/attachments/uploads/directUploads, serve/url/attach/delete),
+      tus + direct upload controllers, injection tokens.
     entry_exports:
       - MediaModule (forRoot, forRootAsync)
       - MediaService
       - MediaUploadController
       - MediaDirectUploadController
-      - tokens: MEDIA_STORAGE MEDIA_LIBRARY MEDIA_ATTACHMENTS MEDIA_UPLOADS MEDIA_TUS MEDIA_DIRECT
+      - tokens: MEDIA_LIBRARY MEDIA_ATTACHMENTS MEDIA_UPLOADS MEDIA_TUS MEDIA_DIRECT
   - name: "@dudousxd/nestjs-media-react"
     dir: packages/react
     role: >-

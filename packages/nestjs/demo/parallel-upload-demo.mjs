@@ -6,8 +6,9 @@ import 'reflect-metadata';
 import { CreateBucketCommand, GetObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import { MediaModule } from '@dudousxd/nestjs-media';
 import { uploadMediaParallel } from '@dudousxd/nestjs-media-client';
-import { S3Driver } from '@dudousxd/nestjs-media-disk-s3';
+import { s3Multipart } from '@dudousxd/nestjs-media-disk-s3';
 import { NestFactory } from '@nestjs/core';
+import { S3Disk, StorageModule } from '@nestjs/storage';
 import express from 'express';
 import { GenericContainer, Wait } from 'testcontainers';
 
@@ -67,13 +68,25 @@ const s3 = new S3Client({
 await s3.send(new CreateBucketCommand({ Bucket: BUCKET }));
 console.log(`[${ms()}ms] MinIO up at ${endpoint}, bucket "${BUCKET}" created`);
 
+const diskOptions = {
+  bucket: BUCKET,
+  region: 'us-east-1',
+  endpoint,
+  forcePathStyle: true,
+  credentials: { accessKeyId: 'minioadmin', secretAccessKey: 'minioadmin' },
+};
 const app = await NestFactory.create(
-  MediaModule.forRoot({
-    default: BUCKET,
-    disks: { [BUCKET]: new S3Driver({ client: s3, bucket: BUCKET }) },
-    uploadSessions: new MemStore(),
-    tus: { disk: BUCKET, basePath: '/media/uploads', keyFor: () => KEY },
-  }),
+  {
+    module: class AppModule {},
+    imports: [
+      StorageModule.forRoot({ disks: { [BUCKET]: new S3Disk(diskOptions) } }),
+      MediaModule.forRoot({
+        uploadSessions: new MemStore(),
+        multipart: { [BUCKET]: s3Multipart(diskOptions) },
+        tus: { disk: BUCKET, basePath: '/media/uploads', keyFor: () => KEY },
+      }),
+    ],
+  },
   { bodyParser: false, logger: false },
 );
 // Log every request as the server receives it, so concurrent PUTs are visible.
