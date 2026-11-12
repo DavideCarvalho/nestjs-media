@@ -1,5 +1,10 @@
 import { useQuery } from '@tanstack/react-query';
-import { mediaConsoleClient } from '../client/media-console-client.js';
+import { useEffect, useState } from 'react';
+import {
+  ConsoleAccessError,
+  mediaConsoleClient,
+  onConsoleAccessDenied,
+} from '../client/media-console-client.js';
 import { Button, Dot } from './ui.js';
 import { useHashRoute } from './useHashRoute.js';
 import { DisksView } from './views/DisksView.js';
@@ -35,12 +40,47 @@ function LogoMark({ className }: { className?: string }): JSX.Element {
   );
 }
 
+/** What the console shows instead of its views when the API denies access (`authorize`). */
+export function AccessDenied({ error }: { error: ConsoleAccessError }): JSX.Element {
+  const signIn = error.status === 401;
+  return (
+    <div role="alert" className="grid h-full place-items-center p-6">
+      <div className="max-w-sm text-center">
+        <div className="text-sm font-semibold tracking-tight">
+          {signIn
+            ? error.redirectTo
+              ? 'Redirecting to sign in…'
+              : 'Sign-in required'
+            : 'Access denied'}
+        </div>
+        <p className="mt-2 text-xs text-zinc-500">
+          {signIn
+            ? 'Sign in to the app to use the media console.'
+            : "You don't have access to the media console."}
+        </p>
+      </div>
+    </div>
+  );
+}
+
+/** The latest console denial the API client reported, if any. */
+function useAccessDenied(): ConsoleAccessError | undefined {
+  const [denied, setDenied] = useState<ConsoleAccessError>();
+  useEffect(() => onConsoleAccessDenied(setDenied), []);
+  return denied;
+}
+
 export function App(): JSX.Element {
   const route = useHashRoute();
   const topology = useQuery({
     queryKey: ['topology'],
     queryFn: () => mediaConsoleClient.topology(),
+    // A denial won't change on retry.
+    retry: (count, error) => !(error instanceof ConsoleAccessError) && count < 1,
   });
+  const reported = useAccessDenied();
+  const denied =
+    reported ?? (topology.error instanceof ConsoleAccessError ? topology.error : undefined);
 
   const stat = (label: string, on: boolean) => (
     <span
@@ -96,13 +136,14 @@ export function App(): JSX.Element {
         </header>
 
         <main className="min-h-0 flex-1 overflow-auto p-6">
-          {route.tab === 'disks' && (
+          {denied && <AccessDenied error={denied} />}
+          {!denied && route.tab === 'disks' && (
             <DisksView route={route} actions={topology.data?.actions ?? false} />
           )}
-          {route.tab === 'uploads' && (
+          {!denied && route.tab === 'uploads' && (
             <UploadsView route={route} actions={topology.data?.actions ?? false} />
           )}
-          {route.tab === 'library' && (
+          {!denied && route.tab === 'library' && (
             <LibraryView route={route} hasStore={topology.data?.hasStore ?? false} />
           )}
         </main>

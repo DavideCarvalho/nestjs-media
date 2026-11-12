@@ -131,8 +131,8 @@ is a `RangeError`. A page holds at most `limit` entries. While it has a `cursor`
 
 ## Protecting the routes
 
-The upload controllers and the `/media` console ship with **no auth of their own**: you protect them
-with NestJS's first-party tools (`@nestjs/authentication`, `@nestjs/authorization`), one of two ways.
+The upload controllers ship with **no auth of their own**: you protect them with NestJS's
+first-party tools (`@nestjs/authentication`, `@nestjs/authorization`), one of two ways.
 
 1. **Mount them yourself.** Pass `routes: false` (every provider keeps working) and extend the
    exported controllers in your own module, decorated like any other controller:
@@ -149,12 +149,22 @@ with NestJS's first-party tools (`@nestjs/authentication`, `@nestjs/authorizatio
 
    ```ts
    MediaModule.forRoot({ /* … */, decorators: [UseGuards(AuthenticationGuard), Can(MediaPolicy, 'upload')] });
-   MediaDashboardModule.forRoot({ decorators: [UseGuards(AuthenticationGuard), Can(MediaPolicy, 'console')] });
    ```
 
-**Production rule:** when `NODE_ENV === 'production'`, a `MediaModule` or `MediaDashboardModule`
-that mounts routes without `decorators` (an empty list counts as none) refuses to boot, with an
-error naming both ways. Outside production undecorated routes mount open.
+**Production rule:** when `NODE_ENV === 'production'`, a `MediaModule` that mounts upload routes
+without `decorators` (an empty list counts as none) refuses to boot, with an error naming both
+ways. Outside production undecorated routes mount open.
+
+The `/media` console takes one `authorize` option instead (a function, an `@Injectable()` class, a
+lazy import, an `@nestjs/authorization` policy, or a gate name). Without it the console is open
+outside production and answers 403 in production:
+
+```ts
+MediaDashboardModule.forRoot({
+  decorators: [UseGuards(AuthenticationGuard)],
+  authorize: (ctx) => ctx.switchToHttp().getRequest().user?.isAdmin === true,
+});
+```
 
 Every controller this library mounts is marked `@Can.Anyone()`-open, so `@nestjs/authorization`'s
 deny-by-default global guard doesn't refuse it; a `@Can(...)` you add is still checked. `mount`

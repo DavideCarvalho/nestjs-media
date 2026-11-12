@@ -1,7 +1,7 @@
 ---
 title: '@dudousxd/nestjs-media-dashboard'
 icon: LayoutDashboard
-description: Standalone /media console — disks, live uploads, and the media library, protected with NestJS's first-party auth tools.
+description: Standalone /media console — disks, live uploads, and the media library, behind one `authorize` option.
 ---
 
 import { Callout } from 'fumadocs-ui/components/callout';
@@ -18,8 +18,8 @@ import { MediaDashboardModule } from '@dudousxd/nestjs-media-dashboard';
     MediaDashboardModule.forRoot({
       basePath: '/media',
       apiBasePath: '/api/media/console',
-      // Required in production — see "Protecting the routes".
-      decorators: [UseGuards(AuthenticationGuard), Can(MediaPolicy, 'console')],
+      // Who may use the console — see "Access". Without it, production answers 403.
+      authorize: (ctx) => ctx.switchToHttp().getRequest().user?.isAdmin === true,
     }),
   ],
 })
@@ -35,8 +35,9 @@ interface MediaDashboardOptions {
   basePath?: string;       // default '/media'
   apiBasePath?: string;    // default '<basePath>/api'
   actions?: boolean;       // enable delete/copy/move/abort — default false (read-only)
+  authorize?: ConsoleAuthorize;              // who may use the console — see "Access"
   imports?: DynamicModule['imports'];        // DI resolution path for a decorator guard's deps
-  decorators?: ClassDecorator[];             // applied to every console controller, e.g. Can(...)
+  decorators?: ClassDecorator[];             // applied to every console controller, e.g. UseGuards(...)
   routes?: boolean;                           // false → mount no controller (mount them yourself)
   objectInsights?: ObjectInsightProvider[];  // host context shown in the preview
   objectUrls?: 'auto' | 'proxy';             // presigned store URLs, or same-origin — default 'auto'
@@ -48,92 +49,223 @@ interface MediaDashboardOptions {
 | `basePath` | Where the SPA is served. Keep it out of an `/api` prefix so it reads as a UI, not an endpoint. |
 | `apiBasePath` | Where the JSON API is mounted (what the SPA fetches). Put it under your app's `/api` prefix so it inherits the app's proxy rules. |
 | `actions` | Enables the destructive endpoints (delete object/record, copy/move, abort upload). The read API is always available. |
-| `decorators` | Class decorators applied to every console controller — see [Protecting the routes](#protecting-the-routes). |
+| `authorize` | Who may use the console (page, assets and JSON API) — see [Access](#access). |
+| `decorators` | Class decorators applied to every console controller, before `authorize` runs: authentication guards, throttling. |
 | `routes` | `false` mounts no controller, for serving the console from your own — see [Mount it yourself](#1-mount-it-yourself). Default `true`. |
 | `imports` | Modules providing the dependencies of a guard you pass through `decorators`. |
 | `objectInsights` | Annotate an object in the preview with what *your app* knows about it — see [Object insights](#object-insights). |
 | `objectUrls` | Whether an object's reported `url` is presigned straight to the store or routed through this server — see [Reaching an object's bytes](#reaching-an-objects-bytes). |
 
-`MediaDashboardModule.forRootAsync(options)` mirrors this, building `objectInsights` through an injected `useObjectInsights(...deps)` factory (`inject` lists the deps). `decorators`, `routes`, `actions` and the mount paths stay static fields on the async options object, since they shape the routes when the module is built.
+`MediaDashboardModule.forRootAsync(options)` mirrors this, building `objectInsights` through an injected `useObjectInsights(...deps)` factory (`inject` lists the deps). `authorize`, `decorators`, `routes`, `actions` and the mount paths stay static fields on the async options object, since they shape the routes when the module is built.
 
-## Protecting the routes
+## Access
 
-The console mounts a page/asset controller and the read and action JSON APIs, with **no auth of their own**: you protect them with NestJS's first-party tools (`@nestjs/authentication`, `@nestjs/authorization`), one of two ways:
-
-1. **Mount it yourself**: `routes: false`, then extend the exported controllers.
-2. **`decorators`** on the controllers this module mounts.
-
-**Production rule.** When `NODE_ENV === 'production'`, a registration that mounts the console without `decorators` (an empty array counts as none) refuses to boot:
-
-```txt
-MediaDashboardModule.forRoot() mounts routes with no protection, which is refused when NODE_ENV=production. Protect them one of two ways:
-  1. decorators on the mounted controllers: MediaDashboardModule.forRoot({ decorators: [UseGuards(AuthenticationGuard), Can(MediaPolicy, 'console')] })
-  2. routes: false, and mount them yourself: MediaDashboardModule.forRoot({ routes: false }) + @Can(MediaPolicy, 'console') @Controller('media/api') class ConsoleApiController extends MediaConsoleReadController {}
-```
-
-Outside production, undecorated routes mount open.
-
-`@nestjs/authorization`'s `AuthorizationModule.forRoot()` registers a global `AuthorizationGuard` that **denies by default** any route with no `@Can(...)` and no `@Can.Anyone()`. Every console controller is marked `@Can.Anyone()`-open (`'authorization:can-anyone'` metadata, no dependency on that package), so the console keeps working when you adopt it. The mark only opens a route that declares no requirement: a `@Can(...)` you add is still checked (a guest gets 401, a user the policy denies 403).
-
-### 1. Mount it yourself
-
-`routes: false` registers **no** console controller, while every provider keeps working and is exported (`MediaConsoleService` and the resolved paths). Serve the console by extending the exported controller classes in a module of your own and protect them like any of your routes. Keep `basePath`/`apiBasePath` equal to where you mount them, since the SPA reads both:
+`authorize` decides who may use the console. It runs on **every** console request: the page, its
+assets, the read API and the actions. It runs after your `decorators` and global guards, so your
+authentication has already set `request.user`.
 
 ```ts
-import { Can } from '@nestjs/authorization';
-import { Controller, Module } from '@nestjs/common';
+import { UseGuards } from '@nestjs/common';
+import { AuthenticationGuard } from '@nestjs/authentication';
+
+MediaDashboardModule.forRoot({
+  decorators: [UseGuards(AuthenticationGuard)], // sign-in: your app's own
+  authorize: (ctx) => ctx.switchToHttp().getRequest().user?.isAdmin === true,
+});
+```
+
+<Callout type="info">
+  This is the console's access. It is a different option on a different module from
+  [`MediaModule`'s `authorize(user, action, subject)` hook](/docs/packages/nestjs#authorize), which
+  checks `MediaService` reads and writes. The upload routes keep their own `decorators` / `routes`.
+</Callout>
+
+### The five forms
+
+```ts
+// 1. Inline function
+authorize: (ctx) => ctx.switchToHttp().getRequest().user?.isAdmin === true,
+
+// 2. A class: an @Injectable() that implements ConsoleAuthorizer (constructor injection works)
+authorize: ConsoleAccess,
+
+// 3. A lazy import of that class (its default export)
+authorize: () => import('./console-access.js'),
+
+// 4. An @nestjs/authorization policy: policy[ability](user)
+authorize: { policy: ConsolePolicy, ability: 'view' },
+
+// 5. A gate name registered with @dudousxd/nestjs-authz's AuthzModule
+authorize: 'console.media',
+```
+
+```ts title="console-access.ts"
+import { type ExecutionContext, Injectable } from '@nestjs/common';
+import type { ConsoleAuthorizer } from '@dudousxd/nestjs-media-dashboard';
+
+@Injectable()
+export default class ConsoleAccess implements ConsoleAuthorizer {
+  constructor(private readonly audit: AuditService) {}
+
+  async authorize(ctx: ExecutionContext) {
+    const user = ctx.switchToHttp().getRequest().user;
+    if (!user) return { redirectTo: '/login?next=/media' };
+    await this.audit.record('console.open', user.id);
+    return user.roles.includes('admin');
+  }
+}
+```
+
+The policy form needs `@nestjs/authorization` installed (an optional peer). It reads the user with
+`AuthorizationModule`'s `getUser` (default: `request.user`). The gate-name form needs
+`@dudousxd/nestjs-authz`'s `AuthzModule`; without it the app fails at boot and says so. The authz
+package also exports `authorizeByRoles({ roles })` and `authorizeByPermission(permission)`.
+
+### What `authorize` returns
+
+| Result | API call (`fetch`) | Page navigation (`GET`, `Accept: text/html`) |
+|---|---|---|
+| `true` / `{ allowed: true }` | allowed | allowed |
+| `false` / `{ allowed: false }` | 403 `{ "error": "forbidden" }` | 403 "Access denied" page |
+| `{ allowed: false, reason: 'unauthenticated' }` | 401 `{ "error": "unauthenticated" }` | 401 |
+| `{ redirectTo: '/login' }` | 401 `{ "error": "unauthenticated", "redirectTo": "/login" }` | 302 to `/login` |
+| a throw | 403 (logged at `warn`) | 403 |
+
+The bundled SPA shows an access-denied state when the API answers 403. When it gets a 401 with
+`redirectTo`, it sends the browser there.
+
+### A shared token
+
+`authorizeByToken` allows a request whose `Authorization: Bearer <token>` header matches (compared in
+constant time). Anything else is `unauthenticated`. The header is the only place it looks, so
+`?token=` does nothing. An empty or missing token throws when you call it, at config time.
+
+```ts
+import { authorizeByToken } from '@dudousxd/nestjs-media-dashboard';
+
+MediaDashboardModule.forRoot({ authorize: authorizeByToken({ token: process.env.CONSOLE_TOKEN }) });
+```
+
+A browser navigation sends no `Authorization` header, so this suits API clients and scripts more
+than the SPA.
+
+### Without `authorize`
+
+- Outside production (`NODE_ENV !== 'production'`) the console is open.
+- In production every request (page, assets, API) answers 403 `{ "error": "forbidden" }`.
+- Either way, one warning is logged at boot:
+
+```txt
+[@dudousxd/nestjs-media-dashboard] console has no `authorize` configured: it is open outside production and denies every request in production. Set `authorize` in MediaDashboardModule.forRoot().
+```
+
+`decorators` don't count as `authorize`: an auth guard in `decorators` alone still leaves production
+answering 403.
+
+### `decorators`
+
+Class decorators applied to every controller the console mounts, before `authorize` runs. Use them
+for authentication, throttling and the like:
+
+```ts
+MediaDashboardModule.forRoot({
+  decorators: [UseGuards(AuthenticationGuard)],
+  authorize: { policy: ConsolePolicy, ability: 'view' },
+});
+```
+
+Each registration decorates fresh subclasses of the controllers, so decorators never leak from one
+registration into another. `imports` adds modules that provide a decorator guard's dependencies.
+
+Every console controller is marked `@Can.Anyone()`-open (`'authorization:can-anyone'` metadata), so
+`@nestjs/authorization`'s deny-by-default global `AuthorizationGuard` lets it through and `authorize`
+decides. A `Can(...)` you pass in `decorators` is still checked.
+
+<Callout type="warn">
+  `authorize` fronts BOTH the page (a full-page `GET` to `basePath`) and the JSON API (the SPA's
+  `fetch` calls, which send cookies with `credentials: 'same-origin'`). A full-page navigation carries
+  only **cookies**, never an `Authorization` header. If your authentication only reads a bearer
+  token, every browser visit to the console is a guest. Authenticate the console from a cookie.
+</Callout>
+
+### Mount it yourself
+
+`routes: false` registers **no** console controller. Every provider keeps working and is exported
+(`MediaConsoleService`, the resolved paths and the resolved `authorize`). Serve the console by
+extending the exported controllers, and apply `ConsoleAuthorizeGuard` and `ConsoleAuthorizeFilter`
+so `authorize` still decides access. Put your authentication guard first. Keep `basePath`/`apiBasePath`
+equal to where you mount them, since the SPA reads both:
+
+```ts
+import { Controller, Module, UseFilters, UseGuards } from '@nestjs/common';
 import {
+  ConsoleAuthorizeFilter,
+  ConsoleAuthorizeGuard,
   MediaConsoleActionsController,
   MediaConsoleReadController,
   MediaDashboardModule,
   MediaDashboardUiController,
 } from '@dudousxd/nestjs-media-dashboard';
 
-@Can(MediaPolicy, 'console')
+@UseGuards(AuthenticationGuard, ConsoleAuthorizeGuard)
+@UseFilters(ConsoleAuthorizeFilter)
 @Controller('media')
 export class ConsolePageController extends MediaDashboardUiController {}
 
-@Can(MediaPolicy, 'console')
+@UseGuards(AuthenticationGuard, ConsoleAuthorizeGuard)
+@UseFilters(ConsoleAuthorizeFilter)
 @Controller('media/api')
 export class ConsoleApiController extends MediaConsoleReadController {}
 
-@Can(MediaPolicy, 'console')
+@UseGuards(AuthenticationGuard, ConsoleAuthorizeGuard)
+@UseFilters(ConsoleAuthorizeFilter)
 @Controller('media/api')
 export class ConsoleActionsController extends MediaConsoleActionsController {} // only with `actions: true`
 
 @Module({
   imports: [
-    AuthorizationModule.forRoot(),
-    MediaDashboardModule.forRoot({ basePath: '/media', apiBasePath: '/media/api', routes: false }),
+    MediaDashboardModule.forRoot({
+      basePath: '/media',
+      apiBasePath: '/media/api',
+      routes: false,
+      authorize: { policy: ConsolePolicy, ability: 'view' },
+    }),
   ],
   controllers: [ConsolePageController, ConsoleApiController, ConsoleActionsController],
-  providers: [MediaPolicy],
 })
 export class AppModule {}
 ```
 
-The subclasses inherit every route and the constructor's injection, so they need no constructor of their own. `routes` is a static field on `forRootAsync` too.
+The guard answers the JSON denials on its own. The filter adds the page behaviour: the 302 for
+`redirectTo` and the "Access denied" page. The subclasses inherit every route and the constructor's
+injection, so they need no constructor of their own.
 
-### 2. `decorators`
+### Migrating from the production boot refusal
 
-To keep the routes this module mounts and gate them with the official tools, pass `decorators` — class decorators applied to **every** controller the console mounts (default: none):
+A console mounted with no `decorators` in production no longer refuses to boot. It boots, answers
+403 to every request, and logs the warning above. `decorators` no longer count as protection. Set
+`authorize`.
+
+**Before**
 
 ```ts
-import { AuthenticationGuard } from '@nestjs/authentication';
-import { Can } from '@nestjs/authorization';
-import { UseGuards } from '@nestjs/common';
-
 MediaDashboardModule.forRoot({
   decorators: [UseGuards(AuthenticationGuard), Can(MediaPolicy, 'console')],
 });
 ```
 
-A `Can(...)` passed here is still checked by the official guard (it treats `can-anyone` as open only when no requirement is declared): a guest gets 401, a user the policy denies 403. Each registration decorates fresh subclasses of the controllers, so decorators never leak from one registration into another.
+**After**
 
-<Callout type="warn">
-  The guard fronts BOTH the page (a full-page `GET` to `basePath`) and the JSON API (the SPA's `fetch` calls, which send cookies with `credentials: 'same-origin'`). A full-page navigation carries only **cookies**, never an `Authorization` header — an authentication strategy that only reads a bearer token will 401 every browser visit to the console. Authenticate the console from a cookie.
-</Callout>
+```ts
+MediaDashboardModule.forRoot({
+  decorators: [UseGuards(AuthenticationGuard)],
+  authorize: { policy: MediaPolicy, ability: 'console' },
+});
+```
 
+A self-mounted console (`routes: false`) that used `@Can(MediaPolicy, 'console')` on its own
+controllers keeps working as it is. To have `authorize` decide instead, apply
+`ConsoleAuthorizeGuard` and `ConsoleAuthorizeFilter` as shown above.
 
 ## Previews
 
@@ -342,7 +474,7 @@ MediaDashboardModule.forRoot({
 
 ## The typed browser client (`/client` subpath)
 
-`@dudousxd/nestjs-media-dashboard/client` is a **pure-types + tiny-runtime** entry, safe to import into any browser bundle — it carries no NestJS. It exports `mediaConsoleClient`, a typed wrapper over every endpoint above (it sends cookies via `credentials: 'same-origin'`, so whatever protects the routes sees the page's session), plus every response type. This is what the bundled SPA uses, and what you'd import to build your own admin screen against the same API:
+`@dudousxd/nestjs-media-dashboard/client` is a **pure-types + tiny-runtime** entry, safe to import into any browser bundle — it carries no NestJS. It exports `mediaConsoleClient`, a typed wrapper over every endpoint above (it sends cookies via `credentials: 'same-origin'`, so `authorize` sees the page's session), plus every response type. This is what the bundled SPA uses, and what you'd import to build your own admin screen against the same API:
 
 ```ts
 import {
@@ -361,7 +493,7 @@ await mediaConsoleClient.moveObject('s3', 'a/x.jpg', 's3', 'b/x.jpg');
 await mediaConsoleClient.uploadObject('s3', 'imports/data.csv', file); // raw bytes, MIME preserved
 ```
 
-It also carries a few browser-only conveniences the raw API doesn't: `objectRawUrl(disk, key)` (a same-origin inline URL to embed a preview a signed cross-origin URL would force-download), `objectTextHead(disk, key, maxBytes)` (sample the head of a large text file without pulling it all down), `objectBytes(disk, key)` (fetch raw bytes for binary previews), and `objectRange(disk, key, start, end)` (fetch one byte range — `end` inclusive). `objectRange` throws if the server answers `200` instead of `206`: a proxy that strips the `Range` header would otherwise stream the entire object into what the caller believes is a 64 KB page. `MediaConsoleClient` is the type of the whole client object, handy for wrapping or mocking it.
+It also carries a few browser-only conveniences the raw API doesn't: `objectRawUrl(disk, key)` (a same-origin inline URL to embed a preview a signed cross-origin URL would force-download), `objectTextHead(disk, key, maxBytes)` (sample the head of a large text file without pulling it all down), `objectBytes(disk, key)` (fetch raw bytes for binary previews), and `objectRange(disk, key, start, end)` (fetch one byte range — `end` inclusive). A 401 or 403 from the API throws a `ConsoleAccessError` (`status`, `redirectTo`) and is reported to `onConsoleAccessDenied(listener)`; a 401 with `redirectTo` also sends the browser there. `objectRange` throws if the server answers `200` instead of `206`: a proxy that strips the `Range` header would otherwise stream the entire object into what the caller believes is a 64 KB page. `MediaConsoleClient` is the type of the whole client object, handy for wrapping or mocking it.
 
 By default it fetches from `/media/api`; the UI controller injects the real base at runtime via `window.__MEDIA_API__` / `window.__MEDIA_BASE__`, so a non-default `apiBasePath` is picked up automatically.
 
@@ -373,8 +505,8 @@ By default it fetches from `/media/api`; the UI controller injects the real base
 import { MediaConsoleApiModule } from '@dudousxd/nestjs-media-dashboard';
 ```
 
-Its `register()` takes the same building blocks `MediaDashboardModule` feeds it — `actions`, `objectUrls`, `decorators`, `routes` and `imports` — and exports `MediaConsoleService`. The same [production rule](#protecting-the-routes) applies to it. Prefer `MediaDashboardModule.forRoot`/`forRootAsync` unless you specifically need to own the mount.
+Its `register()` takes the same building blocks `MediaDashboardModule` feeds it — `actions`, `objectUrls`, `authorize`, `decorators`, `routes` and `imports` — and exports `MediaConsoleService`. [Access](#access) works the same way, and the boot warning names `MediaConsoleApiModule.register()`. Prefer `MediaDashboardModule.forRoot`/`forRootAsync` unless you specifically need to own the mount.
 
 ## Peer dependencies
 
-`@dudousxd/nestjs-media-core`, `@nestjs/storage` (`>=0.0.5 <0.1.0`), `@nestjs/common` / `@nestjs/core` (^12.1), and `rxjs`. The bundled SPA ships its own React copy — no extra frontend install needed.
+`@dudousxd/nestjs-media-core`, `@nestjs/storage` (`>=0.0.5 <0.1.0`), `@nestjs/common` / `@nestjs/core` (^12.1), and `rxjs`. `@nestjs/authorization` (`>=0.1.3 <0.2.0`) is optional: only the `{ policy, ability }` form of `authorize` needs it. The bundled SPA ships its own React copy — no extra frontend install needed.

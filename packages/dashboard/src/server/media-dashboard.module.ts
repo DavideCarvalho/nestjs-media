@@ -6,7 +6,8 @@ import {
 } from '@nestjs/common';
 import type { InjectionToken } from '@nestjs/common';
 import { RouterModule } from '@nestjs/core';
-import { assertRoutesProtected, decoratedController } from './controller-decorators.js';
+import type { ConsoleAuthorize } from './console-authorize.js';
+import { consoleController } from './controller-decorators.js';
 import { MediaConsoleApiModule } from './media-console-api.module.js';
 import { MediaDashboardUiController } from './media-dashboard-ui.controller.js';
 import type { ObjectInsightProvider } from './object-insights.js';
@@ -59,6 +60,30 @@ export interface MediaDashboardOptions {
    */
   objectInsights?: ObjectInsightProvider[];
   /**
+   * Who may use the console: decided on EVERY console request (the page, its assets and the JSON
+   * API) by a guard that runs after your `decorators`, so your authentication guards set
+   * `request.user` first. Five forms:
+   *
+   * ```ts
+   * authorize: (ctx) => ctx.switchToHttp().getRequest().user?.isAdmin === true,
+   * authorize: ConsoleAccess,                              // @Injectable() implements ConsoleAuthorizer
+   * authorize: () => import('./console-access.js'),        // lazy, default export
+   * authorize: { policy: ConsolePolicy, ability: 'view' }, // @nestjs/authorization policy
+   * authorize: 'console.media',                            // a gate from @dudousxd/nestjs-authz
+   * ```
+   *
+   * Answer `true`/`{ allowed: true }` to allow, `false`/`{ allowed: false }` for 403,
+   * `{ allowed: false, reason: 'unauthenticated' }` for 401, or `{ redirectTo: '/login' }` to send a
+   * page navigation there (API calls get 401 with `redirectTo`). A throw is a 403.
+   *
+   * Omitted: open outside production; in production every request answers 403, and one warning is
+   * logged at boot.
+   *
+   * This is the console's access. It is not `MediaModule`'s `authorize(user, action, subject)` hook,
+   * which governs the product upload routes.
+   */
+  authorize?: ConsoleAuthorize;
+  /**
    * Class decorators applied to EVERY controller the console mounts — the page/asset controller
    * and the read and action APIs — e.g.
    * `[UseGuards(AuthenticationGuard), Can(MediaPolicy, 'console')]` with the first-party
@@ -69,8 +94,8 @@ export interface MediaDashboardOptions {
    * passed here is still checked (the guard treats `can-anyone` as open only when no requirement is
    * declared).
    *
-   * In production (`NODE_ENV === 'production'`) a registration that mounts the console with no
-   * `decorators` refuses to boot — protect it here, or mount it yourself with `routes: false`.
+   * `decorators` don't decide access on their own: use them for authentication, throttling and the
+   * like, and {@link authorize} for who may use the console.
    *
    * Full-page navigations to `basePath` carry only cookies, never an `Authorization` header — a
    * guard here must be able to authenticate the page from a cookie, or every browser visit 401s.
@@ -82,12 +107,13 @@ export interface MediaDashboardOptions {
   /**
    * `false` mounts NO controller — no page, no JSON API — while every provider still works and is
    * exported (`MediaConsoleService`, the resolved paths), so you serve
-   * the console from controllers of your own, protected with ordinary Nest decorators, by extending
-   * the exported controller classes. Keep `basePath`/`apiBasePath` equal to where you mount them:
-   * the SPA reads both.
+   * the console from controllers of your own by extending the exported controller classes. Apply
+   * `ConsoleAuthorizeGuard` and `ConsoleAuthorizeFilter` to them so {@link authorize} still decides
+   * access. Keep `basePath`/`apiBasePath` equal to where you mount them: the SPA reads both.
    *
    * ```ts
-   * @Can(MediaPolicy, 'console')
+   * @UseGuards(ConsoleAuthorizeGuard)
+   * @UseFilters(ConsoleAuthorizeFilter)
    * @Controller('media/api')
    * export class ConsoleApiController extends MediaConsoleReadController {}
    * ```
@@ -126,6 +152,8 @@ export interface MediaDashboardAsyncOptions {
    * shape the routes when the module is built.
    */
   decorators?: ClassDecorator[];
+  /** See {@link MediaDashboardOptions.authorize}. Static, like `decorators`. */
+  authorize?: ConsoleAuthorize;
   /** See {@link MediaDashboardOptions.routes}. Static, like `decorators`. */
   routes?: boolean;
 }
@@ -141,8 +169,8 @@ function normalize(path: string): string {
  * the `objectInsights` providers need injected services) alongside `MediaModule` (global), so it
  * resolves the storage/store/upload tokens. Exclude the UI/API paths from any global `/api` prefix.
  *
- * Protect it with {@link MediaDashboardOptions.decorators}, or mount it yourself with
- * `routes: false` — in production one of the two is required.
+ * Decide who may use it with {@link MediaDashboardOptions.authorize}; without it the console is open
+ * outside production and answers 403 to everything in production.
  */
 @Module({})
 export class MediaDashboardModule {
@@ -171,6 +199,7 @@ export class MediaDashboardModule {
       actions?: boolean;
       objectUrls?: ObjectUrlStrategy;
       imports?: DynamicModule['imports'];
+      authorize?: ConsoleAuthorize;
       decorators?: ClassDecorator[];
       routes?: boolean;
     },
@@ -180,15 +209,6 @@ export class MediaDashboardModule {
     const apiBasePath = normalize(options.apiBasePath ?? `${basePath}/api`);
     const actions = options.actions === true;
     const mount = options.routes !== false;
-    assertRoutesProtected({
-      module: name,
-      mountsRoutes: mount,
-      decorators: options.decorators,
-      decoratorsExample:
-        "MediaDashboardModule.forRoot({ decorators: [UseGuards(AuthenticationGuard), Can(MediaPolicy, 'console')] })",
-      selfMountExample:
-        "MediaDashboardModule.forRoot({ routes: false }) + @Can(MediaPolicy, 'console') @Controller('media/api') class ConsoleApiController extends MediaConsoleReadController {}",
-    });
     const imports = options.imports;
     return {
       module: MediaDashboardModule,
@@ -199,6 +219,8 @@ export class MediaDashboardModule {
           objectUrls: { strategy: options.objectUrls ?? 'auto', apiBasePath },
           insightsProvider,
           imports,
+          ...(options.authorize !== undefined ? { authorize: options.authorize } : {}),
+          moduleName: name,
           ...(options.decorators ? { decorators: options.decorators } : {}),
           routes: mount,
         }),
@@ -211,9 +233,7 @@ export class MediaDashboardModule {
             ]
           : []),
       ],
-      controllers: mount
-        ? [decoratedController(MediaDashboardUiController, options.decorators)]
-        : [],
+      controllers: mount ? [consoleController(MediaDashboardUiController, options.decorators)] : [],
       providers: [
         { provide: MEDIA_DASHBOARD_BASE_PATH, useValue: basePath },
         { provide: MEDIA_DASHBOARD_API_PATH, useValue: apiBasePath },
