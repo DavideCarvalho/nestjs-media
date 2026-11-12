@@ -184,8 +184,18 @@ describe('mediaDevTools', () => {
     const { tool } = await setup();
     const list = (await tool('media_list_uploads').run({})) as { items: { id: string }[] };
     expect(list.items.map((u) => u.id)).toEqual(['m1', 'm2']);
-    const limited = (await tool('media_list_uploads').run({ limit: 1 })) as { items: unknown[] };
-    expect(limited.items).toHaveLength(1);
+    const limited = (await tool('media_list_uploads').run({ limit: 1 })) as {
+      items: { id: string }[];
+      next: string | null;
+    };
+    expect(limited.items.map((u) => u.id)).toEqual(['m1']);
+    expect(limited.next).toBe('1');
+    const second = (await tool('media_list_uploads').run({ limit: 1, cursor: limited.next })) as {
+      items: { id: string }[];
+      next: string | null;
+    };
+    expect(second.items.map((u) => u.id)).toEqual(['m2']);
+    expect(second.next).toBeNull();
     const detail = (await tool('media_get_upload').run({ id: 'm1' })) as {
       upload: { id: string; percent: number };
     };
@@ -246,6 +256,33 @@ describe('mediaDevTools', () => {
     await expect(tool('media_delete_objects').run({ disk: 'local', keys: many })).rejects.toThrow(
       /at most 100/,
     );
+  });
+
+  it('media_delete_objects reports partial progress when a key fails mid-list', async () => {
+    const { tool, disk } = await setup({ actions: true });
+    const original = MediaConsoleService.prototype.deleteObject;
+    const spy = vi
+      .spyOn(MediaConsoleService.prototype, 'deleteObject')
+      .mockImplementation(async function (this: MediaConsoleService, name, key) {
+        if (key === 'docs/b.txt') throw new Error('storage said 500');
+        return original.call(this, name, key);
+      });
+    try {
+      expect(
+        await tool('media_delete_objects').run({
+          disk: 'local',
+          keys: ['a.txt', 'docs/b.txt', 'docs/c.txt'],
+        }),
+      ).toEqual({
+        deleted: ['a.txt'],
+        failed: { key: 'docs/b.txt', error: expect.stringContaining('storage said 500') },
+        skipped: ['docs/c.txt'],
+      });
+      expect(await disk.exists('a.txt')).toBe(false);
+      expect(await disk.exists('docs/c.txt')).toBe(true);
+    } finally {
+      spy.mockRestore();
+    }
   });
 });
 

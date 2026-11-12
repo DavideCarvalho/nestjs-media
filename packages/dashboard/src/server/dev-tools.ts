@@ -233,12 +233,13 @@ export function mediaDevTools(
       name: 'media_list_uploads',
       kind: 'read',
       description:
-        'Resumable upload sessions in progress: id, disk, key, offset, size, percent, parts. Filters: disk, prefix (key prefix). Returns { items, next }.',
+        'Resumable upload sessions in progress: id, disk, key, offset, size, percent, parts. Filters: disk, prefix (key prefix). Returns { items, next }; pass `next` back as `cursor` for the following page.',
       input: {
         type: 'object',
         properties: {
           disk,
           prefix: { type: 'string', description: 'Key prefix.' },
+          cursor: { type: 'string', description: 'The `next` of the previous page.' },
           limit,
         },
       },
@@ -246,7 +247,12 @@ export function mediaDevTools(
         const { uploads } = await service.listUploads(
           given({ disk: str(input.disk), prefix: str(input.prefix) }),
         );
-        return { items: uploads.slice(0, limitOf(input)), next: null };
+        const start = Math.max(0, Number.parseInt(str(input.cursor) ?? '0', 10) || 0);
+        const end = start + limitOf(input);
+        return {
+          items: uploads.slice(start, end),
+          next: end < uploads.length ? String(end) : null,
+        };
       },
     },
     {
@@ -344,7 +350,7 @@ export function mediaDevTools(
       name: 'media_delete_objects',
       kind: 'action',
       destructive: true,
-      description: `Deletes objects from a disk by key, at most ${MAX_DELETE_KEYS} per call. Returns { deleted } with the keys deleted. An error when the disk does not exist.`,
+      description: `Deletes objects from a disk by key, at most ${MAX_DELETE_KEYS} per call. Returns { deleted } with the keys deleted. Stops at the first key that fails and returns { deleted, failed: { key, error }, skipped } so you know exactly what was applied. An error when the disk does not exist.`,
       input: {
         type: 'object',
         properties: {
@@ -368,11 +374,21 @@ export function mediaDevTools(
           throw new Error(`"keys" lists ${keys.length} keys; at most ${MAX_DELETE_KEYS} per call`);
         }
         const deleted: string[] = [];
-        for (const key of keys) {
-          await call(
-            () => `disk "${name}"`,
-            () => service.deleteObject(name, key),
-          );
+        for (const [index, key] of keys.entries()) {
+          try {
+            await call(
+              () => `disk "${name}"`,
+              () => service.deleteObject(name, key),
+            );
+          } catch (error) {
+            // An unknown disk fails before anything is deleted: keep that an error.
+            if (deleted.length === 0 && index === 0) throw error;
+            return {
+              deleted,
+              failed: { key, error: error instanceof Error ? error.message : String(error) },
+              skipped: keys.slice(index + 1),
+            };
+          }
           deleted.push(key);
         }
         return { deleted };
