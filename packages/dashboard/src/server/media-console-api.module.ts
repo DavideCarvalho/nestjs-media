@@ -1,12 +1,15 @@
 import { type DynamicModule, Module, type ModuleMetadata, type Provider } from '@nestjs/common';
-import { type ConsoleAuthorize, consoleAuthorizeProvider } from './console-authorize.js';
+import {
+  CONSOLE_AUTHORIZE_DECIDE,
+  type ConsoleAuthorize,
+  consoleAuthorizeProvider,
+} from './console-authorize.js';
 import { consoleController } from './controller-decorators.js';
 import { MediaConsoleActionsController } from './media-console-actions.controller.js';
 import { MediaConsoleReadController } from './media-console-read.controller.js';
 import { MediaConsoleService } from './media-console.service.js';
 import type { ObjectUrlConfig } from './object-urls.js';
 import {
-  MEDIA_CONSOLE_AUTHORIZE,
   MEDIA_CONSOLE_OBJECT_INSIGHTS,
   MEDIA_CONSOLE_OBJECT_URLS,
   MEDIA_DASHBOARD_ACTIONS,
@@ -27,7 +30,7 @@ export interface MediaConsoleApiModuleOptions {
    */
   authorize?: ConsoleAuthorize;
   /** The registration named in the boot warning when `authorize` is omitted. Default
-   *  `'MediaConsoleApiModule.register'`. */
+   *  `'MediaConsoleApiModule.register()'`. */
   moduleName?: string;
   /**
    * Class decorators applied to EVERY controller this module mounts (read, actions) — see
@@ -65,7 +68,7 @@ export class MediaConsoleApiModule {
         MediaConsoleService,
         consoleAuthorizeProvider(
           options.authorize,
-          options.moduleName ?? 'MediaConsoleApiModule.register',
+          options.moduleName ?? 'MediaConsoleApiModule.register()',
         ),
         { provide: MEDIA_DASHBOARD_ACTIONS, useValue: options.actions },
         { provide: MEDIA_CONSOLE_OBJECT_URLS, useValue: options.objectUrls },
@@ -76,7 +79,7 @@ export class MediaConsoleApiModule {
       ],
       // For a host mounting the controllers itself (`routes: false`): its subclasses inject these, and
       // `ConsoleAuthorizeGuard` injects the resolved `authorize` check.
-      exports: [MediaConsoleService, MEDIA_DASHBOARD_ACTIONS, MEDIA_CONSOLE_AUTHORIZE],
+      exports: [MediaConsoleService, MEDIA_DASHBOARD_ACTIONS, CONSOLE_AUTHORIZE_DECIDE],
     };
   }
 }

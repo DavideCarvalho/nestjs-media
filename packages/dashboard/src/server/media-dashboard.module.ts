@@ -108,12 +108,13 @@ export interface MediaDashboardOptions {
    * `false` mounts NO controller — no page, no JSON API — while every provider still works and is
    * exported (`MediaConsoleService`, the resolved paths), so you serve
    * the console from controllers of your own by extending the exported controller classes. Apply
-   * `ConsoleAuthorizeGuard` and `ConsoleAuthorizeFilter` to them so {@link authorize} still decides
-   * access. Keep `basePath`/`apiBasePath` equal to where you mount them: the SPA reads both.
+   * `UseConsoleAuthorize()` to them, ABOVE your authentication guard (class decorators apply
+   * bottom-up, so authentication runs first), so {@link authorize} still decides access. Keep
+   * `basePath`/`apiBasePath` equal to where you mount them: the SPA reads both.
    *
    * ```ts
-   * @UseGuards(ConsoleAuthorizeGuard)
-   * @UseFilters(ConsoleAuthorizeFilter)
+   * @UseConsoleAuthorize()
+   * @UseGuards(AuthGuard)
    * @Controller('media/api')
    * export class ConsoleApiController extends MediaConsoleReadController {}
    * ```
@@ -175,14 +176,14 @@ function normalize(path: string): string {
 @Module({})
 export class MediaDashboardModule {
   static forRoot(options: MediaDashboardOptions = {}): DynamicModule {
-    return MediaDashboardModule.build('MediaDashboardModule.forRoot', options, {
+    return MediaDashboardModule.build('MediaDashboardModule.forRoot()', options, {
       provide: MEDIA_CONSOLE_OBJECT_INSIGHTS,
       useValue: options.objectInsights ?? [],
     });
   }
 
   static forRootAsync(options: MediaDashboardAsyncOptions = {}): DynamicModule {
-    return MediaDashboardModule.build('MediaDashboardModule.forRootAsync', options, {
+    return MediaDashboardModule.build('MediaDashboardModule.forRootAsync()', options, {
       provide: MEDIA_CONSOLE_OBJECT_INSIGHTS,
       inject: options.inject ?? [],
       useFactory: async (...deps: any[]) =>

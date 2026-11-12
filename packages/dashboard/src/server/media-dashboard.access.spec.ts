@@ -13,19 +13,17 @@ import {
   Injectable,
   Logger,
   Module,
-  UseFilters,
   UseGuards,
 } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
-  ConsoleAuthorizeFilter,
-  ConsoleAuthorizeGuard,
   type ConsoleAuthorizeResult,
   type ConsoleAuthorizer,
   MediaConsoleApiModule,
   MediaConsoleReadController,
   MediaDashboardModule,
+  UseConsoleAuthorize,
   authorizeByToken,
 } from './index.js';
 
@@ -136,6 +134,23 @@ describe('authorize', () => {
     expect(await res.text()).toContain('Access denied');
   });
 
+  it('an unauthenticated page navigation gets a 401 "Sign in required" page; the API keeps JSON', async () => {
+    const url = await boot(
+      MediaDashboardModule.forRoot({
+        decorators: [UseGuards(FakeAuthGuard)],
+        authorize: byRole({ allowed: false, reason: 'unauthenticated' }),
+      }),
+    );
+    const nav = await fetch(`${url}/media`, page());
+    expect(nav.status).toBe(401);
+    expect(nav.headers.get('content-type')).toContain('text/html');
+    expect(await nav.text()).toContain('Sign in required');
+
+    const call = await fetch(`${url}/media/api/disks`, page());
+    expect(call.status).toBe(401);
+    expect(await call.json()).toEqual({ error: 'unauthenticated' });
+  });
+
   it('redirectTo: 302 for a page navigation, 401 JSON with redirectTo for the API', async () => {
     const url = await boot(
       MediaDashboardModule.forRoot({
@@ -211,9 +226,11 @@ describe('authorize', () => {
     expect((await fetch(`${url}/disks`, api())).status).toBe(403);
   });
 
-  it('routes: false — the exported guard and filter protect a self-mounted controller', async () => {
-    @UseGuards(FakeAuthGuard, ConsoleAuthorizeGuard)
-    @UseFilters(ConsoleAuthorizeFilter)
+  it('routes: false: UseConsoleAuthorize() above the app auth guard protects a self-mounted controller', async () => {
+    // Class decorators apply bottom-up: UseGuards(FakeAuthGuard) is registered first, so it runs
+    // first and sets request.user before the console guard decides.
+    @UseConsoleAuthorize()
+    @UseGuards(FakeAuthGuard)
     @Controller('mine/api')
     class MyConsoleApi extends MediaConsoleReadController {}
 
@@ -225,7 +242,9 @@ describe('authorize', () => {
       { controllers: [MyConsoleApi as never] },
     );
     expect((await fetch(`${url}/mine/api/disks`, api('admin'))).status).toBe(200);
-    expect((await fetch(`${url}/mine/api/disks`, api('viewer'))).status).toBe(403);
+    const forbidden = await fetch(`${url}/mine/api/disks`, api('viewer'));
+    expect(forbidden.status).toBe(403);
+    expect(await forbidden.json()).toEqual({ error: 'forbidden' });
     expect((await fetch(`${url}/mine/api/disks`, api())).status).toBe(401);
     expect((await fetch(`${url}/media/api/disks`, api('admin'))).status).toBe(404);
   });
@@ -292,6 +311,19 @@ describe('authorize omitted', () => {
         expect(warnings).toEqual([[WARNING.replace('MediaDashboardModule.forRoot', module)]]);
       });
     }
+
+    it('routes: false: the warning is still logged once and the exported guard answers 403', async () => {
+      const warn = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+      @UseConsoleAuthorize()
+      @Controller('mine/api')
+      class MyConsoleApi extends MediaConsoleReadController {}
+
+      const url = await boot(MediaDashboardModule.forRoot({ routes: false }), {
+        controllers: [MyConsoleApi as never],
+      });
+      expect((await fetch(`${url}/mine/api/disks`, api('admin'))).status).toBe(403);
+      expect(warn.mock.calls.filter(([m]) => m === WARNING)).toHaveLength(1);
+    });
 
     it('with authorize, production serves normally', async () => {
       const url = await boot(MediaDashboardModule.forRoot({ authorize: () => true }));

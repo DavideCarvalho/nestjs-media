@@ -116,8 +116,10 @@ export default class ConsoleAccess implements ConsoleAuthorizer {
 }
 ```
 
-The policy form needs `@nestjs/authorization` installed (an optional peer). It reads the user with
-`AuthorizationModule`'s `getUser` (default: `request.user`). The gate-name form needs
+The policy form needs `@nestjs/authorization` installed (an optional peer) and
+`AuthorizationModule.forRoot()` imported in the app; without either, the app fails at boot and says
+so. It reads the user with `AuthorizationModule`'s `getUser` (default: `request.user`); `null`,
+`false` or no user is a guest, so a denial is a 401 instead of a 403. The gate-name form needs
 `@dudousxd/nestjs-authz`'s `AuthzModule`; without it the app fails at boot and says so. The authz
 package also exports `authorizeByRoles({ roles })` and `authorizeByPermission(permission)`.
 
@@ -127,7 +129,7 @@ package also exports `authorizeByRoles({ roles })` and `authorizeByPermission(pe
 |---|---|---|
 | `true` / `{ allowed: true }` | allowed | allowed |
 | `false` / `{ allowed: false }` | 403 `{ "error": "forbidden" }` | 403 "Access denied" page |
-| `{ allowed: false, reason: 'unauthenticated' }` | 401 `{ "error": "unauthenticated" }` | 401 |
+| `{ allowed: false, reason: 'unauthenticated' }` | 401 `{ "error": "unauthenticated" }` | 401 "Sign in required" page |
 | `{ redirectTo: '/login' }` | 401 `{ "error": "unauthenticated", "redirectTo": "/login" }` | 302 to `/login` |
 | a throw | 403 (logged at `warn`) | 403 |
 
@@ -192,33 +194,34 @@ decides. A `Can(...)` you pass in `decorators` is still checked.
 
 `routes: false` registers **no** console controller. Every provider keeps working and is exported
 (`MediaConsoleService`, the resolved paths and the resolved `authorize`). Serve the console by
-extending the exported controllers, and apply `ConsoleAuthorizeGuard` and `ConsoleAuthorizeFilter`
-so `authorize` still decides access. Put your authentication guard first. Keep `basePath`/`apiBasePath`
-equal to where you mount them, since the SPA reads both:
+extending the exported controllers and apply `UseConsoleAuthorize()` so `authorize` still decides
+access. Keep `basePath`/`apiBasePath` equal to where you mount them, since the SPA reads both.
+
+List `@UseConsoleAuthorize()` **above** your authentication guard. Nest applies class decorators
+bottom-up, so the guard listed lower runs first and sets `request.user` before `authorize` decides.
 
 ```ts
-import { Controller, Module, UseFilters, UseGuards } from '@nestjs/common';
+import { Controller, Module, UseGuards } from '@nestjs/common';
 import {
-  ConsoleAuthorizeFilter,
-  ConsoleAuthorizeGuard,
   MediaConsoleActionsController,
   MediaConsoleReadController,
   MediaDashboardModule,
   MediaDashboardUiController,
+  UseConsoleAuthorize,
 } from '@dudousxd/nestjs-media-dashboard';
 
-@UseGuards(AuthenticationGuard, ConsoleAuthorizeGuard)
-@UseFilters(ConsoleAuthorizeFilter)
+@UseConsoleAuthorize()
+@UseGuards(AuthenticationGuard)
 @Controller('media')
 export class ConsolePageController extends MediaDashboardUiController {}
 
-@UseGuards(AuthenticationGuard, ConsoleAuthorizeGuard)
-@UseFilters(ConsoleAuthorizeFilter)
+@UseConsoleAuthorize()
+@UseGuards(AuthenticationGuard)
 @Controller('media/api')
 export class ConsoleApiController extends MediaConsoleReadController {}
 
-@UseGuards(AuthenticationGuard, ConsoleAuthorizeGuard)
-@UseFilters(ConsoleAuthorizeFilter)
+@UseConsoleAuthorize()
+@UseGuards(AuthenticationGuard)
 @Controller('media/api')
 export class ConsoleActionsController extends MediaConsoleActionsController {} // only with `actions: true`
 
@@ -236,9 +239,10 @@ export class ConsoleActionsController extends MediaConsoleActionsController {} /
 export class AppModule {}
 ```
 
-The guard answers the JSON denials on its own. The filter adds the page behaviour: the 302 for
-`redirectTo` and the "Access denied" page. The subclasses inherit every route and the constructor's
-injection, so they need no constructor of their own.
+`UseConsoleAuthorize()` applies `ConsoleAuthorizeGuard` and `ConsoleAuthorizeFilter` together: the
+JSON denials, the 302 for `redirectTo`, and the "Access denied" and "Sign in required" pages. The
+subclasses inherit every route and the constructor's injection, so they need no constructor of their
+own. Without `authorize`, the boot warning and the production 403 apply here too.
 
 ### Migrating from the production boot refusal
 
@@ -265,7 +269,7 @@ MediaDashboardModule.forRoot({
 
 A self-mounted console (`routes: false`) that used `@Can(MediaPolicy, 'console')` on its own
 controllers keeps working as it is. To have `authorize` decide instead, apply
-`ConsoleAuthorizeGuard` and `ConsoleAuthorizeFilter` as shown above.
+`UseConsoleAuthorize()` as shown above.
 
 ## Previews
 

@@ -1,6 +1,6 @@
 import 'reflect-metadata';
-import { type Type, UseFilters, UseGuards } from '@nestjs/common';
-import { ConsoleAuthorizeFilter, ConsoleAuthorizeGuard } from './console-authorize.js';
+import type { Type } from '@nestjs/common';
+import { UseConsoleAuthorize } from './console-authorize.js';
 
 /**
  * `@nestjs/authorization`'s `CAN_ANYONE_METADATA` key (what `@Can.Anyone()` writes), inlined as a
@@ -41,9 +41,6 @@ export function consoleController<T extends Type>(
   Object.defineProperty(Decorated, 'name', { value: controller.name });
   // `Reflect.decorate` applies the list bottom-up, like stacked `@A @B class` decorators.
   if (decorators && decorators.length > 0) Reflect.decorate(decorators, Decorated);
-  Reflect.decorate(
-    [UseGuards(ConsoleAuthorizeGuard), UseFilters(ConsoleAuthorizeFilter)],
-    Decorated,
-  );
+  Reflect.decorate([UseConsoleAuthorize()], Decorated);
   return Decorated;
 }

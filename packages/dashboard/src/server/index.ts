@@ -15,12 +15,20 @@ export {
   type ConsoleAuthorizerClass,
   type ConsolePolicyCheck,
   type ConsoleDecision,
-  type ConsoleAuthorizeCheck,
+  type ConsoleDecide,
+  type ConsoleGate,
+  CONSOLE_GATE,
+  CONSOLE_AUTHORIZE_DECIDE,
+  CONSOLE_AUTHORIZE_MISSING_WARNING,
+  CONSOLE_PAGE_METADATA,
+  ConsolePage,
+  normalizeConsoleResult,
   authorizeByToken,
   resolveConsoleAuthorize,
   ConsoleAuthorizeGuard,
   ConsoleAuthorizeFilter,
-  ConsoleAccessDeniedException,
+  ConsoleAccessDenied,
+  UseConsoleAuthorize,
 } from './console-authorize.js';
 export type { ObjectUrlConfig, ObjectUrlStrategy } from './object-urls.js';
 export { MediaConsoleService } from './media-console.service.js';
@@ -29,7 +37,6 @@ export { MediaDashboardUiController } from './media-dashboard-ui.controller.js';
 export { MediaConsoleReadController } from './media-console-read.controller.js';
 export { MediaConsoleActionsController } from './media-console-actions.controller.js';
 export {
-  MEDIA_CONSOLE_AUTHORIZE,
   MEDIA_MULTIPART,
   MEDIA_STORE,
   MEDIA_UPLOAD_SESSIONS,

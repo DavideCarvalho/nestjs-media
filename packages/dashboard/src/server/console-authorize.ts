@@ -11,9 +11,11 @@ import {
   Injectable,
   Logger,
   type Type,
+  UseFilters,
+  UseGuards,
+  applyDecorators,
 } from '@nestjs/common';
 import { HttpAdapterHost, ModuleRef } from '@nestjs/core';
-import { MEDIA_CONSOLE_AUTHORIZE } from './tokens.js';
 
 // ── The contract (same names and shapes in every Aviary console) ─────────────────────────────────
 
@@ -49,12 +51,35 @@ export type ConsoleDecision =
 /** The provider `@dudousxd/nestjs-authz`'s `AuthzModule` registers to resolve gate names. */
 export const CONSOLE_GATE: symbol = Symbol.for('@dudousxd/aviary:console-gate');
 
-interface ConsoleGate {
+/** What `@dudousxd/nestjs-authz` provides under {@link CONSOLE_GATE}. */
+export interface ConsoleGate {
   allows(name: string, context: ExecutionContext): Promise<ConsoleAuthorizeResult>;
 }
 
-const logger = new Logger('MediaDashboardModule');
-const FORBIDDEN: ConsoleDecision = { allowed: false, reason: 'forbidden' };
+/** What a resolved `authorize` is: called once per request, never throws. */
+export type ConsoleDecide = (context: ExecutionContext) => Promise<ConsoleDecision>;
+
+const PACKAGE = '@dudousxd/nestjs-media-dashboard';
+const MODULE = 'MediaDashboardModule';
+
+/** The one boot warning for a console with no `authorize`. Same wording in every Aviary console. */
+export const CONSOLE_AUTHORIZE_MISSING_WARNING = consoleAuthorizeMissingWarning(
+  `${MODULE}.forRoot()`,
+);
+
+/** The boot warning naming the registration (`MediaConsoleApiModule.register()` when used alone). */
+export function consoleAuthorizeMissingWarning(registration: string): string {
+  return `[${PACKAGE}] console has no \`authorize\` configured: it is open outside production and denies every request in production. Set \`authorize\` in ${registration}.`;
+}
+
+// Every decision is a fresh object: a caller may mutate what it gets back.
+const allow = (): ConsoleDecision => ({ allowed: true });
+const forbidden = (): ConsoleDecision => ({ allowed: false, reason: 'forbidden' });
+const unauthenticated = (): ConsoleDecision => ({ allowed: false, reason: 'unauthenticated' });
+
+function isProduction(): boolean {
+  return (process.env.NODE_ENV ?? '').trim().toLowerCase() === 'production';
+}
 
 function isAuthorizerClass(value: unknown): value is ConsoleAuthorizerClass {
   return (
@@ -72,261 +97,325 @@ function isPolicyCheck(value: unknown): value is ConsolePolicyCheck {
   );
 }
 
+function isLazyModule(value: unknown): value is { default: ConsoleAuthorizerClass } {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    isAuthorizerClass((value as { default?: unknown }).default)
+  );
+}
+
 /** Turns any {@link ConsoleAuthorizeResult} into a {@link ConsoleDecision}. */
-export function normalizeConsoleDecision(result: unknown): ConsoleDecision {
-  if (result === true) return { allowed: true };
-  if (typeof result === 'object' && result !== null) {
-    const r = result as { allowed?: unknown; reason?: unknown; redirectTo?: unknown };
-    if (typeof r.redirectTo === 'string') {
-      return { allowed: false, reason: 'unauthenticated', redirectTo: r.redirectTo };
-    }
-    if (r.allowed === true) return { allowed: true };
-    if (r.allowed === false && r.reason === 'unauthenticated') {
-      return { allowed: false, reason: 'unauthenticated' };
-    }
+export function normalizeConsoleResult(result: unknown): ConsoleDecision {
+  if (result === true) return allow();
+  if (typeof result !== 'object' || result === null) return forbidden();
+  const shape = result as { allowed?: unknown; reason?: unknown; redirectTo?: unknown };
+  if (typeof shape.redirectTo === 'string' && shape.allowed !== true) {
+    return { allowed: false, reason: 'unauthenticated', redirectTo: shape.redirectTo };
   }
-  return FORBIDDEN;
+  if (shape.allowed === true) return allow();
+  return shape.reason === 'unauthenticated' ? unauthenticated() : forbidden();
+}
+
+/** `null`, `undefined` and `false` mean "nobody signed in", like `@nestjs/authorization`'s guard. */
+function hasUser(user: unknown): boolean {
+  return user !== null && user !== undefined && user !== false;
 }
 
 /** A dynamic import the bundler leaves alone, so the optional peer is never statically required. */
 const importOptional = (specifier: string): Promise<Record<string, unknown>> =>
   import(/* @vite-ignore */ specifier);
 
+async function policyDecider(
+  check: ConsolePolicyCheck,
+  moduleRef: ModuleRef,
+): Promise<ConsoleDecide> {
+  let pkg: Record<string, unknown>;
+  try {
+    pkg = await importOptional('@nestjs/authorization');
+  } catch {
+    throw new Error(
+      '`authorize: { policy, ability }` needs @nestjs/authorization installed (npm i @nestjs/authorization); or pass a function, a class, or a gate name',
+    );
+  }
+  type Service = { can(policy: Type<unknown>, ability: string, user: unknown): Promise<boolean> };
+  let service: Service | undefined;
+  try {
+    service = moduleRef.get<Service>(pkg.AuthorizationService as Type<Service>, { strict: false });
+  } catch {
+    service = undefined;
+  }
+  if (!service) {
+    throw new Error(
+      '`authorize: { policy, ability }` needs AuthorizationModule.forRoot() from @nestjs/authorization imported in the app',
+    );
+  }
+  const found = service;
+  const defaultGetUser = pkg.defaultGetUser as (context: ExecutionContext) => unknown;
+  let getUser = defaultGetUser;
+  try {
+    const options = moduleRef.get<{ getUser?: typeof getUser } | undefined>(
+      pkg.AUTHORIZATION_MODULE_OPTIONS as string,
+      { strict: false },
+    );
+    if (typeof options?.getUser === 'function') getUser = options.getUser;
+  } catch {
+    // No module options registered: `defaultGetUser` reads `request.user`.
+  }
+  const { policy, ability } = check;
+  return async (context) => {
+    // `null`, `false` and `undefined` are a guest, as for `@nestjs/authorization`'s own guard.
+    const user = await getUser(context);
+    const signedIn = hasUser(user);
+    if (await found.can(policy, ability, signedIn ? user : null)) return allow();
+    return signedIn ? forbidden() : unauthenticated();
+  };
+}
+
+function gateDecider(name: string, moduleRef: ModuleRef): ConsoleDecide {
+  let gate: ConsoleGate | undefined;
+  try {
+    gate = moduleRef.get<ConsoleGate>(CONSOLE_GATE, { strict: false });
+  } catch {
+    gate = undefined;
+  }
+  if (!gate) {
+    throw new Error(
+      `\`authorize: '${name}'\` needs @dudousxd/nestjs-authz's AuthzModule (it resolves gate names); or pass a function, a class, or { policy, ability }`,
+    );
+  }
+  const found = gate;
+  return async (context) => normalizeConsoleResult(await found.allows(name, context));
+}
+
+function classDecider(moduleRef: ModuleRef): (Class: ConsoleAuthorizerClass) => ConsoleDecide {
+  const instances = new Map<ConsoleAuthorizerClass, Promise<ConsoleAuthorizer>>();
+  const instanceOf = (Class: ConsoleAuthorizerClass): Promise<ConsoleAuthorizer> => {
+    const cached = instances.get(Class);
+    if (cached) return cached;
+    const pending = (async (): Promise<ConsoleAuthorizer> => {
+      try {
+        // A registered provider is used as is; otherwise one instance per registration.
+        const registered = moduleRef.get(Class, { strict: false });
+        if (registered) return registered;
+      } catch {
+        // Not a provider: create it below.
+      }
+      return moduleRef.create(Class);
+    })();
+    // A failed construction is retried on the next request instead of denying forever.
+    pending.catch(() => instances.delete(Class));
+    instances.set(Class, pending);
+    return pending;
+  };
+  return (Class) => async (context) =>
+    normalizeConsoleResult(await (await instanceOf(Class)).authorize(context));
+}
+
 /**
- * Resolves `authorize` once, at module init, into a per-request check that never throws (a throw
- * inside it is a `forbidden` denial). A gate name with no gate provider, or a policy check without
- * `@nestjs/authorization` installed, throws here, at boot.
+ * Resolves `authorize` into one function the guard calls per request. Configuration mistakes (a gate
+ * name without nestjs-authz, a policy without @nestjs/authorization and its module) throw here, so
+ * call it at boot. The returned function never throws: an error is a `forbidden`.
+ *
+ * `authorize` omitted: open outside production, `forbidden` for every request in production, and one
+ * warning logged (unless `warnIfMissing: false`).
  */
 export async function resolveConsoleAuthorize(
-  authorize: ConsoleAuthorize,
+  authorize: ConsoleAuthorize | undefined,
   moduleRef: ModuleRef,
-): Promise<(context: ExecutionContext) => Promise<ConsoleDecision>> {
-  const guarded =
-    (run: (context: ExecutionContext) => Promise<unknown>) =>
-    async (context: ExecutionContext): Promise<ConsoleDecision> => {
-      try {
-        return normalizeConsoleDecision(await run(context));
-      } catch (error) {
-        logger.warn(
-          `console \`authorize\` threw, so the request is denied: ${error instanceof Error ? error.message : String(error)}`,
-        );
-        return FORBIDDEN;
-      }
-    };
+  options: { logger?: Logger; warnIfMissing?: boolean; registration?: string } = {},
+): Promise<ConsoleDecide> {
+  const logger = options.logger ?? new Logger(MODULE);
+  if (authorize === undefined) {
+    if (options.warnIfMissing !== false) {
+      logger.warn(
+        options.registration
+          ? consoleAuthorizeMissingWarning(options.registration)
+          : CONSOLE_AUTHORIZE_MISSING_WARNING,
+      );
+    }
+    const production = isProduction();
+    return async () => (production ? forbidden() : allow());
+  }
 
+  let decide: ConsoleDecide;
   if (typeof authorize === 'string') {
-    let gate: ConsoleGate | undefined;
-    try {
-      gate = moduleRef.get<ConsoleGate>(CONSOLE_GATE, { strict: false });
-    } catch {
-      gate = undefined;
-    }
-    if (!gate) {
-      throw new Error(
-        `\`authorize: '${authorize}'\` needs @dudousxd/nestjs-authz's AuthzModule (it resolves gate names); or pass a function, a class, or { policy, ability }`,
-      );
-    }
-    const found = gate;
-    return guarded((context) => found.allows(authorize, context));
-  }
-
-  if (isPolicyCheck(authorize)) {
-    let pkg: Record<string, unknown>;
-    try {
-      pkg = await importOptional('@nestjs/authorization');
-    } catch {
-      throw new Error(
-        '`authorize: { policy, ability }` needs @nestjs/authorization installed (npm i @nestjs/authorization); or pass a function, a class, or a gate name',
-      );
-    }
-    const service = moduleRef.get(pkg.AuthorizationService as Type, { strict: false }) as {
-      can(policy: Type<unknown>, ability: string, user: unknown): Promise<boolean>;
+    decide = gateDecider(authorize, moduleRef);
+  } else if (isPolicyCheck(authorize)) {
+    decide = await policyDecider(authorize, moduleRef);
+  } else if (isAuthorizerClass(authorize)) {
+    decide = classDecider(moduleRef)(authorize);
+  } else if (typeof authorize === 'function') {
+    const fromClass = classDecider(moduleRef);
+    let lazy: ConsoleDecide | undefined;
+    const fn = authorize as (context: ExecutionContext) => unknown;
+    decide = async (context) => {
+      if (lazy) return lazy(context);
+      const result = await fn(context);
+      if (!isLazyModule(result)) return normalizeConsoleResult(result);
+      // A lazy import: remember the class, so the import runs once per registration.
+      lazy = fromClass(result.default);
+      return lazy(context);
     };
-    let getUser = pkg.defaultGetUser as (context: ExecutionContext) => unknown;
+  } else {
+    throw new Error(
+      `${MODULE}: \`authorize\` must be a function, a class with authorize(), a lazy import, { policy, ability } or a gate name.`,
+    );
+  }
+
+  return async (context) => {
     try {
-      const options = moduleRef.get<{ getUser?: typeof getUser } | undefined>(
-        pkg.AUTHORIZATION_MODULE_OPTIONS as string,
-        { strict: false },
+      return await decide(context);
+    } catch (error) {
+      logger.warn(
+        `console \`authorize\` threw, denying the request: ${error instanceof Error ? error.message : String(error)}`,
       );
-      if (options?.getUser) getUser = options.getUser;
-    } catch {
-      // No module options registered: `defaultGetUser` reads `request.user`.
+      return forbidden();
     }
-    const { policy, ability } = authorize;
-    return guarded(async (context) => {
-      const user = await getUser(context);
-      if (await service.can(policy, ability, user)) return true;
-      const anonymous = user === null || user === undefined || user === false;
-      return { allowed: false, reason: anonymous ? 'unauthenticated' : 'forbidden' };
-    });
-  }
-
-  let instance: ConsoleAuthorizer | undefined;
-  const instanceOf = async (Class: ConsoleAuthorizerClass): Promise<ConsoleAuthorizer> => {
-    if (instance) return instance;
-    try {
-      instance = moduleRef.get(Class, { strict: false });
-    } catch {
-      instance = undefined;
-    }
-    instance ??= await moduleRef.create(Class);
-    return instance;
   };
-
-  if (isAuthorizerClass(authorize)) {
-    return guarded(async (context) => (await instanceOf(authorize)).authorize(context));
-  }
-
-  const fn = authorize as (context: ExecutionContext) => unknown;
-  let lazyClass: ConsoleAuthorizerClass | undefined;
-  return guarded(async (context) => {
-    if (lazyClass) return (await instanceOf(lazyClass)).authorize(context);
-    const result = await fn(context);
-    const loaded = (result as { default?: unknown } | null | undefined)?.default;
-    if (typeof result === 'object' && result !== null && isAuthorizerClass(loaded)) {
-      lazyClass = loaded;
-      return (await instanceOf(loaded)).authorize(context);
-    }
-    return result;
-  });
 }
+
+const sha256 = (value: string): Buffer => createHash('sha256').update(value).digest();
 
 /**
- * `authorize` from a shared token: allows when `Authorization: Bearer <token>` matches (timing-safe),
- * otherwise answers `unauthenticated`. The header only — no query string, no custom header.
+ * Allows a request carrying `Authorization: Bearer <token>` (compared timing-safe); anything else
+ * is `unauthenticated`. Header only: no query string, no custom header. Throws when `token` is
+ * empty, so a missing env var fails at config time instead of opening the console.
  */
-export function authorizeByToken(options: { token: string | undefined }): (
-  context: ExecutionContext,
-) => ConsoleAuthorizeResult {
+export function authorizeByToken(options: { token: string | undefined }): ConsoleAuthorize {
   const token = options.token;
   if (typeof token !== 'string' || token.length === 0) {
-    throw new Error('authorizeByToken({ token }) needs a non-empty token');
+    throw new Error('authorizeByToken: `token` is empty; set it (e.g. from an env var).');
   }
-  const expected = createHash('sha256').update(token).digest();
-  return (context) => {
+  const expected = sha256(token);
+  return (context: ExecutionContext): ConsoleAuthorizeResult => {
     const header = context.switchToHttp().getRequest<{ headers?: Record<string, unknown> }>()
-      .headers?.authorization;
+      ?.headers?.authorization;
     const match = typeof header === 'string' ? /^Bearer\s+(.+)$/i.exec(header.trim()) : null;
-    if (!match) return { allowed: false, reason: 'unauthenticated' };
-    const given = createHash('sha256')
-      .update(match[1] as string)
-      .digest();
-    return timingSafeEqual(given, expected)
-      ? { allowed: true }
-      : { allowed: false, reason: 'unauthenticated' };
+    if (match?.[1] && timingSafeEqual(sha256(match[1]), expected)) return true;
+    return { allowed: false, reason: 'unauthenticated' };
   };
 }
 
-// ── Enforcement ──────────────────────────────────────────────────────────────────────────────────
+// ── Enforcement: a guard (decides) + a filter scoped to the console controllers (answers) ─────────
 
-/** The per-registration check the guard runs, bound to {@link MEDIA_CONSOLE_AUTHORIZE}. */
-export type ConsoleAuthorizeCheck = (context: ExecutionContext) => Promise<ConsoleDecision>;
+/** DI token of the resolved {@link ConsoleDecide} the guard runs. */
+export const CONSOLE_AUTHORIZE_DECIDE: symbol = Symbol(`${PACKAGE}:console-authorize`);
 
-/** Marks a controller whose GET routes are page navigations (the SPA shell). */
-export const CONSOLE_PAGE_METADATA = 'media-console:page';
+/** Marks a controller as serving pages: a denied `GET` that accepts HTML gets a page, not JSON. */
+export const CONSOLE_PAGE_METADATA = `${PACKAGE}:console-page`;
+export const ConsolePage = (): ClassDecorator => (target) => {
+  Reflect.defineMetadata(CONSOLE_PAGE_METADATA, true, target);
+};
 
-/** A console denial; its response body is the JSON every API caller gets. */
-export class ConsoleAccessDeniedException extends HttpException {
+/**
+ * The denial the guard throws. An `HttpException` with the JSON body, so it still answers correctly
+ * where {@link ConsoleAuthorizeFilter} is not applied; the filter adds the page answers.
+ */
+export class ConsoleAccessDenied extends HttpException {
   constructor(
     readonly decision: Extract<ConsoleDecision, { allowed: false }>,
     /** Whether the denied request was a page navigation (answered with a redirect or a page). */
     readonly page = false,
   ) {
+    const isUnauthenticated = decision.reason === 'unauthenticated';
     super(
-      decision.reason === 'unauthenticated'
+      isUnauthenticated
         ? {
             error: 'unauthenticated',
             ...(decision.redirectTo ? { redirectTo: decision.redirectTo } : {}),
           }
         : { error: 'forbidden' },
-      decision.reason === 'unauthenticated' ? 401 : 403,
+      isUnauthenticated ? 401 : 403,
     );
   }
 }
 
 /**
  * Runs the console's `authorize` on every request to a console controller. The dashboard applies it
- * (after your `decorators`, so your authentication guards set `request.user` first); apply it
- * yourself, with {@link ConsoleAuthorizeFilter}, on controllers you mount with `routes: false`.
+ * (after your `decorators`, so your authentication guards set `request.user` first); on controllers
+ * you mount yourself (`routes: false`) apply {@link UseConsoleAuthorize}.
  */
 @Injectable()
 export class ConsoleAuthorizeGuard implements CanActivate {
-  constructor(@Inject(MEDIA_CONSOLE_AUTHORIZE) private readonly check: ConsoleAuthorizeCheck) {}
+  constructor(@Inject(CONSOLE_AUTHORIZE_DECIDE) private readonly decide: ConsoleDecide) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
-    const decision = await this.check(context);
+    const decision = await this.decide(context);
     if (decision.allowed) return true;
-    throw new ConsoleAccessDeniedException(decision, isPageNavigation(context));
+    throw new ConsoleAccessDenied(decision, isPageNavigation(context));
   }
 }
 
-const DENIED_PAGE = `<!doctype html><html><head><meta charset="utf-8"><title>Access denied</title></head><body style="font-family:system-ui,sans-serif;display:grid;place-items:center;min-height:100vh;margin:0"><main style="text-align:center"><h1>Access denied</h1><p>You don't have access to the media console.</p></main></body></html>`;
+/** A `GET` asking for HTML on a console page controller: a browser navigation, not an API call. */
+function isPageNavigation(context: ExecutionContext): boolean {
+  if (context.getType() !== 'http') return false;
+  if (Reflect.getMetadata(CONSOLE_PAGE_METADATA, context.getClass()) !== true) return false;
+  const request = context
+    .switchToHttp()
+    .getRequest<{ method?: string; headers?: Record<string, unknown> }>();
+  const accept = request?.headers?.accept;
+  return request?.method === 'GET' && typeof accept === 'string' && accept.includes('text/html');
+}
+
+const page = (title: string, message: string): string =>
+  `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${title}</title></head><body style="font-family:system-ui,sans-serif;display:grid;place-items:center;min-height:100vh;margin:0"><main style="text-align:center"><h1>${title}</h1><p>${message}</p></main></body></html>`;
+
+const DENIED_PAGE = page('Access denied', 'You do not have access to this console.');
+const SIGN_IN_PAGE = page('Sign in required', 'Sign in to use this console.');
 
 /**
- * Answers a console denial: JSON for API calls; for a page navigation (`GET` with `Accept: text/html`
- * on the console page) a 302 to `redirectTo`, or an "Access denied" page.
+ * Answers a console denial: JSON for API calls; for a page navigation a 302 to `redirectTo`, an
+ * "Access denied" page (403) or a "Sign in required" page (401).
  */
-@Catch(ConsoleAccessDeniedException)
+@Catch(ConsoleAccessDenied)
 export class ConsoleAuthorizeFilter implements ExceptionFilter {
   constructor(@Inject(HttpAdapterHost) private readonly adapterHost: HttpAdapterHost) {}
 
-  catch(exception: ConsoleAccessDeniedException, host: ArgumentsHost): void {
-    const response = host.switchToHttp().getResponse();
+  catch(exception: ConsoleAccessDenied, host: ArgumentsHost): void {
     const adapter = this.adapterHost.httpAdapter;
+    const response = host.switchToHttp().getResponse();
     const { decision, page: isPage } = exception;
     if (isPage && decision.redirectTo) {
       adapter.redirect(response, 302, decision.redirectTo);
       return;
     }
-    if (isPage && decision.reason === 'forbidden') {
+    if (isPage) {
+      const unauthenticated = decision.reason === 'unauthenticated';
       adapter.setHeader(response, 'Content-Type', 'text/html; charset=utf-8');
-      adapter.reply(response, DENIED_PAGE, 403);
+      adapter.reply(
+        response,
+        unauthenticated ? SIGN_IN_PAGE : DENIED_PAGE,
+        unauthenticated ? 401 : 403,
+      );
       return;
     }
     adapter.reply(response, exception.getResponse(), exception.getStatus());
   }
 }
 
-/** A `GET` asking for HTML on the console page controller — a browser navigation, not an API call. */
-function isPageNavigation(context: ExecutionContext): boolean {
-  if (context.getType() !== 'http') return false;
-  const request = context
-    .switchToHttp()
-    .getRequest<{ method?: string; headers?: Record<string, unknown> }>();
-  const accept = request.headers?.accept;
-  return (
-    request.method === 'GET' &&
-    typeof accept === 'string' &&
-    accept.includes('text/html') &&
-    Reflect.getMetadata(CONSOLE_PAGE_METADATA, context.getClass()) === true
-  );
-}
-
-/** The boot warning for a console with no `authorize`. */
-export const NO_AUTHORIZE_WARNING = (module: string): string =>
-  `[@dudousxd/nestjs-media-dashboard] console has no \`authorize\` configured: it is open outside production and denies every request in production. Set \`authorize\` in ${module}().`;
+/**
+ * The guard and its filter as one class decorator, for a console you mount yourself
+ * (`routes: false`). List it ABOVE your authentication guards, so it runs after them.
+ */
+export const UseConsoleAuthorize = (): ClassDecorator & MethodDecorator =>
+  applyDecorators(UseGuards(ConsoleAuthorizeGuard), UseFilters(ConsoleAuthorizeFilter));
 
 /**
- * The provider of {@link MEDIA_CONSOLE_AUTHORIZE} for one registration. With `authorize`, its resolved
- * check; without, open outside production and `forbidden` in production, with one boot warning.
+ * The provider of {@link CONSOLE_AUTHORIZE_DECIDE} for one registration: `authorize` resolved at boot
+ * (one warning when it is omitted, whether or not the routes are mounted).
  */
 export function consoleAuthorizeProvider(
   authorize: ConsoleAuthorize | undefined,
-  module: string,
+  registration: string,
 ): {
   provide: symbol;
   inject: [typeof ModuleRef];
-  useFactory: (moduleRef: ModuleRef) => Promise<ConsoleAuthorizeCheck>;
+  useFactory: (moduleRef: ModuleRef) => Promise<ConsoleDecide>;
 } {
   return {
-    provide: MEDIA_CONSOLE_AUTHORIZE,
+    provide: CONSOLE_AUTHORIZE_DECIDE,
     inject: [ModuleRef],
-    useFactory: async (moduleRef) => {
-      if (authorize !== undefined) return resolveConsoleAuthorize(authorize, moduleRef);
-      logger.warn(NO_AUTHORIZE_WARNING(module));
-      const decision: ConsoleDecision =
-        process.env.NODE_ENV === 'production' ? FORBIDDEN : { allowed: true };
-      return async () => decision;
-    },
+    useFactory: (moduleRef) => resolveConsoleAuthorize(authorize, moduleRef, { registration }),
   };
 }

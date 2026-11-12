@@ -24,6 +24,3 @@ export const MEDIA_CONSOLE_OBJECT_INSIGHTS: symbol = Symbol('MEDIA_CONSOLE_OBJEC
 /** Carries the resolved `ObjectUrlConfig` (`options.objectUrls` + the API mount) to the console
  *  service, which decides from it whether an object's `url` is presigned or same-origin. */
 export const MEDIA_CONSOLE_OBJECT_URLS: symbol = Symbol('MEDIA_CONSOLE_OBJECT_URLS');
-
-/** Carries one registration's resolved console `authorize` check to `ConsoleAuthorizeGuard`. */
-export const MEDIA_CONSOLE_AUTHORIZE: symbol = Symbol('MEDIA_CONSOLE_AUTHORIZE');

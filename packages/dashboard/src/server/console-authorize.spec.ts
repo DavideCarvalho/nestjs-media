@@ -5,10 +5,11 @@ import { ModuleRef } from '@nestjs/core';
 import { Test } from '@nestjs/testing';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
+  CONSOLE_AUTHORIZE_MISSING_WARNING,
   type ConsoleAuthorize,
   type ConsoleAuthorizer,
   authorizeByToken,
-  normalizeConsoleDecision,
+  normalizeConsoleResult,
   resolveConsoleAuthorize,
 } from './console-authorize.js';
 
@@ -57,7 +58,7 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe('normalizeConsoleDecision', () => {
+describe('normalizeConsoleResult', () => {
   it.each([
     [true, { allowed: true }],
     [{ allowed: true }, { allowed: true }],
@@ -75,11 +76,49 @@ describe('normalizeConsoleDecision', () => {
     [undefined, { allowed: false, reason: 'forbidden' }],
     ['yes', { allowed: false, reason: 'forbidden' }],
   ])('%j → %j', (result, decision) => {
-    expect(normalizeConsoleDecision(result)).toEqual(decision);
+    expect(normalizeConsoleResult(result)).toEqual(decision);
+  });
+
+  it('returns a fresh object every time (no shared denial singleton)', () => {
+    for (const result of [true, false, { allowed: false, reason: 'unauthenticated' }]) {
+      const first = normalizeConsoleResult(result);
+      const second = normalizeConsoleResult(result);
+      expect(first).toEqual(second);
+      expect(first).not.toBe(second);
+    }
   });
 });
 
 describe('resolveConsoleAuthorize', () => {
+  describe('omitted', () => {
+    const env = process.env.NODE_ENV;
+    afterEach(() => {
+      process.env.NODE_ENV = env;
+    });
+
+    it('open outside production, warning once with the exact text', async () => {
+      process.env.NODE_ENV = 'development';
+      const warn = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+      const check = await resolveConsoleAuthorize(undefined, await moduleRefWith());
+      expect(await check(ctx())).toEqual({ allowed: true });
+      expect(await check(ctx())).toEqual({ allowed: true });
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(warn).toHaveBeenCalledWith(
+        '[@dudousxd/nestjs-media-dashboard] console has no `authorize` configured: it is open outside production and denies every request in production. Set `authorize` in MediaDashboardModule.forRoot().',
+      );
+      expect(CONSOLE_AUTHORIZE_MISSING_WARNING).toBe(warn.mock.calls[0]?.[0]);
+    });
+
+    it('forbidden in production, a fresh object per request', async () => {
+      process.env.NODE_ENV = 'production';
+      vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+      const check = await resolveConsoleAuthorize(undefined, await moduleRefWith());
+      const first = await check(ctx());
+      expect(first).toEqual({ allowed: false, reason: 'forbidden' });
+      expect(await check(ctx())).not.toBe(first);
+    });
+  });
+
   it('inline function: called with the context', async () => {
     const check = await resolveConsoleAuthorize(
       (c) => c.switchToHttp().getRequest<{ user?: { admin: boolean } }>().user?.admin === true,
@@ -238,16 +277,50 @@ describe('resolveConsoleAuthorize', () => {
       expect(await check(ctx({ headers: { 'x-role': 'admin' } }))).toEqual({ allowed: true });
       expect(await check(ctx())).toEqual({ allowed: false, reason: 'unauthenticated' });
     });
+
+    it('a null or false user is a guest: the policy sees null, the denial is unauthenticated', async () => {
+      const seen: unknown[] = [];
+      @Policy()
+      class Recording {
+        view(user: unknown): boolean {
+          seen.push(user);
+          return false;
+        }
+      }
+      const moduleRef = await moduleRefWith(
+        [],
+        [AuthorizationModule.forRoot({ policies: [Recording], globalGuard: false })],
+      );
+      const check = await resolveConsoleAuthorize(
+        { policy: Recording, ability: 'view' },
+        moduleRef,
+      );
+      expect(await check(ctx({ user: null }))).toEqual({
+        allowed: false,
+        reason: 'unauthenticated',
+      });
+      expect(await check(ctx({ user: false }))).toEqual({
+        allowed: false,
+        reason: 'unauthenticated',
+      });
+      expect(seen).toEqual([null, null]);
+    });
+
+    it('without AuthorizationModule imported, fails at boot with a tailored message', async () => {
+      await expect(
+        resolveConsoleAuthorize({ policy: ConsolePolicy, ability: 'view' }, await moduleRefWith()),
+      ).rejects.toThrow(
+        '`authorize: { policy, ability }` needs AuthorizationModule.forRoot() from @nestjs/authorization imported in the app',
+      );
+    });
   });
 });
 
 describe('authorizeByToken', () => {
-  const byToken = authorizeByToken({ token: 's3cret' });
+  const byToken = authorizeByToken({ token: 's3cret' }) as (c: ExecutionContext) => unknown;
 
   it('allows a matching Bearer header', () => {
-    expect(byToken(ctx({ headers: { authorization: 'Bearer s3cret' } }))).toEqual({
-      allowed: true,
-    });
+    expect(byToken(ctx({ headers: { authorization: 'Bearer s3cret' } }))).toBe(true);
   });
 
   it('a mismatch, a missing header, or another scheme is unauthenticated', () => {
@@ -270,12 +343,14 @@ describe('authorizeByToken', () => {
   });
 
   it('an empty or missing token throws at config time', () => {
-    expect(() => authorizeByToken({ token: '' })).toThrow(/non-empty token/);
-    expect(() => authorizeByToken({ token: undefined })).toThrow(/non-empty token/);
+    expect(() => authorizeByToken({ token: '' })).toThrow('authorizeByToken: `token` is empty');
+    expect(() => authorizeByToken({ token: undefined })).toThrow(
+      'authorizeByToken: `token` is empty',
+    );
   });
 
   it('is a ConsoleAuthorize', async () => {
-    const authorize: ConsoleAuthorize = byToken;
+    const authorize: ConsoleAuthorize = authorizeByToken({ token: 's3cret' });
     const check = await resolveConsoleAuthorize(authorize, await moduleRefWith());
     expect(await check(ctx({ headers: { authorization: 'Bearer s3cret' } }))).toEqual({
       allowed: true,

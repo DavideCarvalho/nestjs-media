@@ -8,10 +8,9 @@ import {
   Inject,
   NotFoundException,
   Param,
-  SetMetadata,
   StreamableFile,
 } from '@nestjs/common';
-import { CONSOLE_PAGE_METADATA } from './console-authorize.js';
+import { ConsolePage } from './console-authorize.js';
 import { OpenToAuthorization } from './controller-decorators.js';
 import { MEDIA_DASHBOARD_API_PATH, MEDIA_DASHBOARD_BASE_PATH } from './tokens.js';
 
@@ -41,7 +40,7 @@ const CONTENT_TYPES: Record<string, string> = {
 // Open to `@nestjs/authorization`'s deny-by-default guard; the console's `authorize` decides access.
 // Marked as the page controller: a denied browser navigation here gets a redirect or a page, not JSON.
 @OpenToAuthorization()
-@SetMetadata(CONSOLE_PAGE_METADATA, true)
+@ConsolePage()
 @Controller()
 export class MediaDashboardUiController {
   private readonly dir = spaDir();
