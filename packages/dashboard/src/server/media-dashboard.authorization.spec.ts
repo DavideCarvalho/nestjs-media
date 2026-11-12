@@ -1,7 +1,8 @@
 import { InMemoryDisk, StorageModule } from '@nestjs/storage';
 // End-to-end against the REAL first-party `@nestjs/authorization`, whose `AuthorizationModule.forRoot()`
 // registers a deny-by-default global `AuthorizationGuard`. Every console controller is marked
-// `can-anyone`-open; hosts decide who reaches it with `decorators: [Can(...)]`.
+// `can-anyone`-open, so the official guard lets it through; a `Can(...)` passed in `decorators` is
+// still checked. (Who may use the console is `authorize` — see media-dashboard.access.spec.ts.)
 import 'reflect-metadata';
 import { AuthorizationModule, Can, Policy } from '@nestjs/authorization';
 import { type DynamicModule, Global, Module } from '@nestjs/common';

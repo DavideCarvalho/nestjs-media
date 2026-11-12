@@ -36,9 +36,53 @@ function withQuery(path: string, params: Record<string, string | number | undefi
   return query ? `${path}?${query}` : path;
 }
 
+/** A console denial from the API: 403 (`forbidden`) or 401 (`unauthenticated`, maybe with `redirectTo`). */
+export class ConsoleAccessError extends Error {
+  constructor(
+    readonly status: 401 | 403,
+    readonly redirectTo?: string,
+  ) {
+    super(status === 403 ? 'Access denied' : 'Sign-in required');
+    this.name = 'ConsoleAccessError';
+  }
+}
+
+type AccessListener = (error: ConsoleAccessError) => void;
+const accessListeners = new Set<AccessListener>();
+
+/** Called on every console denial the client sees; returns an unsubscribe. The SPA uses it to show
+ *  its access-denied state. */
+export function onConsoleAccessDenied(listener: AccessListener): () => void {
+  accessListeners.add(listener);
+  return () => accessListeners.delete(listener);
+}
+
+/**
+ * Throws for a non-2xx response. A 401 carrying `redirectTo` sends the browser there (the app's
+ * sign-in); a 401/403 is reported as a {@link ConsoleAccessError} to {@link onConsoleAccessDenied}.
+ */
+async function ensureOk(response: Response): Promise<void> {
+  if (response.ok) return;
+  if (response.status === 401 || response.status === 403) {
+    let redirectTo: string | undefined;
+    if (response.status === 401) {
+      const body = (await response
+        .clone()
+        .json()
+        .catch(() => undefined)) as { redirectTo?: unknown } | undefined;
+      if (typeof body?.redirectTo === 'string') redirectTo = body.redirectTo;
+    }
+    const error = new ConsoleAccessError(response.status, redirectTo);
+    if (redirectTo && typeof window !== 'undefined') window.location.assign(redirectTo);
+    for (const listener of accessListeners) listener(error);
+    throw error;
+  }
+  throw new Error(`${response.status} ${response.statusText}`);
+}
+
 async function getJson<T>(path: string): Promise<T> {
   const response = await fetch(`${apiBase()}${path}`, { credentials: 'same-origin' });
-  if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
+  await ensureOk(response);
   return response.json();
 }
 
@@ -54,7 +98,7 @@ async function send(
       ? { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }
       : {}),
   });
-  if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
+  await ensureOk(response);
 }
 
 /** POST raw bytes as `application/octet-stream` (a file upload) — the host's JSON parser leaves the
@@ -66,7 +110,7 @@ async function sendRaw(path: string, body: Blob): Promise<void> {
     headers: { 'Content-Type': 'application/octet-stream' },
     body,
   });
-  if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
+  await ensureOk(response);
 }
 
 /** Typed browser client for the /media console JSON API. Rides ambient cookies to whatever protects the routes. */
@@ -106,7 +150,7 @@ export const mediaConsoleClient = {
     const response = await fetch(mediaConsoleClient.objectRawUrl(disk, key), {
       credentials: 'same-origin',
     });
-    if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
+    await ensureOk(response);
     if (!response.body) {
       const text = await response.text();
       return { text, bytesRead: text.length };
@@ -158,7 +202,7 @@ export const mediaConsoleClient = {
         `Ranged read of "${key}" was answered 200 (full body) instead of 206 — the Range header was dropped between this page and the disk.`,
       );
     }
-    if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
+    await ensureOk(response);
     return new Uint8Array(await response.arrayBuffer());
   },
   /** Fetch an object's raw bytes (for binary previews like XLSX) through the inline proxy. */
@@ -166,7 +210,7 @@ export const mediaConsoleClient = {
     const response = await fetch(mediaConsoleClient.objectRawUrl(disk, key), {
       credentials: 'same-origin',
     });
-    if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
+    await ensureOk(response);
     return response.arrayBuffer();
   },
   uploads: (params: { disk?: string; prefix?: string } = {}): Promise<UploadListResponse> =>

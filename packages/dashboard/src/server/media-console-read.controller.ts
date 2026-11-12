@@ -35,8 +35,7 @@ function toLimit(value: string | undefined): number | undefined {
  * Read-only JSON API for the /media console. Bare `@Controller()` — the path prefix is applied by
  * `RouterModule` (set in `MediaDashboardModule.forRoot({ apiBasePath })`). Always mounted.
  */
-// Open to `@nestjs/authorization`'s deny-by-default guard; the host's `decorators` (or its own
-// subclass, with `routes: false`) decide access.
+// Open to `@nestjs/authorization`'s deny-by-default guard; the console's `authorize` decides access.
 @OpenToAuthorization()
 @Controller()
 export class MediaConsoleReadController {

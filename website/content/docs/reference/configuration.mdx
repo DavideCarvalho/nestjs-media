@@ -64,12 +64,14 @@ interface MediaModuleOptions {
 
 ## Protecting the routes
 
-The upload controllers (and the [`/media` console](/docs/packages/dashboard#protecting-the-routes)) have no auth of their own. Protect them with NestJS's first-party tools, one of two ways:
+The upload controllers have no auth of their own. Protect them with NestJS's first-party tools, one of two ways:
 
 1. **Mount them yourself**: `routes: false`, then extend the exported controllers — `@Can(MediaPolicy, 'upload') @Controller('media/uploads') class UploadsController extends MediaUploadController {}`.
 2. **`decorators`** on the mounted controllers — `MediaModule.forRoot({ ..., decorators: [UseGuards(AuthenticationGuard), Can(MediaPolicy, 'upload')] })`.
 
-**Production rule:** when `NODE_ENV === 'production'`, `MediaModule.forRoot`/`forRootAsync` and `MediaDashboardModule.forRoot`/`forRootAsync` throw at module definition if they mount routes with no `decorators` (an empty array counts as none), with an error naming both ways. Outside production undecorated routes mount open.
+**Production rule:** when `NODE_ENV === 'production'`, `MediaModule.forRoot`/`forRootAsync` throw at module definition if they mount upload routes with no `decorators` (an empty array counts as none), with an error naming both ways. Outside production undecorated routes mount open.
+
+The `/media` console is different: it takes an `authorize` option on `MediaDashboardModule` and never refuses to boot. See [the console's Access section](/docs/packages/dashboard#access).
 
 ## `MediaModule.forRootAsync(options)`
 

@@ -29,8 +29,7 @@ interface CreateFolderBody {
  * `MediaDashboardModule.forRoot({ actions: true })` (default off). Bare `@Controller()` — the path
  * prefix comes from `RouterModule`, sharing the API base with the read controller.
  */
-// Open to `@nestjs/authorization`'s deny-by-default guard; the host's `decorators` (or its own
-// subclass, with `routes: false`) decide access.
+// Open to `@nestjs/authorization`'s deny-by-default guard; the console's `authorize` decides access.
 @OpenToAuthorization()
 @Controller()
 export class MediaConsoleActionsController {

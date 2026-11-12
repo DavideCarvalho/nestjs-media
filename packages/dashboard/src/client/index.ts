@@ -1,2 +1,8 @@
 export * from './types.js';
-export { apiBase, mediaConsoleClient, type MediaConsoleClient } from './media-console-client.js';
+export {
+  apiBase,
+  ConsoleAccessError,
+  mediaConsoleClient,
+  onConsoleAccessDenied,
+  type MediaConsoleClient,
+} from './media-console-client.js';

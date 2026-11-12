@@ -10,6 +10,7 @@ import {
   Param,
   StreamableFile,
 } from '@nestjs/common';
+import { ConsolePage } from './console-authorize.js';
 import { OpenToAuthorization } from './controller-decorators.js';
 import { MEDIA_DASHBOARD_API_PATH, MEDIA_DASHBOARD_BASE_PATH } from './tokens.js';
 
@@ -36,9 +37,10 @@ const CONTENT_TYPES: Record<string, string> = {
  * The path comes from `RouterModule` (set by `MediaDashboardModule.forRoot({ basePath })`), so the
  * controller routes are relative.
  */
-// Open to `@nestjs/authorization`'s deny-by-default guard; the host's `decorators` (or its own
-// subclass, with `routes: false`) decide access.
+// Open to `@nestjs/authorization`'s deny-by-default guard; the console's `authorize` decides access.
+// Marked as the page controller: a denied browser navigation here gets a redirect or a page, not JSON.
 @OpenToAuthorization()
+@ConsolePage()
 @Controller()
 export class MediaDashboardUiController {
   private readonly dir = spaDir();

@@ -1,5 +1,10 @@
 import { type DynamicModule, Module, type ModuleMetadata, type Provider } from '@nestjs/common';
-import { assertRoutesProtected, decoratedController } from './controller-decorators.js';
+import {
+  CONSOLE_AUTHORIZE_DECIDE,
+  type ConsoleAuthorize,
+  consoleAuthorizeProvider,
+} from './console-authorize.js';
+import { consoleController } from './controller-decorators.js';
 import { MediaConsoleActionsController } from './media-console-actions.controller.js';
 import { MediaConsoleReadController } from './media-console-read.controller.js';
 import { MediaConsoleService } from './media-console.service.js';
@@ -10,7 +15,7 @@ import {
   MEDIA_DASHBOARD_ACTIONS,
 } from './tokens.js';
 
-interface ApiModuleOptions {
+export interface MediaConsoleApiModuleOptions {
   actions: boolean;
   /** Provider for `MEDIA_CONSOLE_OBJECT_INSIGHTS` — the host's object-annotation providers.
    *  Omitted binds the empty list, which is the no-op the console renders nothing for. */
@@ -19,6 +24,14 @@ interface ApiModuleOptions {
   objectUrls: ObjectUrlConfig;
   /** Extra imports the insights factory's `inject` deps (or a decorator's guards' deps) live in. */
   imports?: ModuleMetadata['imports'];
+  /**
+   * Who may use the console API — see `MediaDashboardOptions.authorize`. Omitted: open outside
+   * production, every request answers 403 in production, and one warning is logged at boot.
+   */
+  authorize?: ConsoleAuthorize;
+  /** The registration named in the boot warning when `authorize` is omitted. Default
+   *  `'MediaConsoleApiModule.register()'`. */
+  moduleName?: string;
   /**
    * Class decorators applied to EVERY controller this module mounts (read, actions) — see
    * `MediaDashboardOptions.decorators`. Each call decorates fresh subclasses, never the shared
@@ -34,20 +47,11 @@ interface ApiModuleOptions {
 
 /**
  * Holds the console's JSON API: the read controller (always) and the actions controller (only when
- * `actions: true`). Who reaches them is the host's call — `decorators`, or its own controllers.
+ * `actions: true`). Who reaches them is decided by `authorize` (`ConsoleAuthorizeGuard`).
  */
 @Module({})
 export class MediaConsoleApiModule {
-  static register(options: ApiModuleOptions): DynamicModule {
-    assertRoutesProtected({
-      module: 'MediaConsoleApiModule.register',
-      mountsRoutes: options.routes !== false,
-      decorators: options.decorators,
-      decoratorsExample:
-        "MediaConsoleApiModule.register({ ..., decorators: [UseGuards(AuthenticationGuard), Can(MediaPolicy, 'console')] })",
-      selfMountExample:
-        "MediaConsoleApiModule.register({ ..., routes: false }) + @Can(MediaPolicy, 'console') @Controller('media/api') class ConsoleApiController extends MediaConsoleReadController {}",
-    });
+  static register(options: MediaConsoleApiModuleOptions): DynamicModule {
     return {
       module: MediaConsoleApiModule,
       imports: options.imports ?? [],
@@ -55,13 +59,17 @@ export class MediaConsoleApiModule {
         options.routes === false
           ? []
           : [
-              decoratedController(MediaConsoleReadController, options.decorators),
+              consoleController(MediaConsoleReadController, options.decorators),
               ...(options.actions
-                ? [decoratedController(MediaConsoleActionsController, options.decorators)]
+                ? [consoleController(MediaConsoleActionsController, options.decorators)]
                 : []),
             ],
       providers: [
         MediaConsoleService,
+        consoleAuthorizeProvider(
+          options.authorize,
+          options.moduleName ?? 'MediaConsoleApiModule.register()',
+        ),
         { provide: MEDIA_DASHBOARD_ACTIONS, useValue: options.actions },
         { provide: MEDIA_CONSOLE_OBJECT_URLS, useValue: options.objectUrls },
         options.insightsProvider ?? {
@@ -69,8 +77,9 @@ export class MediaConsoleApiModule {
           useValue: [],
         },
       ],
-      // For a host mounting the controllers itself (`routes: false`): its subclasses inject these.
-      exports: [MediaConsoleService, MEDIA_DASHBOARD_ACTIONS],
+      // For a host mounting the controllers itself (`routes: false`): its subclasses inject these, and
+      // `ConsoleAuthorizeGuard` injects the resolved `authorize` check.
+      exports: [MediaConsoleService, MEDIA_DASHBOARD_ACTIONS, CONSOLE_AUTHORIZE_DECIDE],
     };
   }
 }

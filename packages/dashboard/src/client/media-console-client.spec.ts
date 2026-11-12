@@ -1,5 +1,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { mediaConsoleClient } from './media-console-client.js';
+import {
+  ConsoleAccessError,
+  mediaConsoleClient,
+  onConsoleAccessDenied,
+} from './media-console-client.js';
 
 const realFetch = globalThis.fetch;
 
@@ -63,5 +67,46 @@ describe('mediaConsoleClient.objectDownloadUrl', () => {
     expect(mediaConsoleClient.objectDownloadUrl('primary', key)).toBe(
       mediaConsoleClient.objectRawUrl('primary', key).replace('/object/raw?', '/object/download?'),
     );
+  });
+});
+
+describe('console denials', () => {
+  const json = (status: number, body: unknown) => () =>
+    new Response(JSON.stringify(body), {
+      status,
+      headers: { 'Content-Type': 'application/json' },
+    });
+
+  it('a 403 throws a ConsoleAccessError and notifies listeners', async () => {
+    stubFetch(json(403, { error: 'forbidden' }));
+    const seen: ConsoleAccessError[] = [];
+    const off = onConsoleAccessDenied((error) => seen.push(error));
+    const error = await mediaConsoleClient.disks().catch((e: unknown) => e);
+    off();
+    expect(error).toBeInstanceOf(ConsoleAccessError);
+    expect((error as ConsoleAccessError).status).toBe(403);
+    expect(seen).toHaveLength(1);
+  });
+
+  it('a 401 with redirectTo sends the browser there', async () => {
+    stubFetch(json(401, { error: 'unauthenticated', redirectTo: '/login?next=/media' }));
+    const assign = vi.fn();
+    const realWindow = (globalThis as { window?: unknown }).window;
+    (globalThis as { window?: unknown }).window = { location: { assign } };
+    try {
+      const error = await mediaConsoleClient.topology().catch((e: unknown) => e);
+      expect((error as ConsoleAccessError).redirectTo).toBe('/login?next=/media');
+      expect(assign).toHaveBeenCalledWith('/login?next=/media');
+    } finally {
+      (globalThis as { window?: unknown }).window = realWindow;
+    }
+  });
+
+  it('a 401 without redirectTo does not navigate', async () => {
+    stubFetch(json(401, { error: 'unauthenticated' }));
+    const error = await mediaConsoleClient.topology().catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(ConsoleAccessError);
+    expect((error as ConsoleAccessError).status).toBe(401);
+    expect((error as ConsoleAccessError).redirectTo).toBeUndefined();
   });
 });
