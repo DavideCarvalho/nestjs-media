@@ -13,6 +13,7 @@ import {
   TusUploadHandler,
   type UploadSessionStore,
   canSeeRow,
+  keySegment,
   readTenancy,
   tenantMatch,
 } from '@dudousxd/nestjs-media-core';
@@ -91,11 +92,45 @@ export interface MediaFactory<T> {
  * The request's tenant scope, under `MEDIA_TENANCY`: what the media dashboard applies to the
  * stores it reads directly. Both methods switch the stores to tenancy first when it is on.
  */
+/**
+ * Console labels keyed by tenant id: the context's `tenantLabels` (its `tenancy.label`, context >=
+ * 2.1), else the slug, else the id. Read structurally, like the rest of the tenancy contract.
+ */
+async function labelTenants(
+  tenants: Array<{ id: string; kind: string; slug?: string }>,
+  injected: unknown,
+): Promise<Record<string, string>> {
+  const slot = (globalThis as unknown as Record<symbol, { current?: unknown } | undefined>)[
+    Symbol.for('@dudousxd/nestjs-diagnostics:accessor')
+  ];
+  const accessor = (injected ?? slot?.current) as
+    | { tenantLabels?(tenants: unknown[]): Promise<Record<string, string>> }
+    | undefined;
+  if (typeof accessor?.tenantLabels === 'function') {
+    try {
+      return await accessor.tenantLabels(tenants);
+    } catch {
+      // Fall back to slug/id below.
+    }
+  }
+  return Object.fromEntries(tenants.map((t) => [t.id, t.slug || t.id]));
+}
+
 export interface MediaTenancyScope {
   /** The store filter for this request: `undefined` when every row is visible. */
   match(): Promise<MediaTenantMatch | undefined>;
   /** Whether this request may see a row whose tenant is `tenantId`. */
   canSee(tenantId: string | null | undefined): Promise<boolean>;
+  /**
+   * Display labels keyed by tenant id (the context's `tenancy.label`, else the slug, else the id),
+   * for the console. Empty while tenancy is off.
+   */
+  labels(tenantIds: string[]): Promise<Record<string, string>>;
+  /**
+   * With `tenancy.pathPrefix`, the storage prefix of this request's tenant (`t/<tenantId>/`);
+   * otherwise `undefined`.
+   */
+  pathPrefix(): Promise<string | undefined>;
 }
 
 export interface MediaModuleOptions {
@@ -456,6 +491,27 @@ function mediaProviders(
         return {
           match: async () => tenantMatch(await current()),
           canSee: async (tenantId) => canSeeRow(await current(), tenantId),
+          labels: async (tenantIds) => {
+            const tenancy = readTenancy(options.tenancy, contextAccessor ?? undefined, {
+              required: false,
+            });
+            if (!tenancy.enabled || tenantIds.length === 0) return {};
+            // Rows keep only the id: label them as the kind media scopes by.
+            const own = typeof options.tenancy === 'object' ? options.tenancy : {};
+            const filter = tenancy.filter();
+            const kind =
+              own.kinds?.[0] ?? (filter.mode === 'tenant' ? filter.tenant.kind : 'tenant');
+            return labelTenants(
+              [...new Set(tenantIds)].map((id) => ({ id, kind })),
+              contextAccessor,
+            );
+          },
+          pathPrefix: async () => {
+            const tenancy = await current();
+            if (!tenancy.enabled || !tenancy.pathPrefix) return undefined;
+            const filter = tenancy.filter();
+            return filter.mode === 'tenant' ? `t/${keySegment(filter.tenant.id)}/` : undefined;
+          },
         };
       },
     },

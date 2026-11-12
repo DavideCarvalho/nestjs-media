@@ -70,6 +70,10 @@ import {
 export interface ConsoleTenancyScope {
   match(): Promise<MediaTenantMatch | undefined>;
   canSee(tenantId: string | null | undefined): Promise<boolean>;
+  /** Display labels keyed by tenant id. Absent on an older `MediaModule`: ids are shown. */
+  labels?(tenantIds: string[]): Promise<Record<string, string>>;
+  /** With `tenancy.pathPrefix`, this request's tenant's storage prefix (`t/<tenantId>/`). */
+  pathPrefix?(): Promise<string | undefined>;
 }
 
 /** Seconds a signed object URL stays valid. */
@@ -152,7 +156,20 @@ async function http<T>(run: () => Promise<T>): Promise<T> {
   }
 }
 
-function mapUpload(session: UploadSession): UploadInfo {
+/** Labels for the tenants of `rows`, keyed by id; `undefined` when tenancy is off. */
+type Labels = Record<string, string> | undefined;
+
+/** A row's tenant for the console: absent with tenancy off, `null` with no tenant. */
+function tenantOf(
+  tenantId: string | null | undefined,
+  labels: Labels,
+): Pick<LibraryRecord, 'tenant'> {
+  if (labels === undefined) return {};
+  if (tenantId === null || tenantId === undefined) return { tenant: null };
+  return { tenant: { id: tenantId, label: labels[tenantId] ?? tenantId } };
+}
+
+function mapUpload(session: UploadSession, labels?: Labels): UploadInfo {
   const percent =
     session.size !== undefined && session.size > 0
       ? Math.min(100, Math.round((session.offset / session.size) * 100))
@@ -167,10 +184,11 @@ function mapUpload(session: UploadSession): UploadInfo {
     parts: session.parts,
     multipart: session.multipartUploadId !== undefined,
     ...(session.createdAt ? { createdAt: session.createdAt.toISOString() } : {}),
+    ...tenantOf(session.tenantId, labels),
   };
 }
 
-function mapRecord(record: MediaRecord): LibraryRecord {
+function mapRecord(record: MediaRecord, labels?: Labels): LibraryRecord {
   return {
     id: record.id,
     ownerType: record.ownerType,
@@ -183,6 +201,7 @@ function mapRecord(record: MediaRecord): LibraryRecord {
     disk: record.disk,
     path: record.path,
     createdAt: record.createdAt.toISOString(),
+    ...tenantOf(record.tenantId, labels),
   };
 }
 
@@ -220,6 +239,17 @@ export class MediaConsoleService {
   /** The store filter for this request (`undefined`: every row). */
   private async tenantMatch(): Promise<MediaTenantMatch | undefined> {
     return this.tenancy ? this.tenancy.match() : undefined;
+  }
+
+  /**
+   * Labels for the tenants of `rows` (tenancy on), else `undefined`. A labeler failure falls back to
+   * the ids: a label never breaks a listing.
+   */
+  private async labelsFor(rows: Array<{ tenantId?: string | null }>): Promise<Labels> {
+    if (!this.tenancy || !rows.some((row) => row.tenantId !== undefined)) return undefined;
+    const ids = rows.flatMap((row) => (typeof row.tenantId === 'string' ? [row.tenantId] : []));
+    if (ids.length === 0 || typeof this.tenancy.labels !== 'function') return {};
+    return this.tenancy.labels(ids).catch(() => ({}));
   }
 
   /** Whether this request may see a row of `tenantId`; a hidden row is reported as not found. */
@@ -523,7 +553,8 @@ export class MediaConsoleService {
       ...(filter.prefix ? { keyPrefix: filter.prefix } : {}),
       ...(tenant ? { tenant } : {}),
     });
-    return { uploads: sessions.map(mapUpload) };
+    const labels = await this.labelsFor(sessions);
+    return { uploads: sessions.map((session) => mapUpload(session, labels)) };
   }
 
   async uploadDetail(id: string): Promise<UploadDetailResponse> {
@@ -533,7 +564,7 @@ export class MediaConsoleService {
       throw new NotFoundException(`Unknown upload: ${id}`);
     }
     const parts = this.uploads.listParts ? await this.uploads.listParts(id) : [];
-    return { upload: mapUpload(session), parts };
+    return { upload: mapUpload(session, await this.labelsFor([session])), parts };
   }
 
   /**
@@ -585,8 +616,9 @@ export class MediaConsoleService {
         ...(filter.cursor ? { cursor: filter.cursor } : {}),
       },
     );
+    const labels = await this.labelsFor(page.records);
     return {
-      records: page.records.map(mapRecord),
+      records: page.records.map((record) => mapRecord(record, labels)),
       ...(page.cursor ? { cursor: page.cursor } : {}),
     };
   }
@@ -610,7 +642,7 @@ export class MediaConsoleService {
         return { name, url, disk: conversion.disk, path: conversion.path };
       }),
     );
-    return { record: mapRecord(record), variants };
+    return { record: mapRecord(record, await this.labelsFor([record])), variants };
   }
 
   async deleteLibraryRecord(id: string): Promise<void> {
@@ -641,12 +673,15 @@ export class MediaConsoleService {
       Promise.resolve()
         .then(read)
         .catch(() => fallback);
-    const tenant = await this.tenantMatch();
-    const recordHit = (record: MediaRecord) => ({
-      title: record.name !== '' ? record.name : record.fileName,
-      subtitle: ['Library', record.collection, record.fileName].join(' · '),
-      href: `${page}#/library/${encodeURIComponent(record.id)}`,
-    });
+    let tenant: MediaTenantMatch | undefined;
+    let tenantPrefix: string | undefined;
+    try {
+      tenant = await this.tenantMatch();
+      tenantPrefix = tenant ? await this.tenancy?.pathPrefix?.() : undefined;
+    } catch {
+      // No tenant where one is required (the context's 403): nothing this viewer may see.
+      return [];
+    }
     const store = this.store;
     const [byId, named, files] = await Promise.all([
       quiet(async () => {
@@ -662,12 +697,32 @@ export class MediaConsoleService {
         // A store that predates `nameContains` ignores it: keep only real matches.
         return found.records.filter((record) => matchesName(record, q));
       }, [] as MediaRecord[]),
-      // Disk objects carry no tenant: searched only when the request sees every tenant's rows.
-      tenant === undefined
-        ? quiet(() => this.filesByKey(q.replace(/^\/+/, ''), limit, page), [])
+      // Disk objects carry no tenant: searched when the request sees every tenant's rows, or, with
+      // `tenancy.pathPrefix`, under this tenant's own `t/<tenantId>/`.
+      tenant === undefined || tenantPrefix !== undefined
+        ? quiet(() => {
+            const key = q.replace(/^\/+/, '');
+            const scoped =
+              tenantPrefix === undefined || key.startsWith(tenantPrefix)
+                ? key
+                : `${tenantPrefix}${key}`;
+            return this.filesByKey(scoped, limit, page);
+          }, [])
         : Promise.resolve([]),
     ]);
-    const hits = [...(byId ? [recordHit(byId)] : []), ...named.map(recordHit), ...files];
+    const records = [...(byId ? [byId] : []), ...named];
+    const labels = await this.labelsFor(records).catch(() => undefined);
+    const recordHit = (record: MediaRecord) => {
+      const owner = typeof record.tenantId === 'string' ? labels?.[record.tenantId] : undefined;
+      return {
+        title: record.name !== '' ? record.name : record.fileName,
+        subtitle: ['Library', record.collection, record.fileName, ...(owner ? [owner] : [])].join(
+          ' · ',
+        ),
+        href: `${page}#/library/${encodeURIComponent(record.id)}`,
+      };
+    };
+    const hits = [...records.map(recordHit), ...files];
     const seen = new Set<string>();
     return hits
       .filter((hit) => {

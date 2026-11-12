@@ -29,7 +29,17 @@ interface MediaModuleOptions {
   };
 
   // ── scope records and upload sessions by the request's tenant ────────
-  tenancy?: 'inherit' | false | { enabled?: 'inherit' | boolean; kinds?: string[]; nullRows?: 'tenantless' | 'shared' };
+  tenancy?:
+    | 'inherit'
+    | false
+    | {
+        enabled?: 'inherit' | boolean;
+        kinds?: string[];
+        family?: string;
+        required?: boolean;
+        nullRows?: 'tenantless' | 'shared';
+        pathPrefix?: boolean;
+      };
 
   // ── who may read/attach/delete through MediaService ────────────────────
   authorize?: (user: unknown, action: 'read' | 'attach' | 'delete', subject: MediaRecord | MediaAttachTarget) => void | Promise<void>;

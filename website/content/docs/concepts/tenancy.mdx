@@ -37,7 +37,18 @@ MediaModule.forRoot({
 |---|---|
 | `'inherit'` (default) | On when `ContextModule`'s `tenancy.enabled` is `true` |
 | `false` | Off, even when the context turns tenancy on |
-| `{ enabled?: 'inherit' \| boolean; kinds?: string[]; nullRows?: 'tenantless' \| 'shared' }` | `enabled` overrides the context switch. `kinds` is media's own allow-list of tenant kinds (a tenant of another kind counts as none). `nullRows: 'shared'` shows records with no tenant to every tenant. |
+| an object | The fields below. |
+
+The object form takes:
+
+| Field | Effect |
+|---|---|
+| `enabled?: 'inherit' \| boolean` | Overrides the context switch. |
+| `kinds?: string[]` | Media's own allow-list of tenant kinds. With [nested tenants](#nested-tenants), media scopes by the most specific level of the active chain whose kind is listed. A tenant with no listed level counts as none. |
+| `family?: string` | Scope by the request's tenant of this family (e.g. a patient's `account`) instead of the primary one. |
+| `required?: boolean` | A read or write with no tenant throws the context's `TenantRequiredError` (403) instead of running as tenantless. Default: the context's `tenancy.required`. See [Require a tenant](#require-a-tenant). |
+| `nullRows?: 'tenantless' \| 'shared'` | `'shared'` shows records with no tenant to every tenant. Default `'tenantless'`. |
+| `pathPrefix?: boolean` | Store new library files under `t/<tenantId>/`. Default `false`. See [Tenant folders](#tenant-folders-pathprefix). |
 
 ---
 
@@ -71,9 +82,55 @@ A record or session the request can't see is treated exactly like a missing one,
 - **`library.delete()`, `MediaService.delete()` and upload `abort()`:** a silent no-op. Nothing is deleted, and nothing is thrown.
 - **Dashboard:** every library and uploads endpoint returns a 404, including delete record and cancel upload. With tenancy on, deleting or cancelling a missing id is a 404 too. The check runs before your `authorize` hook, which still runs for every visible record: tenancy only narrows.
 
+**The console shows the tenant.** With tenancy on, the dashboard's library cards, record detail, uploads table and upload detail show each row's organization. The label comes from the context's `tenancy.label` resolver ([context ≥ 2.1](/docs/context/tenancy)), else the tenant's id. The JSON API returns it as `tenant: { id, label }` (`null` for a row with no tenant).
+
 <Callout type="info">
   Not scoped by tenant: the dashboard's object browser (it lists raw disk keys, not records), direct presigned uploads (they keep no session), the attachment-as-column API (attachments live on your own rows), and the Telescope media panels. Restrict those with your `authorize` hooks.
 </Callout>
+
+---
+
+## Nested tenants
+
+When tenants nest (a clinic and its units), the context carries the active chain, root first ([context ≥ 2.1](/docs/context/tenancy)):
+
+```ts
+Context.setTenant({ id: unit.id, kind: 'unit', chain: [{ id: clinic.id, kind: 'clinic' }] });
+```
+
+Pick the level media scopes by with `kinds`:
+
+```ts
+MediaModule.forRoot({ store, tenancy: { kinds: ['clinic'] } }); // files belong to the clinic
+MediaModule.forRoot({ store, tenancy: { kinds: ['unit'] } });   // files belong to the unit
+```
+
+Files are stamped with that level's id, and a request sees the files of that level. With `kinds: ['clinic']`, every unit of a clinic shares the clinic's files. Without `kinds`, media uses the tenant itself (the most specific level). With an older context there is no chain, and the tenant is used as before.
+
+---
+
+## Require a tenant
+
+With `required` on (in `ContextModule`'s `tenancy`, or in media's own option), a library read or write, an upload, or a console read with no tenant throws `TenantRequiredError`: a 403 with `code: 'E_TENANT_REQUIRED'`. A request inside `Context.allTenants()`, and code with no context at all (a script, a worker outside a request), still sees every row.
+
+Media never throws it where no request is served: the boot check below reads tenancy with `required: false`. The console's global search answers no hits instead of failing. Set `required: false` in media's option to keep media lenient while other libs require a tenant.
+
+---
+
+## Tenant folders (`pathPrefix`)
+
+```ts
+MediaModule.forRoot({ store, tenancy: { pathPrefix: true } });
+```
+
+With `pathPrefix` on, `library.attach()` stores a tenant's **new** files under `t/<tenantId>/` (e.g. `t/org_1/Post/42/gallery/<id>/photo.jpg`). Their conversions sit next to them. That gives each tenant its own folder for bucket policies, lifecycle rules or an export.
+
+- **Existing files never move.** Records keep the key they were stored under, so old and new layouts work side by side.
+- A file with no tenant, or attached while tenancy is off, keeps the usual layout.
+- Characters a key segment can't hold (`/`, `\`, control characters) become `_` in the tenant id.
+- Keys you choose yourself (resumable and direct uploads take the `key` you pass) are not prefixed. Build them under `t/<tenantId>/` if you want the same layout.
+
+In the console search, a viewer of one tenant also finds disk objects under their own `t/<tenantId>/`.
 
 ---
 

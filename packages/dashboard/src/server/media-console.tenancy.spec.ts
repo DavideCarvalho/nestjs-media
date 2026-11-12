@@ -123,3 +123,101 @@ describe('MediaConsoleService tenancy', () => {
     expect((await shared.service.listLibrary({})).records.map((r) => r.id)).toEqual(['b', 'c']);
   });
 });
+
+describe('MediaConsoleService tenancy: labels, required, pathPrefix', () => {
+  const labelled = (match: MediaTenantMatch | undefined): ConsoleTenancyScope => ({
+    ...scopeFor(match),
+    labels: async (ids) => Object.fromEntries(ids.map((id) => [id, `Org ${id.toUpperCase()}`])),
+  });
+
+  it('shows each row’s tenant with its label, and no tenant as null', async () => {
+    const { service } = await setup(labelled(undefined));
+    const records = (await service.listLibrary({})).records;
+    expect(records.map((r) => r.tenant)).toEqual([
+      { id: 't1', label: 'Org T1' },
+      { id: 't2', label: 'Org T2' },
+      null,
+    ]);
+    expect((await service.libraryDetail('b')).record.tenant).toEqual({ id: 't2', label: 'Org T2' });
+    expect((await service.listUploads({})).uploads.map((u) => u.tenant?.label ?? null)).toEqual([
+      'Org T1',
+      'Org T2',
+      null,
+    ]);
+    expect((await service.uploadDetail('a')).upload.tenant).toEqual({ id: 't1', label: 'Org T1' });
+  });
+
+  it('falls back to the id when the labeler fails or an older MediaModule has none', async () => {
+    const failing = await setup({
+      ...scopeFor(undefined),
+      labels: async () => {
+        throw new Error('down');
+      },
+    });
+    expect((await failing.service.listLibrary({})).records[0]?.tenant).toEqual({
+      id: 't1',
+      label: 't1',
+    });
+    const older = await setup(scopeFor(undefined));
+    expect((await older.service.listLibrary({})).records[0]?.tenant).toEqual({
+      id: 't1',
+      label: 't1',
+    });
+  });
+
+  it('carries no tenant field without tenancy', async () => {
+    const { service } = await setup(null);
+    expect((await service.listLibrary({})).records[0]).not.toHaveProperty('tenant');
+  });
+
+  it('search: no tenant where one is required finds nothing, and does not throw', async () => {
+    const { service } = await setup({
+      match: async () => {
+        throw Object.assign(new Error('tenant required'), { status: 403 });
+      },
+      canSee: async () => false,
+    });
+    await expect(service.search('a', 5, '/media')).resolves.toEqual([]);
+  });
+
+  it('search: with pathPrefix, a tenant searches the disks under its own t/<tenantId>/', async () => {
+    const store = new InMemoryMediaStore();
+    const disk = new InMemoryDisk();
+    await disk.put('t/t1/Post/1/gallery/x/report.pdf', Buffer.from('x'));
+    await disk.put('t/t2/Post/1/gallery/y/report.pdf', Buffer.from('x'));
+    await disk.put('Post/1/gallery/z/report.pdf', Buffer.from('x'));
+    const service = new MediaConsoleService(
+      storageOf({ local: disk }, 'local'),
+      store,
+      null,
+      false,
+      null,
+      null,
+      null,
+      { ...scopeFor({ id: 't1' }), pathPrefix: async () => 't/t1/' },
+    );
+    const keys = async (q: string) =>
+      (await service.search(q, 5, '/media')).map((hit) => hit.subtitle);
+    expect(await keys('Post/')).toEqual(['local · t/t1/Post/1/gallery/x/report.pdf']);
+    expect(await keys('t/t1/Post')).toEqual(['local · t/t1/Post/1/gallery/x/report.pdf']);
+    // Without pathPrefix, a tenant gets no disk hits (objects carry no tenant).
+    const plain = new MediaConsoleService(
+      storageOf({ local: disk }, 'local'),
+      store,
+      null,
+      false,
+      null,
+      null,
+      null,
+      scopeFor({ id: 't1' }),
+    );
+    expect(await plain.search('Post/', 5, '/media')).toEqual([]);
+  });
+
+  it('search: a library hit names the tenant for a viewer who sees several', async () => {
+    const { service } = await setup(labelled(undefined));
+    expect((await service.search('b', 5, '/media'))[0]?.subtitle).toBe(
+      'Library · gallery · b.txt · Org T2',
+    );
+  });
+});

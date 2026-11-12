@@ -39,6 +39,8 @@ function UploadsListView({ actions }: { actions: boolean }): JSX.Element {
   }
 
   const uploads = uploadsQuery.data?.uploads ?? [];
+  // With tenancy on, every session carries `tenant` (null when it has none).
+  const tenancy = uploads.some((upload) => upload.tenant !== undefined);
 
   return (
     <section className="rise">
@@ -58,6 +60,7 @@ function UploadsListView({ actions }: { actions: boolean }): JSX.Element {
               <tr className="mono border-b border-border text-[10px] uppercase tracking-wider text-zinc-600">
                 <th className="px-4 py-2 font-normal">Key</th>
                 <th className="px-4 py-2 font-normal">Disk</th>
+                {tenancy && <th className="px-4 py-2 font-normal">Organization</th>}
                 <th className="px-4 py-2 font-normal">Progress</th>
                 <th className="px-4 py-2 font-normal">Parts</th>
                 <th className="px-4 py-2 font-normal">Age</th>
@@ -75,6 +78,11 @@ function UploadsListView({ actions }: { actions: boolean }): JSX.Element {
                     </a>
                   </td>
                   <td className="mono px-4 py-2 text-xs text-zinc-400">{upload.disk}</td>
+                  {tenancy && (
+                    <td className="max-w-[12rem] truncate px-4 py-2 text-xs text-zinc-400">
+                      {upload.tenant?.label ?? '—'}
+                    </td>
+                  )}
                   <td className="px-4 py-2">
                     <ProgressBar percent={upload.percent} />
                   </td>
@@ -138,6 +146,11 @@ function UploadDetailView({
               <DetailRow label="Disk">
                 <span className="mono text-xs">{uploadQuery.data.upload.disk}</span>
               </DetailRow>
+              {uploadQuery.data.upload.tenant !== undefined && (
+                <DetailRow label="Organization">
+                  {uploadQuery.data.upload.tenant?.label ?? '—'}
+                </DetailRow>
+              )}
               <DetailRow label="Progress">
                 <ProgressBar percent={uploadQuery.data.upload.percent} />
               </DetailRow>

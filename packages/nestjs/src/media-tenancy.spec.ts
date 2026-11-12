@@ -138,6 +138,41 @@ describe('MediaModule tenancy', () => {
     expect(await as('t1', () => scope?.canSee('t2'))).toBe(false);
   });
 
+  it('labels tenants for the console (slug/id fallback with an older context, else its labeler)', async () => {
+    await boot({ context: 'provider', tenancy: { kinds: ['clinic'] } });
+    const scope = app?.get<MediaTenancyScope>(MEDIA_TENANCY);
+    expect(await scope?.labels(['c1', 'c1', 'c2'])).toEqual({ c1: 'c1', c2: 'c2' });
+    const accessor = app?.get<{ tenantLabels?: unknown }>(
+      Symbol.for('@dudousxd/nestjs-context:accessor'),
+    );
+    const seen: unknown[] = [];
+    if (accessor) {
+      accessor.tenantLabels = async (tenants: Array<{ id: string; kind: string }>) => {
+        seen.push(...tenants);
+        return Object.fromEntries(tenants.map((t) => [t.id, `Clinic ${t.id}`]));
+      };
+    }
+    expect(await scope?.labels(['c1'])).toEqual({ c1: 'Clinic c1' });
+    // Rows keep only the id: they are labelled as the kind media scopes by.
+    expect(seen).toEqual([{ id: 'c1', kind: 'clinic' }]);
+    expect(await scope?.labels([])).toEqual({});
+  });
+
+  it('gives the console the storage prefix of the request tenant only with pathPrefix', async () => {
+    await boot({ context: 'provider', tenancy: { pathPrefix: true } });
+    const scope = app?.get<MediaTenancyScope>(MEDIA_TENANCY);
+    expect(await as('t/1', () => scope?.pathPrefix())).toBe('t/t_1/');
+    expect(await as(null, () => scope?.pathPrefix())).toBeUndefined();
+    await app?.close();
+    app = undefined;
+    await boot({ context: 'provider' });
+    // `boot` reassigns the module-level `app`, which the narrowing above can't see.
+    const plain = (app as NestExpressApplication | undefined)?.get<MediaTenancyScope>(
+      MEDIA_TENANCY,
+    );
+    expect(await as('t1', () => plain?.pathPrefix())).toBeUndefined();
+  });
+
   describe('tenancy off is identical', () => {
     const cases = [
       { name: 'context tenancy disabled', context: 'provider', enabled: false },
