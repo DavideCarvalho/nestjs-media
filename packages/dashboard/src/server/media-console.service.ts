@@ -72,8 +72,11 @@ export interface ConsoleTenancyScope {
   canSee(tenantId: string | null | undefined): Promise<boolean>;
   /** Display labels keyed by tenant id. Absent on an older `MediaModule`: ids are shown. */
   labels?(tenantIds: string[]): Promise<Record<string, string>>;
-  /** With `tenancy.pathPrefix`, this request's tenant's storage prefix (`t/<tenantId>/`). */
-  pathPrefix?(): Promise<string | undefined>;
+  /**
+   * The disk key prefixes this request may browse (`tenancy.pathPrefix`): `undefined` for every key,
+   * `['t/<tenantId>/']` for a tenant, `[]` for nothing. Absent on an older `MediaModule`: every key.
+   */
+  diskPrefixes?(): Promise<string[] | undefined>;
 }
 
 /** Seconds a signed object URL stays valid. */
@@ -123,6 +126,11 @@ function isAddressable(key: string): boolean {
   } catch {
     return false;
   }
+}
+
+/** Whether a search prefix stays where it says: it follows the key rule (no `..`, `\\`, `//`). */
+function isPlainPrefix(prefix: string): boolean {
+  return isAddressable(prefix.endsWith('/') ? prefix.slice(0, -1) : prefix);
 }
 
 /** Core errors that carry a client `status` (400). */
@@ -252,6 +260,40 @@ export class MediaConsoleService {
     return this.tenancy.labels(ids).catch(() => ({}));
   }
 
+  /**
+   * The disk key prefixes this request may touch (`tenancy.pathPrefix`); `undefined` for every key.
+   */
+  private async diskPrefixes(): Promise<string[] | undefined> {
+    return typeof this.tenancy?.diskPrefixes === 'function'
+      ? this.tenancy.diskPrefixes()
+      : undefined;
+  }
+
+  /**
+   * A confined viewer reaches only keys inside their prefixes; anything else, or a key that could
+   * resolve elsewhere (`..`, a leading `/`, a backslash), is reported as not found (404).
+   */
+  private async confine(disk: string, ...keys: string[]): Promise<void> {
+    const prefixes = await this.diskPrefixes();
+    if (prefixes === undefined) return;
+    for (const key of keys) {
+      if (!isAddressable(key) || !prefixes.some((prefix) => key.startsWith(prefix))) {
+        throw new NotFoundException(`Unknown object: ${disk}:${key}`);
+      }
+    }
+  }
+
+  /** {@link confine} for a folder (`a/b/`, checked as the folder itself). */
+  private async confineFolder(disk: string, ...folders: string[]): Promise<void> {
+    const prefixes = await this.diskPrefixes();
+    if (prefixes === undefined) return;
+    for (const folder of folders) {
+      if (!prefixes.some((prefix) => folder.startsWith(prefix))) {
+        throw new NotFoundException(`Unknown folder: ${disk}:${folder}`);
+      }
+    }
+  }
+
   /** Whether this request may see a row of `tenantId`; a hidden row is reported as not found. */
   private async canSee(tenantId: string | null | undefined): Promise<boolean> {
     return this.tenancy ? this.tenancy.canSee(tenantId) : true;
@@ -313,6 +355,21 @@ export class MediaConsoleService {
     } catch (error) {
       throw new BadRequestException((error as Error).message);
     }
+    const prefixes = await this.diskPrefixes();
+    if (prefixes !== undefined && !prefixes.some((p) => prefix.startsWith(p))) {
+      // Above the viewer's prefixes (the root, `t/`): just the folders leading to them.
+      const below = prefixes.filter((p) => p.startsWith(prefix));
+      if (below.length === 0 && prefix !== '') {
+        throw new NotFoundException(`Unknown folder: ${disk}:${prefix}`);
+      }
+      const folders = [
+        ...new Set(below.map((p) => `${prefix}${p.slice(prefix.length).split('/')[0]}/`)),
+      ];
+      return {
+        folders: folders.map((folder) => ({ name: lastSegment(folder), prefix: folder })),
+        files: [],
+      };
+    }
     const level = await http(() =>
       listFolderLevel(
         store,
@@ -343,6 +400,7 @@ export class MediaConsoleService {
 
   async objectDetail(disk: string, key: string): Promise<ObjectDetailResponse> {
     const store = this.diskOrThrow(disk);
+    await this.confine(disk, key);
     return http(async () => {
       const stat = await store.stat(key);
       return {
@@ -366,6 +424,7 @@ export class MediaConsoleService {
       return { insights: [] };
     }
     this.diskOrThrow(disk);
+    await this.confine(disk, key);
 
     const settled = await Promise.all(
       providers.map(async (provider): Promise<ObjectInsight | null> => {
@@ -395,12 +454,14 @@ export class MediaConsoleService {
    * object), `If-None-Match` a 304, a range past the end a 416, a missing file a 404. `inline`
    * applies only to types that can't run script in this origin; others download.
    */
-  serveObject(
+  async serveObject(
     disk: string,
     key: string,
     options: ServeFileOptions,
   ): Promise<StreamableFile | undefined> {
-    return http(() => serveFile(this.diskOrThrow(disk), key, options));
+    const store = this.diskOrThrow(disk);
+    await this.confine(disk, key);
+    return http(() => serveFile(store, key, options));
   }
 
   /**
@@ -416,6 +477,7 @@ export class MediaConsoleService {
     contentLength?: number,
   ): Promise<void> {
     const store = this.diskOrThrow(disk);
+    await this.confine(disk, key);
     await http(() =>
       store.put(key, body, {
         ...(contentType ? { contentType } : {}),
@@ -429,12 +491,16 @@ export class MediaConsoleService {
    * `@nestjs/storage` keys can't end with `/`. Listings show the folder because a key lives in it.
    */
   async createFolder(disk: string, prefix: string): Promise<void> {
+    const store = this.diskOrThrow(disk);
     const folder = clientFolder(prefix, 'Folder name');
-    await http(() => this.diskOrThrow(disk).put(`${folder}${FOLDER_KEEP_FILE}`, ''));
+    await this.confineFolder(disk, folder);
+    await http(() => store.put(`${folder}${FOLDER_KEEP_FILE}`, ''));
   }
 
   async deleteObject(disk: string, key: string): Promise<void> {
-    await http(() => this.diskOrThrow(disk).delete(key));
+    const store = this.diskOrThrow(disk);
+    await this.confine(disk, key);
+    await http(() => store.delete(key));
   }
 
   /**
@@ -445,6 +511,7 @@ export class MediaConsoleService {
   async deleteFolder(disk: string, prefix: string): Promise<void> {
     const store = this.diskOrThrow(disk);
     const folder = clientFolder(prefix, 'Folder');
+    await this.confineFolder(disk, folder);
     await http(async () => {
       const keys: string[] = [];
       for await (const entry of store.listAll({ prefix: folder, limit: SWEEP_LIMIT })) {
@@ -457,10 +524,14 @@ export class MediaConsoleService {
   }
 
   async copyObject(fromDisk: string, from: string, toDisk: string, to: string): Promise<void> {
+    await this.confine(fromDisk, from);
+    await this.confine(toDisk, to);
     await http(() => this.transferKey('copy', fromDisk, from, toDisk, to));
   }
 
   async moveObject(fromDisk: string, from: string, toDisk: string, to: string): Promise<void> {
+    await this.confine(fromDisk, from);
+    await this.confine(toDisk, to);
     await http(() => this.transferKey('move', fromDisk, from, toDisk, to));
   }
 
@@ -526,6 +597,8 @@ export class MediaConsoleService {
     this.diskOrThrow(toDisk);
     const fromPrefix = clientFolder(from, 'Source folder');
     const toPrefix = clientFolder(to, 'Destination folder');
+    await this.confineFolder(fromDisk, fromPrefix);
+    await this.confineFolder(toDisk, toPrefix);
     if (fromDisk === toDisk && toPrefix.startsWith(fromPrefix)) {
       throw new BadRequestException(`Cannot ${op} a folder into itself`);
     }
@@ -660,8 +733,9 @@ export class MediaConsoleService {
   /**
    * Global search (the console switcher's): files whose name matches `q`, scoped like every other
    * read. A library record by its exact id, library records whose name or file name contains `q`
-   * (both by the request's tenant), and, when no tenant scope applies, disk objects whose key starts
-   * with `q`. At most `limit` hits, linking into the console at `page` (`#/library/<id>`,
+   * (both by the request's tenant), and disk objects whose key starts with `q`: every disk object
+   * when no tenant scope applies, with `tenancy.pathPrefix` only those under the viewer's own
+   * `t/<tenantId>/`. At most `limit` hits, linking into the console at `page` (`#/library/<id>`,
    * `#/disks/<disk>?prefix=<folder>&preview=<key>`). A source that fails is skipped.
    */
   async search(
@@ -674,10 +748,10 @@ export class MediaConsoleService {
         .then(read)
         .catch(() => fallback);
     let tenant: MediaTenantMatch | undefined;
-    let tenantPrefix: string | undefined;
+    let prefixes: string[] | undefined;
     try {
       tenant = await this.tenantMatch();
-      tenantPrefix = tenant ? await this.tenancy?.pathPrefix?.() : undefined;
+      prefixes = await this.diskPrefixes();
     } catch (error) {
       // No tenant where one is required (the context's `TenantRequiredError`, 403): nothing this
       // viewer may see. Anything else (a store that can't scope by tenant) fails the search.
@@ -701,16 +775,18 @@ export class MediaConsoleService {
       }, [] as MediaRecord[]),
       // Disk objects carry no tenant: searched when the request sees every tenant's rows, or, with
       // `tenancy.pathPrefix`, under this tenant's own `t/<tenantId>/`.
-      tenant === undefined || tenantPrefix !== undefined
-        ? quiet(() => {
-            const key = q.replace(/^\/+/, '');
-            const scoped =
-              tenantPrefix === undefined || key.startsWith(tenantPrefix)
-                ? key
-                : `${tenantPrefix}${key}`;
-            return this.filesByKey(scoped, limit, page);
-          }, [])
-        : Promise.resolve([]),
+      quiet(async () => {
+        const key = q.replace(/^\/+/, '');
+        if (prefixes === undefined)
+          return tenant === undefined ? this.filesByKey(key, limit, page) : [];
+        const perPrefix = await Promise.all(
+          prefixes.map((prefix) => {
+            const scoped = key.startsWith(prefix) ? key : `${prefix}${key}`;
+            return isPlainPrefix(scoped) ? this.filesByKey(scoped, limit, page, prefix) : [];
+          }),
+        );
+        return perPrefix.flat();
+      }, []),
     ]);
     const records = [...(byId ? [byId] : []), ...named];
     const labels = await this.labelsFor(records).catch(() => undefined);
@@ -735,11 +811,12 @@ export class MediaConsoleService {
       .slice(0, limit);
   }
 
-  /** Objects on every disk whose key starts with `prefix`, as search hits. */
+  /** Objects on every disk whose key starts with `prefix` (and `within`), as search hits. */
   private async filesByKey(
     prefix: string,
     limit: number,
     page: string,
+    within = '',
   ): Promise<Array<{ title: string; subtitle: string; href: string }>> {
     const storage = this.storage;
     if (!storage || prefix === '') return [];
@@ -750,7 +827,9 @@ export class MediaConsoleService {
           .list({ prefix, limit: limit + 1 })
           .catch(() => ({ entries: [] }));
         return listed.entries
-          .filter((entry) => lastSegment(entry.key) !== FOLDER_KEEP_FILE)
+          .filter(
+            (entry) => entry.key.startsWith(within) && lastSegment(entry.key) !== FOLDER_KEEP_FILE,
+          )
           .map((entry) => {
             const slash = entry.key.lastIndexOf('/');
             const params = new URLSearchParams();

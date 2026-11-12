@@ -85,7 +85,7 @@ A record or session the request can't see is treated exactly like a missing one,
 **The console shows the tenant.** With tenancy on, the dashboard's library cards, record detail, uploads table and upload detail show each row's organization. The label comes from the context's `tenancy.label` resolver ([context ≥ 2.1](/docs/context/tenancy)), else the tenant's id. The JSON API returns it as `tenant: { id, label }` (`null` for a row with no tenant).
 
 <Callout type="info">
-  Not scoped by tenant: the dashboard's object browser (it lists raw disk keys, not records), direct presigned uploads (they keep no session), the attachment-as-column API (attachments live on your own rows), and the Telescope media panels. Restrict those with your `authorize` hooks.
+  Not scoped by tenant: the dashboard's object browser unless [`pathPrefix`](#tenant-folders-pathprefix) is on (it lists raw disk keys, not records), direct presigned uploads (they keep no session), the attachment-as-column API (attachments live on your own rows), and the Telescope media panels. Restrict those with your `authorize` hooks.
 </Callout>
 
 ---
@@ -130,7 +130,18 @@ With `pathPrefix` on, `library.attach()` stores a tenant's **new** files under `
 - Characters a key segment can't hold (`/`, `\`, control characters) become `_` in the tenant id.
 - Keys you choose yourself (resumable and direct uploads take the `key` you pass) are not prefixed. Build them under `t/<tenantId>/` if you want the same layout.
 
-In the console search, a viewer of one tenant also finds disk objects under their own `t/<tenantId>/`.
+### The console's disks
+
+With `pathPrefix` on, a viewer of one tenant browses the disks only inside their own `t/<tenantId>/`. That covers the object browser (list, preview, download, upload, new folder, rename, copy, move, delete), the console's dev tools and the console search:
+
+- Above that folder (the disk root, `t/`), the browser shows just the way down to it.
+- Any key outside it is a 404, like a missing one. That includes another tenant's folder, files stored before `pathPrefix` was on, and keys that try to climb out (`..`, encoded slashes, a leading `/`).
+- A request with no tenant sees no disk object.
+- A viewer of every tenant (`Context.allTenants()`, the system scope, or tenancy off) still sees every key, files from before `pathPrefix` included.
+
+With `pathPrefix` off, the object browser is not scoped by tenant.
+
+Library records are scoped by their tenant, not by their key. A tenant's records stored before `pathPrefix` still show in the library, but their keys aren't reachable through the object browser.
 
 ---
 

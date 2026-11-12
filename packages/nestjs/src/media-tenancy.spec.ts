@@ -158,11 +158,16 @@ describe('MediaModule tenancy', () => {
     expect(await scope?.labels([])).toEqual({});
   });
 
-  it('gives the console the storage prefix of the request tenant only with pathPrefix', async () => {
+  it('confines the console disks to the request tenant prefix only with pathPrefix', async () => {
     await boot({ context: 'provider', tenancy: { pathPrefix: true } });
     const scope = app?.get<MediaTenancyScope>(MEDIA_TENANCY);
-    expect(await as('t/1', () => scope?.pathPrefix())).toBe('t/t_1/');
-    expect(await as(null, () => scope?.pathPrefix())).toBeUndefined();
+    expect(await as('t/1', () => scope?.diskPrefixes())).toEqual(['t/t_1/']);
+    // No tenant: no prefix of its own, so no disk object.
+    expect(await as(null, () => scope?.diskPrefixes())).toEqual([]);
+    // A viewer of every tenant (or the system) browses every key, pre-prefix objects included.
+    for (const mode of ['all', 'system'] as const) {
+      expect(await requestFilter.run({ mode }, () => scope?.diskPrefixes())).toBeUndefined();
+    }
     await app?.close();
     app = undefined;
     await boot({ context: 'provider' });
@@ -170,7 +175,7 @@ describe('MediaModule tenancy', () => {
     const plain = (app as NestExpressApplication | undefined)?.get<MediaTenancyScope>(
       MEDIA_TENANCY,
     );
-    expect(await as('t1', () => plain?.pathPrefix())).toBeUndefined();
+    expect(await as('t1', () => plain?.diskPrefixes())).toBeUndefined();
   });
 
   describe('tenancy off is identical', () => {

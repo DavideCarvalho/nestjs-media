@@ -555,7 +555,7 @@ Hits respect tenancy like the rest of the console. Library records are those of 
 tenant. Disk objects carry no tenant, so they're searched only for a request that sees every
 tenant (tenancy off, or a system/all scope). With
 [`pathPrefix`](/docs/concepts/tenancy#tenant-folders-pathprefix), a viewer of one tenant also
-finds the objects under their own `t/<tenantId>/`. Where a tenant is required and the viewer has
+finds the objects under their own `t/<tenantId>/`, and browses only that folder on the disks. Where a tenant is required and the viewer has
 none, the search finds nothing.
 
 A hit opens the record or the file preview directly. The same links work by hand:

@@ -197,3 +197,78 @@ describe('GET disks/:disk/object/download — saving a file (mounted)', () => {
     expect(csv.headers.get('content-disposition')).toBe('attachment; filename="q1.csv"');
   });
 });
+
+describe('disk routes of a tenant under pathPrefix (mounted)', () => {
+  const tenantDisk = new InMemoryDisk();
+  const TENANCY = Symbol.for('nestjs-media:tenancy');
+
+  @Global()
+  @Module({
+    providers: [
+      { provide: STORE, useValue: null },
+      { provide: UPLOADS, useValue: null },
+      {
+        provide: TENANCY,
+        useValue: {
+          match: async () => ({ id: 't1' }),
+          canSee: async (tenantId: string | null | undefined) => tenantId === 't1',
+          diskPrefixes: async () => ['t/t1/'],
+        },
+      },
+    ],
+    exports: [STORE, UPLOADS, TENANCY],
+  })
+  class TenantMediaModule {}
+
+  @Module({
+    imports: [
+      StorageModule.forRoot({ disks: { primary: tenantDisk } }),
+      TenantMediaModule,
+      MediaDashboardModule.forRoot({
+        basePath: '/media',
+        apiBasePath: '/api/media',
+        actions: false,
+      }),
+    ],
+  })
+  class TenantAppModule {}
+
+  let base: string;
+  let app: Awaited<ReturnType<typeof NestFactory.create>>;
+
+  beforeAll(async () => {
+    await tenantDisk.put('t/t1/own.txt', CONTENT);
+    await tenantDisk.put('t/t2/other.txt', CONTENT);
+    app = await NestFactory.create(TenantAppModule, { logger: false });
+    await app.listen(0);
+    base = `${await app.getUrl()}/api/media/disks/primary`;
+  });
+
+  afterAll(async () => {
+    await app.close();
+  });
+
+  it('serves its own objects', async () => {
+    expect((await fetch(`${base}/object/raw?key=t%2Ft1%2Fown.txt`)).status).toBe(200);
+  });
+
+  it('never reaches another prefix: traversal, encoded slashes, absolute keys', async () => {
+    for (const key of [
+      't%2Ft2%2Fother.txt',
+      't%2Ft1%2F..%2Ft2%2Fother.txt',
+      't/t1/../t2/other.txt',
+      't%2Ft1%2F%2e%2e%2Ft2%2Fother.txt',
+      't%252Ft1%252F..%252Ft2%252Fother.txt',
+      '%2Ft%2Ft2%2Fother.txt',
+      't%2Ft1%5C..%5Ct2%2Fother.txt',
+    ]) {
+      for (const route of ['object/raw', 'object/download', 'object']) {
+        const response = await fetch(`${base}/${route}?key=${key}`);
+        expect([route, key, response.status]).toEqual([route, key, 404]);
+      }
+    }
+    const listing = await fetch(`${base}/objects?prefix=t%2Ft1%2F..%2Ft2%2F`);
+    expect(listing.status).toBeGreaterThanOrEqual(400);
+    expect(await listing.text()).not.toContain('other.txt');
+  });
+});

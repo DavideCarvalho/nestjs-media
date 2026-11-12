@@ -127,10 +127,11 @@ export interface MediaTenancyScope {
    */
   labels(tenantIds: string[]): Promise<Record<string, string>>;
   /**
-   * With `tenancy.pathPrefix`, the storage prefix of this request's tenant (`t/<tenantId>/`);
-   * otherwise `undefined`.
+   * The disk key prefixes this request may browse: `undefined` for every key (tenancy or
+   * `tenancy.pathPrefix` off, or a viewer of every tenant); with `pathPrefix`, `['t/<tenantId>/']`
+   * for a tenant, `[]` (nothing) for a request with no tenant.
    */
-  pathPrefix(): Promise<string | undefined>;
+  diskPrefixes(): Promise<string[] | undefined>;
 }
 
 export interface MediaModuleOptions {
@@ -506,11 +507,12 @@ function mediaProviders(
               contextAccessor,
             );
           },
-          pathPrefix: async () => {
+          diskPrefixes: async () => {
             const tenancy = await current();
             if (!tenancy.enabled || !tenancy.pathPrefix) return undefined;
             const filter = tenancy.filter();
-            return filter.mode === 'tenant' ? `t/${keySegment(filter.tenant.id)}/` : undefined;
+            if (filter.mode === 'system' || filter.mode === 'all') return undefined;
+            return filter.mode === 'tenant' ? [`t/${keySegment(filter.tenant.id)}/`] : [];
           },
         };
       },
