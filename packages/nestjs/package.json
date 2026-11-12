@@ -1,6 +1,6 @@
 {
   "name": "@dudousxd/nestjs-media",
-  "version": "0.11.0",
+  "version": "0.12.0",
   "description": "Filesystem + media-library for NestJS — one package",
   "license": "MIT",
   "repository": {

@@ -1,5 +1,13 @@
 # @dudousxd/nestjs-media-codegen
 
+## 0.3.0
+
+### Minor Changes
+
+- [#211](https://github.com/DavideCarvalho/nestjs-media/pull/211) [`8f3315e`](https://github.com/DavideCarvalho/nestjs-media/commit/8f3315e3ba7c4825a51dbf413e1a9615a058312b) Thanks [@DavideCarvalho](https://github.com/DavideCarvalho)! - Require Node.js 24 or newer: `engines.node` is now `>=24` (was `>=20`, or unset). CI tests on Node 24 and 26. Upgrade Node, then the packages.
+
+  **Breaking (`@dudousxd/nestjs-media-core`):** the `MediaDiagnosticEnvelope` type, kept only for code written against the old media-specific envelope, is removed. Type a message from an `aviary:media:<event>` channel as `DiagnosticEvent` from `@dudousxd/nestjs-diagnostics` (same shape). See the docs' Upgrading page.
+
 ## 0.2.2
 
 ### Patch Changes

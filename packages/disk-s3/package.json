@@ -1,6 +1,6 @@
 {
   "name": "@dudousxd/nestjs-media-disk-s3",
-  "version": "0.9.0",
+  "version": "0.10.0",
   "description": "nestjs-media S3 multipart side-car for @nestjs/storage S3Disk (native multipart + folder listing)",
   "license": "MIT",
   "repository": {
