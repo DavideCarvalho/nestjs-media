@@ -3,12 +3,21 @@ import { Readable } from 'node:stream';
 import { publishMedia } from './diagnostics';
 import {
   InvalidPartNumberError,
+  MediaTenancyUnavailableError,
   UnsupportedOperationError,
   UploadOffsetConflictError,
   UploadSessionNotFoundError,
 } from './errors';
 import { assertMediaKey } from './keys';
 import { type MultipartDrivers, multipartFor } from './multipart';
+import {
+  type MediaTenancy,
+  type MediaTenancyOption,
+  type MediaTenantMatch,
+  canSeeRow,
+  readTenancy,
+  rowTenantId,
+} from './tenancy';
 import type { MediaDisks, MultipartPart } from './types';
 
 export interface UploadSession {
@@ -35,6 +44,11 @@ export interface UploadSession {
    * and without the client having to call back in after the bytes land.
    */
   metadata?: Record<string, unknown>;
+  /**
+   * The tenant the session belongs to (`null` = none). Set only while tenancy is on; stores leave
+   * it `undefined` otherwise and never read or write their tenant column.
+   */
+  tenantId?: string | null;
 }
 
 /** Optional filter for {@link UploadSessionStore.list}. */
@@ -43,6 +57,8 @@ export interface UploadSessionListFilter {
   disk?: string;
   /** Only sessions whose `key` starts with this prefix. */
   keyPrefix?: string;
+  /** Tenancy only (see {@link UploadSessionStore.enableTenancy}): keep only this tenant's sessions. */
+  tenant?: MediaTenantMatch;
 }
 
 /** Persistence SPI for resumable upload sessions (in-memory impl in `-testing`). */
@@ -61,6 +77,13 @@ export interface UploadSessionStore {
    * enumerate (or a minimal impl) omit it, and callers degrade to an empty list.
    */
   list?(filter?: UploadSessionListFilter): Promise<UploadSession[]>;
+  /**
+   * Switch the store to tenancy, as `MediaStore.enableTenancy`: verify (or add) the nullable
+   * `tenant_id` column, throw `MediaTenancyUnavailableError` when missing, then persist and return
+   * {@link UploadSession.tenantId} and honour `list`'s `tenant` filter. A store without it can't run
+   * with tenancy on.
+   */
+  enableTenancy?(): Promise<void>;
 }
 
 export interface CreateUploadInput {
@@ -70,6 +93,8 @@ export interface CreateUploadInput {
   contentType?: string;
   /** Opaque application data echoed back on the upload diagnostics events. See {@link UploadSession.metadata}. */
   metadata?: Record<string, unknown>;
+  /** The tenant to stamp (`null` = none), instead of the request's. Used only while tenancy is on. */
+  tenantId?: string | null;
 }
 
 export interface ResumableUploadManagerOptions {
@@ -87,6 +112,10 @@ export interface ResumableUploadManagerOptions {
   idGenerator?: () => string;
   /** Emit `nestjs:media:upload.*` diagnostics events (default true). */
   emitDiagnostics?: boolean;
+  /** Scope sessions by the request's tenant. Default `'inherit'` (see `MediaTenancyOption`). */
+  tenancy?: MediaTenancyOption;
+  /** The context's `CONTEXT_ACCESSOR`, when injected. Default: the global slot the context publishes. */
+  contextAccessor?: unknown;
 }
 
 /**
@@ -102,6 +131,9 @@ export class ResumableUploadManager {
   private readonly tmpPrefix: string;
   private readonly newId: () => string;
   private readonly emitDiagnostics: boolean;
+  private readonly tenancyOption: MediaTenancyOption;
+  private readonly contextAccessor: unknown;
+  private tenancyReady: Promise<void> | undefined;
 
   constructor(options: ResumableUploadManagerOptions) {
     this.storage = options.storage;
@@ -111,6 +143,40 @@ export class ResumableUploadManager {
     assertMediaKey(this.tmpPrefix);
     this.newId = options.idGenerator ?? (() => randomUUID());
     this.emitDiagnostics = options.emitDiagnostics ?? true;
+    this.tenancyOption = options.tenancy ?? 'inherit';
+    this.contextAccessor = options.contextAccessor;
+  }
+
+  /**
+   * Fails fast when tenancy is on and the session store can't scope by tenant. `MediaModule` calls
+   * it at boot; every operation also checks. Resolves to whether tenancy is on.
+   */
+  async prepareTenancy(): Promise<boolean> {
+    return (await this.tenancy()).enabled;
+  }
+
+  private async tenancy(): Promise<MediaTenancy> {
+    const tenancy = readTenancy(this.tenancyOption, this.contextAccessor);
+    if (!tenancy.enabled) return tenancy;
+    this.tenancyReady ??= this.enableStoreTenancy();
+    await this.tenancyReady;
+    return tenancy;
+  }
+
+  private async enableStoreTenancy(): Promise<void> {
+    if (typeof this.sessions.enableTenancy !== 'function') {
+      this.tenancyReady = undefined;
+      throw new MediaTenancyUnavailableError(
+        `the upload session store (${this.sessions.constructor?.name ?? 'custom'}) has no \`enableTenancy()\``,
+        'Use a session store that supports tenancy (every first-party store does, from this version).',
+      );
+    }
+    try {
+      await this.sessions.enableTenancy();
+    } catch (error) {
+      this.tenancyReady = undefined;
+      throw error;
+    }
   }
 
   private partKey(session: UploadSession, part: number): string {
@@ -119,6 +185,7 @@ export class ResumableUploadManager {
 
   async createUpload(input: CreateUploadInput): Promise<UploadSession> {
     assertMediaKey(input.key);
+    const tenancy = await this.tenancy();
     // Resolves (and so validates) the disk name before anything is created.
     this.storage.disk(input.disk);
     const driver = multipartFor(this.multipart, input.disk);
@@ -141,6 +208,9 @@ export class ResumableUploadManager {
       offset: 0,
       parts: 0,
       ...(input.metadata !== undefined ? { metadata: input.metadata } : {}),
+      ...(tenancy.enabled
+        ? { tenantId: input.tenantId !== undefined ? input.tenantId : rowTenantId(tenancy) }
+        : {}),
       ...multipart,
     });
     this.emit('upload.start', {
@@ -268,7 +338,7 @@ export class ResumableUploadManager {
   }
 
   async abort(id: string): Promise<void> {
-    const session = await this.sessions.get(id);
+    const session = await this.find(id);
     if (!session) return;
     const driver = multipartFor(this.multipart, session.disk);
     if (session.multipartUploadId && driver) {
@@ -304,8 +374,15 @@ export class ResumableUploadManager {
     await this.storage.disk(session.disk).delete(keys);
   }
 
-  private async require(id: string): Promise<UploadSession> {
+  /** A session the request's tenant can see, else `null` (a hidden one reads as missing). */
+  private async find(id: string): Promise<UploadSession | null> {
+    const tenancy = await this.tenancy();
     const session = await this.sessions.get(id);
+    return session && canSeeRow(tenancy, session.tenantId) ? session : null;
+  }
+
+  private async require(id: string): Promise<UploadSession> {
+    const session = await this.find(id);
     if (!session) throw new UploadSessionNotFoundError(id);
     return session;
   }

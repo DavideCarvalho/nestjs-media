@@ -22,13 +22,16 @@ export const MEDIA_PG_DDL: readonly string[] = [
     "custom_properties" jsonb NOT NULL,
     "conversions" jsonb NOT NULL,
     "created_at" timestamp with time zone NOT NULL,
-    "updated_at" timestamp with time zone NOT NULL
+    "updated_at" timestamp with time zone NOT NULL,
+    "tenant_id" text
   )`,
+  `ALTER TABLE "media" ADD COLUMN IF NOT EXISTS "tenant_id" text`,
   `CREATE INDEX IF NOT EXISTS "idx_media_owner" ON "media" ("owner_type", "owner_id", "collection")`,
   `CREATE INDEX IF NOT EXISTS "idx_media_collection" ON "media" ("collection")`,
   `CREATE INDEX IF NOT EXISTS "idx_media_disk" ON "media" ("disk")`,
   `CREATE INDEX IF NOT EXISTS "idx_media_created_at" ON "media" ("created_at")`,
   `CREATE INDEX IF NOT EXISTS "idx_media_collection_created_at" ON "media" ("collection", "created_at", "id")`,
+  `CREATE INDEX IF NOT EXISTS "idx_media_tenant" ON "media" ("tenant_id", "owner_type", "owner_id", "collection")`,
   `CREATE TABLE IF NOT EXISTS "media_upload_sessions" (
     "id" text PRIMARY KEY NOT NULL,
     "disk" text NOT NULL,
@@ -40,8 +43,11 @@ export const MEDIA_PG_DDL: readonly string[] = [
     "multipart_upload_id" text,
     "metadata" jsonb,
     "created_at" timestamp with time zone DEFAULT now() NOT NULL,
-    "updated_at" timestamp with time zone DEFAULT now() NOT NULL
+    "updated_at" timestamp with time zone DEFAULT now() NOT NULL,
+    "tenant_id" text
   )`,
+  `ALTER TABLE "media_upload_sessions" ADD COLUMN IF NOT EXISTS "tenant_id" text`,
+  `CREATE INDEX IF NOT EXISTS "idx_media_upload_sessions_tenant" ON "media_upload_sessions" ("tenant_id")`,
   `CREATE TABLE IF NOT EXISTS "media_upload_parts" (
     "session_id" text NOT NULL REFERENCES "media_upload_sessions" ("id") ON DELETE CASCADE,
     "part_number" integer NOT NULL,

@@ -93,6 +93,7 @@ export class RedisUploadSessionStore implements UploadSessionStore {
       // Round-trips the host's opaque metadata. `create` serialises the whole session, so without
       // restoring it here it would be silently dropped on read and never reach `upload.complete`.
       ...(parsed.metadata !== undefined ? { metadata: parsed.metadata } : {}),
+      ...(parsed.tenantId !== undefined ? { tenantId: parsed.tenantId } : {}),
     };
     return session;
   }
@@ -131,6 +132,7 @@ export class RedisUploadSessionStore implements UploadSessionStore {
         if (filter.keyPrefix !== undefined && !session.key.startsWith(filter.keyPrefix)) {
           continue;
         }
+        if (filter.tenant && !tenantMatches(filter.tenant, session.tenantId)) continue;
         sessions.push(session);
       }
     } while (cursor !== '0');
@@ -183,4 +185,15 @@ export class RedisUploadSessionStore implements UploadSessionStore {
   async delete(id: string): Promise<void> {
     await this.redis.del(this.key(id), this.partsKey(id));
   }
+
+  /** Tenancy needs no schema: `tenantId` rides in the stored session JSON. */
+  async enableTenancy(): Promise<void> {}
+}
+
+function tenantMatches(
+  match: { id: string | null; orNull?: boolean },
+  tenantId: string | null | undefined,
+): boolean {
+  const row = tenantId ?? null;
+  return row === match.id || (match.orNull === true && row === null);
 }

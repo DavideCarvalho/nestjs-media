@@ -5,6 +5,7 @@ export * from './keys';
 export * from './capabilities';
 export * from './listing';
 export * from './storage-helpers';
+export * from './tenancy';
 export * from './media-record';
 export * from './media-store';
 export * from './media-collection';

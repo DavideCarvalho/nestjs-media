@@ -144,5 +144,75 @@ export function runMediaStoreConformance(
       const result = await store.list({}, { limit: 10, cursor: 'not-a-valid-cursor' });
       expect(result.records.map((r) => r.id)).toEqual(['a']);
     });
+
+    it("save returns the tenantId that was persisted, never one it didn't store", async () => {
+      const store = await makeStore();
+      // Off: a store that doesn't keep `tenantId` must not echo it back.
+      const off = await store.save(makeRecord({ id: 'off', tenantId: 'not-stored' }));
+      expect(off.tenantId ?? null).toEqual((await store.find('off'))?.tenantId ?? null);
+      if (typeof store.enableTenancy !== 'function') return;
+      await store.enableTenancy();
+      const on = await store.save(makeRecord({ id: 'on', tenantId: 't1' }));
+      expect(on.tenantId).toBe('t1');
+      expect((await store.find('on'))?.tenantId).toBe('t1');
+    });
+
+    it('with tenancy enabled, persists tenantId and honours tenant filters', async () => {
+      const store = await makeStore();
+      if (typeof store.enableTenancy !== 'function') return;
+      await store.enableTenancy();
+      await store.save(makeRecord({ id: 'a', tenantId: 't1', createdAt: new Date(1000), size: 1 }));
+      await store.save(makeRecord({ id: 'b', tenantId: 't2', createdAt: new Date(2000), size: 2 }));
+      await store.save(makeRecord({ id: 'c', tenantId: null, createdAt: new Date(3000), size: 4 }));
+      await store.save(makeRecord({ id: 'd', tenantId: 't1', createdAt: new Date(4000), size: 8 }));
+
+      expect((await store.find('a'))?.tenantId).toBe('t1');
+      expect((await store.find('c'))?.tenantId ?? null).toBeNull();
+      const byOwner = await store.listByOwner('Post', '1');
+      expect(Object.fromEntries(byOwner.map((r) => [r.id, r.tenantId ?? null]))).toEqual({
+        a: 't1',
+        b: 't2',
+        c: null,
+        d: 't1',
+      });
+
+      // An upsert can move a record to another tenant.
+      const moved = await store.find('d');
+      if (!moved) throw new Error('expected record d');
+      await store.save({ ...moved, tenantId: 't2' });
+      expect((await store.find('d'))?.tenantId).toBe('t2');
+      await store.save({ ...moved, tenantId: 't1' });
+
+      if (typeof store.count === 'function') {
+        expect(await store.count({ tenant: { id: 't1' } })).toBe(2);
+        expect(await store.count({ tenant: { id: null } })).toBe(1);
+        expect(await store.count({ tenant: { id: 't1', orNull: true } })).toBe(3);
+        expect(await store.count()).toBe(4);
+      }
+      if (typeof store.aggregate === 'function') {
+        const buckets = await store.aggregate({
+          groupBy: 'collection',
+          sum: 'size',
+          tenant: { id: 't1' },
+        });
+        expect(buckets).toEqual([{ key: 'gallery', count: 2, sumSize: 9 }]);
+      }
+      if (typeof store.list === 'function') {
+        const t1 = await store.list({ tenant: { id: 't1' } }, { limit: 50 });
+        expect(t1.records.map((r) => [r.id, r.tenantId])).toEqual([
+          ['a', 't1'],
+          ['d', 't1'],
+        ]);
+        const none = await store.list({ tenant: { id: null } }, { limit: 50 });
+        expect(none.records.map((r) => r.id)).toEqual(['c']);
+        const shared = await store.list({ tenant: { id: 't2', orNull: true } }, { limit: 1 });
+        expect(shared.records.map((r) => r.id)).toEqual(['b']);
+        const next = await store.list(
+          { tenant: { id: 't2', orNull: true } },
+          { limit: 1, ...(shared.cursor ? { cursor: shared.cursor } : {}) },
+        );
+        expect(next.records.map((r) => r.id)).toEqual(['c']);
+      }
+    });
   });
 }

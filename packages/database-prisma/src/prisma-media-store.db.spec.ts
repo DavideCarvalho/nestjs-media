@@ -125,4 +125,30 @@ describe('PrismaMediaStore [real Postgres / testcontainers]', () => {
     expect(rows).toHaveLength(1);
     expect(rows[0]?.name).toBe('second');
   });
+
+  it('with tenancy enabled, writes tenantId and filters count/aggregate/list by tenant', async (ctx) => {
+    if (!store) {
+      ctx.skip();
+      return;
+    }
+    await prisma.media.deleteMany();
+    const tenantStore = new PrismaMediaStore(prisma);
+    await tenantStore.enableTenancy();
+    await tenantStore.save(record({ id: 'a', tenantId: 't1', createdAt: new Date(1000) }));
+    await tenantStore.save(record({ id: 'b', tenantId: 't2', createdAt: new Date(2000) }));
+    await tenantStore.save(record({ id: 'c', createdAt: new Date(3000) }));
+    expect((await tenantStore.find('a'))?.tenantId).toBe('t1');
+    expect((await tenantStore.find('c'))?.tenantId).toBeNull();
+    expect(await tenantStore.count({ tenant: { id: 't1', orNull: true } })).toBe(2);
+    expect(await tenantStore.aggregate({ groupBy: 'disk', tenant: { id: null } })).toEqual([
+      { key: 'local', count: 1, sumSize: 0 },
+    ]);
+    const first = await tenantStore.list({ tenant: { id: 't2', orNull: true } }, { limit: 1 });
+    expect(first.records.map((r) => r.id)).toEqual(['b']);
+    const next = await tenantStore.list(
+      { tenant: { id: 't2', orNull: true } },
+      { limit: 1, ...(first.cursor ? { cursor: first.cursor } : {}) },
+    );
+    expect(next.records.map((r) => r.id)).toEqual(['c']);
+  });
 });

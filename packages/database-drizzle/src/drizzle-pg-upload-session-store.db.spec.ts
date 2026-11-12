@@ -4,7 +4,7 @@
 import type { UploadSession } from '@dudousxd/nestjs-media-core';
 import { sql } from 'drizzle-orm';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { DrizzlePgUploadSessionStore } from './pg';
+import { DrizzlePgUploadSessionStore, createMediaPgTables } from './pg';
 import {
   type PgTestDatabase,
   skipPgSpecs,
@@ -175,5 +175,43 @@ describe.skipIf(skipPgSpecs)('DrizzlePgUploadSessionStore (postgres)', () => {
     expect((await store.list({ keyPrefix: 'a_b' })).map((s) => s.id)).toEqual(['us']);
     expect((await store.list({ keyPrefix: 'back\\' })).map((s) => s.id)).toEqual(['bs']);
     expect((await store.list({ keyPrefix: '%' })).map((s) => s.id)).toEqual([]);
+  });
+
+  it('with tenancy enabled, persists tenantId and filters list by tenant', async () => {
+    await store.enableTenancy();
+    await store.create(session('a', { tenantId: 't1' }));
+    await store.create(session('b', { tenantId: 't2' }));
+    // On: an unset tenant is returned as the `null` that was stored.
+    expect((await store.create(session('c', {}))).tenantId).toBeNull();
+    expect((await store.get('a'))?.tenantId).toBe('t1');
+    expect((await store.get('c'))?.tenantId).toBeNull();
+    await store.update(session('a', { tenantId: 't1', offset: 5 }));
+    expect((await store.get('a'))?.tenantId).toBe('t1');
+    const ids = async (tenant: { id: string | null; orNull?: boolean }) =>
+      (await store.list({ tenant })).map((s) => s.id).sort();
+    expect(await ids({ id: 't1' })).toEqual(['a']);
+    expect(await ids({ id: null })).toEqual(['c']);
+    expect(await ids({ id: 't2', orNull: true })).toEqual(['b', 'c']);
+  });
+
+  it('with tenancy off, works on a table without tenant_id; enableTenancy then fails with the fix', async () => {
+    await pgdb.db.execute(sql`ALTER TABLE media_upload_sessions DROP COLUMN tenant_id`);
+    try {
+      // Off: `create`/`update` don't echo a `tenantId` that was never stored.
+      expect(
+        await store.create(session('a', { tenantId: 'ignored-while-off' })),
+      ).not.toHaveProperty('tenantId');
+      expect(
+        await store.update(session('a', { tenantId: 'ignored-while-off', offset: 1 })),
+      ).not.toHaveProperty('tenantId');
+      expect(await store.get('a')).not.toHaveProperty('tenantId');
+      expect(await store.list()).toHaveLength(1);
+      await expect(store.enableTenancy()).rejects.toMatchObject({
+        name: 'MediaTenancyUnavailableError',
+        message: expect.stringContaining('ALTER TABLE media_upload_sessions ADD COLUMN tenant_id'),
+      });
+    } finally {
+      await createMediaPgTables(pgdb.db);
+    }
   });
 });

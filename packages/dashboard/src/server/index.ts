@@ -39,8 +39,10 @@ export { MediaConsoleActionsController } from './media-console-actions.controlle
 export {
   MEDIA_MULTIPART,
   MEDIA_STORE,
+  MEDIA_TENANCY,
   MEDIA_UPLOAD_SESSIONS,
 } from './tokens.js';
+export type { ConsoleTenancyScope } from './media-console.service.js';
 // The API response types (also published at the `./client` entry) for host reuse.
 export type * from '../client/types.js';
 export type {

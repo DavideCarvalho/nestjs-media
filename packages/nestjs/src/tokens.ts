@@ -17,3 +17,8 @@ export const MEDIA_UPLOAD_SESSIONS = Symbol.for('nestjs-media:upload-sessions');
  * Consumed by the media dashboard (folders, capability badges) and telescope.
  */
 export const MEDIA_MULTIPART = Symbol.for('nestjs-media:multipart');
+/**
+ * The request's tenant scope ({@link MediaTenancyScope}), from `MediaModuleOptions.tenancy`.
+ * Consumed by the media dashboard, which reads the stores directly.
+ */
+export const MEDIA_TENANCY = Symbol.for('nestjs-media:tenancy');

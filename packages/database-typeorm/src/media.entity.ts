@@ -33,6 +33,16 @@ export const MediaEntity = new EntitySchema<MediaRecord>({
     conversions: { type: 'simple-json' },
     createdAt: { type: String, transformer: isoDate },
     updatedAt: { type: String, transformer: isoDate },
+    // Tenancy only. Never selected, inserted or updated by the entity itself: the store reads and
+    // writes it explicitly once tenancy is on, so a table without the column keeps working.
+    tenantId: {
+      type: String,
+      name: 'tenant_id',
+      nullable: true,
+      select: false,
+      insert: false,
+      update: false,
+    },
   },
   // Note: `ensureMediaSchema` only creates the table and adds missing columns
   // non-destructively — it does NOT add indexes to an already-existing table, so
@@ -43,5 +53,6 @@ export const MediaEntity = new EntitySchema<MediaRecord>({
     { name: 'idx_media_disk', columns: ['disk'] },
     { name: 'idx_media_created_at', columns: ['createdAt'] },
     { name: 'idx_media_list', columns: ['collection', 'createdAt', 'id'] },
+    { name: 'idx_media_tenant', columns: ['tenantId', 'ownerType', 'ownerId', 'collection'] },
   ],
 });

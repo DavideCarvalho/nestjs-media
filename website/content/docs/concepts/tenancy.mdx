@@ -1,0 +1,166 @@
+---
+title: Tenancy
+icon: Building2
+description: Scope media records and upload sessions by the request's tenant (organization), from @dudousxd/nestjs-context. Off until you turn it on.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+With tenancy on, every media record and upload session belongs to the **tenant** of the request that created it (an organization, a clinic, a user's workspace), and a request only sees its own tenant's media. The tenant comes from [`@dudousxd/nestjs-context`](/docs/context/tenancy); media reads it structurally and doesn't depend on it.
+
+Tenancy is **off by default**. Nothing changes until `ContextModule` turns it on, and a table without the tenant column keeps working while it is off.
+
+---
+
+## Turn it on
+
+1. Add the nullable `tenant_id` column to your tables ([per adapter, below](#schema)).
+2. Turn tenancy on in the context, and set the tenant of each request (see the context's [Tenancy](/docs/context/tenancy) page):
+
+```ts
+ContextModule.forRoot({ tenancy: { enabled: true } });
+
+// in your auth guard, once the organization is resolved:
+Context.setTenant({ id: claims.org_id, kind: 'organization' });
+```
+
+`MediaModule` follows the context switch. Its own `tenancy` option overrides it:
+
+```ts
+MediaModule.forRoot({
+  store,
+  tenancy: 'inherit', // default: on when ContextModule turns tenancy on
+});
+```
+
+| `tenancy` | Effect |
+|---|---|
+| `'inherit'` (default) | On when `ContextModule`'s `tenancy.enabled` is `true` |
+| `false` | Off, even when the context turns tenancy on |
+| `{ enabled?: 'inherit' \| boolean; kinds?: string[]; nullRows?: 'tenantless' \| 'shared' }` | `enabled` overrides the context switch. `kinds` is media's own allow-list of tenant kinds (a tenant of another kind counts as none). `nullRows: 'shared'` shows records with no tenant to every tenant. |
+
+---
+
+## What changes
+
+**Writes are stamped.** `library.attach()` (and `MediaService.attach()`), and resumable uploads (`uploads.createUpload()`, the tus and multipart controllers), store the request's tenant id. A request with no tenant stores `null`.
+
+An explicit `tenantId` wins over the request's tenant, for example in a job or a webhook handler:
+
+```ts
+await media.library.attach({ ...input, tenantId: invoice.organizationId });
+await media.uploads.createUpload({ disk: 's3', key, tenantId: null }); // no tenant
+```
+
+`tenantId` is ignored while tenancy is off.
+
+**Reads follow the request's tenant.** `library.get()`, `library.list()`, `library.locate()`, `library.url()`, conversions (`ensureConversion`), `MediaService.serve()`/`url()`/`delete()`, upload sessions (`status`, `writeChunk`, `writePart`, `complete`, `abort`) and the [dashboard](/docs/packages/dashboard)'s library and uploads views apply this rule:
+
+| Request | Record of its tenant | Record of another tenant | Record with no tenant |
+|---|---|---|---|
+| with a tenant | visible | not found | not found (visible with `nullRows: 'shared'`) |
+| with no tenant | — | not found | visible |
+| inside `Context.allTenants()` | visible | visible | visible |
+| no context (boot, workers, scripts) | visible | visible | visible |
+
+A record or session the request can't see is treated exactly like a missing one, never as a 403, so other tenants' ids don't leak:
+
+- **Library** (`locate()`, `url()`, `ensureConversion`): `MediaNotFoundError`. `get()` returns `null`.
+- **Upload sessions** (`status`, `writeChunk`, `writePart`, `complete`): `UploadSessionNotFoundError`.
+- **`MediaService.serve()`/`url()`:** a 404.
+- **`library.delete()`, `MediaService.delete()` and upload `abort()`:** a silent no-op. Nothing is deleted, and nothing is thrown.
+- **Dashboard:** every library and uploads endpoint returns a 404, including delete record and cancel upload. With tenancy on, deleting or cancelling a missing id is a 404 too. The check runs before your `authorize` hook, which still runs for every visible record: tenancy only narrows.
+
+<Callout type="info">
+  Not scoped by tenant: the dashboard's object browser (it lists raw disk keys, not records), direct presigned uploads (they keep no session), the attachment-as-column API (attachments live on your own rows), and the Telescope media panels. Restrict those with your `authorize` hooks.
+</Callout>
+
+---
+
+## Fails at boot, not at the first request
+
+With tenancy on, `MediaModule` checks at boot that the media store (and the upload session store) can scope by tenant. When the `tenant_id` column is missing, the app refuses to start with `MediaTenancyUnavailableError`, whose message says how to add it. A store that doesn't implement tenancy (`enableTenancy()`) fails the same way.
+
+With tenancy off, the stores never read or write the column, so you can add it before you turn tenancy on.
+
+---
+
+## Schema
+
+Each adapter declares a nullable `tenant_id` and an index on `(tenant_id, owner_type, owner_id, collection)` (upload sessions: `(tenant_id)`). Add them the way the adapter already manages its schema:
+
+| Adapter | How the column gets there |
+|---|---|
+| [TypeORM](/docs/packages/database-typeorm) | `MediaEntity` declares it. With `autoCreateSchema` (default), the store adds the column and index when tenancy turns on; with `synchronize`, TypeORM adds them; otherwise a migration. |
+| [MikroORM](/docs/packages/database-mikro-orm) | `MediaEntity` declares it. `ensureMediaSchema(orm)` adds it, or generate a migration with the MikroORM CLI. |
+| [Drizzle](/docs/packages/database-drizzle) | `mediaTable`, `mediaPgTable` and `mediaUploadSessionsPgTable` declare it: generate a migration with drizzle-kit. `createMediaTable` / `createMediaPgTables` add it in dev and tests. |
+| [Prisma](/docs/packages/database-prisma) | Add `tenantId String? @map("tenant_id")` and the index to your `Media` model, then `prisma migrate dev`. |
+| Redis sessions, in-memory stores | Nothing to add. |
+
+Plain SQL, if you write migrations by hand:
+
+```sql
+ALTER TABLE media ADD COLUMN tenant_id varchar(255) NULL;
+CREATE INDEX idx_media_tenant ON media (tenant_id, owner_type, owner_id, collection);
+
+-- Drizzle Postgres upload sessions
+ALTER TABLE media_upload_sessions ADD COLUMN tenant_id text NULL;
+CREATE INDEX idx_media_upload_sessions_tenant ON media_upload_sessions (tenant_id);
+```
+
+The TypeORM adapter names its owner columns `ownerType` / `ownerId` (camelCase): use `("tenant_id", "ownerType", "ownerId", "collection")` there.
+
+---
+
+## Backfill existing records
+
+Records created before tenancy have `tenant_id = NULL`: only requests with no tenant see them. Assign them once, in SQL, from the owner they belong to.
+
+When the owner **is** the tenant (media attached to an `Organization`):
+
+```sql
+UPDATE media
+SET tenant_id = owner_id
+WHERE tenant_id IS NULL AND owner_type = 'Organization';
+```
+
+When the owner **belongs to** a tenant (a `Project` with an `organization_id`):
+
+```sql
+UPDATE media
+SET tenant_id = projects.organization_id
+FROM projects
+WHERE media.tenant_id IS NULL
+  AND media.owner_type = 'Project'
+  AND projects.id::text = media.owner_id;
+```
+
+That is Postgres syntax; on MySQL use `UPDATE media JOIN projects ON projects.id = media.owner_id SET media.tenant_id = projects.organization_id WHERE ...`. Repeat per owner type. Records you leave `NULL` stay visible to requests with no tenant (and to every tenant with `nullRows: 'shared'`).
+
+Upload sessions are short-lived: let in-flight ones finish rather than backfilling them.
+
+---
+
+## Custom stores
+
+A [custom store](/docs/recipes/custom-store) supports tenancy by implementing `enableTenancy()`: check (or add) the column and throw when it's missing; from then on, persist `record.tenantId` and honour the `tenant` field of the `count` / `aggregate` / `list` filters (`{ id: string | null; orNull?: boolean }`, where `id: null` means "no tenant"). Until `enableTenancy()` is called, never touch the column. `runMediaStoreConformance` covers it.
+
+---
+
+## Testing
+
+```ts
+import { Context } from '@dudousxd/nestjs-context';
+
+it('keeps tenants apart', async () => {
+  const mine = await Context.withTenant({ id: 'org_1', kind: 'organization' }, () =>
+    media.library.attach(input),
+  );
+  const seen = await Context.withTenant({ id: 'org_2', kind: 'organization' }, () =>
+    media.library.get(mine.id),
+  );
+  expect(seen).toBeNull();
+});
+```
+
+`InMemoryMediaStore` and `InMemoryUploadSessionStore` from `@dudousxd/nestjs-media-testing` support tenancy as they are.

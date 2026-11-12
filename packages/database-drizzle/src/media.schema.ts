@@ -1,4 +1,5 @@
-import { index, integer, sqliteTable, text } from 'drizzle-orm/sqlite-core';
+import { index, sqliteTable, text } from 'drizzle-orm/sqlite-core';
+import { mediaColumns } from './media-columns';
 
 /**
  * Drizzle (sqlite) media table. `order` maps to the `position` column. JSON columns
@@ -8,21 +9,9 @@ import { index, integer, sqliteTable, text } from 'drizzle-orm/sqlite-core';
 export const mediaTable = sqliteTable(
   'media',
   {
-    id: text('id').primaryKey(),
-    ownerType: text('owner_type').notNull(),
-    ownerId: text('owner_id').notNull(),
-    collection: text('collection').notNull(),
-    name: text('name').notNull(),
-    fileName: text('file_name').notNull(),
-    mimeType: text('mime_type').notNull(),
-    size: integer('size').notNull(),
-    disk: text('disk').notNull(),
-    path: text('path').notNull(),
-    order: integer('position').notNull(),
-    customProperties: text('custom_properties', { mode: 'json' }).notNull(),
-    conversions: text('conversions', { mode: 'json' }).notNull(),
-    createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
-    updatedAt: integer('updated_at', { mode: 'timestamp_ms' }).notNull(),
+    ...mediaColumns(),
+    /** Tenancy only: read and written once the store's `enableTenancy()` ran. */
+    tenantId: text('tenant_id'),
   },
   (table) => ({
     ownerIdx: index('idx_media_owner').on(table.ownerType, table.ownerId, table.collection),
@@ -33,6 +22,12 @@ export const mediaTable = sqliteTable(
       table.collection,
       table.createdAt,
       table.id,
+    ),
+    tenantIdx: index('idx_media_tenant').on(
+      table.tenantId,
+      table.ownerType,
+      table.ownerId,
+      table.collection,
     ),
   }),
 );

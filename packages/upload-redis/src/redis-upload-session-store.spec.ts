@@ -173,6 +173,20 @@ describe('RedisUploadSessionStore', () => {
     expect(redis.store.has('media:upload:session:key-check')).toBe(true);
   });
 
+  it('round-trips tenantId and filters list() by tenant', async () => {
+    await store.enableTenancy();
+    await store.create(makeSession({ id: 'a', tenantId: 't1' }));
+    await store.create(makeSession({ id: 'b', tenantId: 't2' }));
+    await store.create(makeSession({ id: 'c', tenantId: null }));
+    expect((await store.get('a'))?.tenantId).toBe('t1');
+    expect((await store.get('c'))?.tenantId).toBeNull();
+    const ids = async (tenant: { id: string | null; orNull?: boolean }) =>
+      (await store.list({ tenant })).map((s) => s.id).sort();
+    expect(await ids({ id: 't1' })).toEqual(['a']);
+    expect(await ids({ id: null })).toEqual(['c']);
+    expect(await ids({ id: 't2', orNull: true })).toEqual(['b', 'c']);
+  });
+
   it('list() returns all stored sessions', async () => {
     await store.create(makeSession({ id: 'a', disk: 'pribuy', key: 'pribuy/elms/1.sqlite' }));
     await store.create(makeSession({ id: 'b', disk: 'files', key: 'reports/x.csv' }));

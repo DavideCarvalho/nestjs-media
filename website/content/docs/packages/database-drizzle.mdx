@@ -19,6 +19,8 @@ MediaModule.forRoot({ store: new DrizzleMediaStore(db) });
 
 Drizzle is migration-first by design — there's no runtime auto-schema. In production you manage the table with **drizzle-kit** using the exported `mediaTable` schema; `createMediaTable(db)` is a convenience for tests and quick dev setups that issues the `CREATE TABLE IF NOT EXISTS`.
 
+The tables declare a nullable `tenant_id` and its index, used only for [tenancy](/docs/concepts/tenancy): your next drizzle-kit migration adds them. While tenancy is off, the stores never read or write the column, so an existing table without it keeps working.
+
 ## Postgres (`/pg`)
 
 Drizzle's schema is dialect-specific, so the package root ships the **sqlite/libSQL** schema and the Postgres flavour lives on its own subpath, `@dudousxd/nestjs-media-database-drizzle/pg` (built on `drizzle-orm/pg-core`). Its stores accept any drizzle Postgres database (`PgDatabase` — node-postgres, postgres-js, neon, pglite, …).

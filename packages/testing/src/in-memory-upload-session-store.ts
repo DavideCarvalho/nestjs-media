@@ -4,6 +4,7 @@ import type {
   UploadSessionListFilter,
   UploadSessionStore,
 } from '@dudousxd/nestjs-media-core';
+import { matchesTenant } from '@dudousxd/nestjs-media-core';
 
 /** In-memory UploadSessionStore for tests. */
 export class InMemoryUploadSessionStore implements UploadSessionStore {
@@ -48,8 +49,12 @@ export class InMemoryUploadSessionStore implements UploadSessionStore {
       .filter(
         (session) =>
           (filter.disk === undefined || session.disk === filter.disk) &&
-          (filter.keyPrefix === undefined || session.key.startsWith(filter.keyPrefix)),
+          (filter.keyPrefix === undefined || session.key.startsWith(filter.keyPrefix)) &&
+          matchesTenant(filter.tenant, session.tenantId),
       )
       .map((session) => ({ ...session }));
   }
+
+  /** Tenancy needs no schema here: `tenantId` is kept on the session as is. */
+  async enableTenancy(): Promise<void> {}
 }

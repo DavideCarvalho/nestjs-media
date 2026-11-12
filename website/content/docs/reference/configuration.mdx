@@ -28,6 +28,9 @@ interface MediaModuleOptions {
     keyFor?: (filename: string, token: string, metadata: Record<string, string>) => string;
   };
 
+  // ── scope records and upload sessions by the request's tenant ────────
+  tenancy?: 'inherit' | false | { enabled?: 'inherit' | boolean; kinds?: string[]; nullRows?: 'tenantless' | 'shared' };
+
   // ── who may read/attach/delete through MediaService ────────────────────
   authorize?: (user: unknown, action: 'read' | 'attach' | 'delete', subject: MediaRecord | MediaAttachTarget) => void | Promise<void>;
 
@@ -55,6 +58,7 @@ interface MediaModuleOptions {
 | `uploadTmpPrefix` | — | Where in-progress chunks are staged on the disk (a valid key, default `.uploads`) |
 | `multipart` | — | Native multipart side-cars by disk name. A name that isn't a `StorageModule` disk fails at boot |
 | `authorize` | — | Checked by `MediaService.serve()`/`url()` (`read`), `attach()`, `delete()`; throw to refuse. See [authorize](/docs/packages/nestjs#authorize) |
+| `tenancy` | — | Default `'inherit'`: scope records and upload sessions by the request's tenant when `ContextModule` turns tenancy on. `false` opts out. See [Tenancy](/docs/concepts/tenancy) |
 | `tus` | — | Mounts `MediaUploadController` (needs `uploadSessions`) |
 | `direct` | — | Enables `media.directUploads` + mounts `MediaDirectUploadController` (needs a `multipart` side-car for the disk) |
 | `decorators` | in production, unless nothing is mounted | Class decorators applied to every mounted upload controller, e.g. `[UseGuards(AuthenticationGuard), Can(MediaPolicy, 'upload')]`. The controllers are `@Can.Anyone()`-open to `@nestjs/authorization`'s global guard either way. See [Protecting the routes](#protecting-the-routes). |
@@ -189,5 +193,6 @@ The disks themselves are `@nestjs/storage`'s `Storage` (or `@InjectDisk(name)`).
 | `UploadSessionNotFoundError` | `MEDIA_UPLOAD_SESSION_NOT_FOUND` |
 | `UploadOffsetConflictError` | `MEDIA_UPLOAD_OFFSET_CONFLICT` |
 | `InvalidPartNumberError` | `MEDIA_INVALID_PART_NUMBER` |
+| `MediaTenancyUnavailableError` | `MEDIA_TENANCY_UNAVAILABLE` |
 
 Storage errors (`StorageFileNotFoundError`, `StorageInvalidKeyError`, …) are `@nestjs/storage`'s; see [Migrating](/docs/reference/migration#errors).

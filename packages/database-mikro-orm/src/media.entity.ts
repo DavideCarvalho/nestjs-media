@@ -23,11 +23,18 @@ export const MediaEntity = new EntitySchema<MediaRecord>({
     conversions: { type: 'json' },
     createdAt: { type: 'datetime' },
     updatedAt: { type: 'datetime' },
+    // Tenancy only. Lazy, so it is never selected unless the store asks for it (once tenancy is
+    // on); a table without the column keeps working.
+    tenantId: { type: 'string', fieldName: 'tenant_id', nullable: true, lazy: true },
   },
   indexes: [
     { name: 'idx_media_collection', properties: ['collection'] },
     { name: 'idx_media_disk', properties: ['disk'] },
     { name: 'idx_media_created_at', properties: ['createdAt'] },
     { name: 'idx_media_collection_created_at_id', properties: ['collection', 'createdAt', 'id'] },
+    {
+      name: 'idx_media_tenant',
+      properties: ['tenantId', 'ownerType', 'ownerId', 'collection'],
+    },
   ],
 });

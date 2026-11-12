@@ -35,11 +35,15 @@ model Media {
   conversions      Json
   createdAt        DateTime
   updatedAt        DateTime
+  tenantId         String?  @map("tenant_id") // only needed for tenancy
 
   @@index([ownerType, ownerId, collection])
+  @@index([tenantId, ownerType, ownerId, collection])
   @@map("media")
 }
 ```
+
+`tenantId` is read and written only while [tenancy](/docs/concepts/tenancy) is on; leave it out if you don't use it.
 
 Then `prisma migrate` as usual — the adapter does no schema management.
 

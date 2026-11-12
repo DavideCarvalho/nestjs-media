@@ -8,10 +8,12 @@ import type {
   MediaRecord,
   MediaStore,
 } from '@dudousxd/nestjs-media-core';
-import { and, asc, count, eq, gt, max, or, sql, sum } from 'drizzle-orm';
+import { and, asc, count, eq, getTableColumns, gt, max, or, sql, sum } from 'drizzle-orm';
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
 import { decodeListCursor, encodeListCursor } from './list-cursor';
+import { mediaTableWithoutTenant } from './media-columns';
 import { mediaTable } from './media.schema';
+import { assertTenantColumn, selectable, tenantCondition } from './tenancy';
 
 type DB = BetterSQLite3Database<Record<string, never>>;
 
@@ -36,9 +38,14 @@ export function createMediaTable(db: DB): void {
       custom_properties text NOT NULL,
       conversions text NOT NULL,
       created_at integer NOT NULL,
-      updated_at integer NOT NULL
+      updated_at integer NOT NULL,
+      tenant_id text
     )
   `);
+  const columns = db.all<{ name: string }>(sql`PRAGMA table_info(media)`);
+  if (!columns.some((column) => column.name === 'tenant_id')) {
+    db.run(sql`ALTER TABLE media ADD COLUMN tenant_id text`);
+  }
   db.run(sql`CREATE INDEX IF NOT EXISTS idx_media_collection ON media (collection)`);
   db.run(sql`CREATE INDEX IF NOT EXISTS idx_media_disk ON media (disk)`);
   db.run(sql`CREATE INDEX IF NOT EXISTS idx_media_created_at ON media (created_at)`);
@@ -46,22 +53,59 @@ export function createMediaTable(db: DB): void {
     CREATE INDEX IF NOT EXISTS idx_media_collection_created_at
     ON media (collection, created_at, id)
   `);
+  db.run(sql`
+    CREATE INDEX IF NOT EXISTS idx_media_tenant
+    ON media (tenant_id, owner_type, owner_id, collection)
+  `);
+}
+
+/** The `media` row of a record: `tenant_id` only once tenancy is on. */
+function toRow(record: MediaRecord, tenancy: boolean) {
+  const { tenantId, ...rest } = record;
+  return tenancy ? { ...rest, tenantId: tenantId ?? null } : rest;
 }
 
 /** MediaStore backed by Drizzle (better-sqlite3). POJO receiving the drizzle db. */
 export class DrizzleMediaStore implements MediaStore {
+  private tenancy = false;
+
   constructor(private readonly db: DB) {}
 
+  /** The columns to read: `tenant_id` only once tenancy is on. */
+  private get columns() {
+    return selectable(getTableColumns(mediaTable), this.tenancy);
+  }
+
+  /**
+   * Tenancy: checks the `tenant_id` column exists, then reads and writes it. Called by the
+   * library when tenancy is on; until then the column is never touched.
+   */
+  async enableTenancy(): Promise<void> {
+    await assertTenantColumn(
+      'media',
+      () => this.db.select({ tenantId: mediaTable.tenantId }).from(mediaTable).limit(1),
+      'Generate a migration with drizzle-kit from `mediaTable` (it declares `tenant_id` and the `idx_media_tenant` index), or run `ALTER TABLE media ADD COLUMN tenant_id text; CREATE INDEX idx_media_tenant ON media (tenant_id, owner_type, owner_id, collection);`.',
+    );
+    this.tenancy = true;
+  }
+
   async save(record: MediaRecord): Promise<MediaRecord> {
+    const row = toRow(record, this.tenancy);
+    // Off: through the table without `tenant_id`, which Drizzle would otherwise list in the INSERT.
     await this.db
-      .insert(mediaTable)
-      .values(record)
-      .onConflictDoUpdate({ target: mediaTable.id, set: record });
-    return record;
+      .insert(this.tenancy ? mediaTable : mediaTableWithoutTenant)
+      .values(row)
+      .onConflictDoUpdate({ target: mediaTable.id, set: row });
+    // What was persisted: off, no `tenantId` (the row has none to read back).
+    return row as MediaRecord;
   }
 
   async find(id: string): Promise<MediaRecord | null> {
-    const rows = await this.db.select().from(mediaTable).where(eq(mediaTable.id, id)).limit(1);
+    const rows = await this.db
+      .select(this.columns)
+      .from(mediaTable)
+      .where(eq(mediaTable.id, id))
+      .limit(1);
     return (rows[0] as MediaRecord | undefined) ?? null;
   }
 
@@ -79,7 +123,7 @@ export class DrizzleMediaStore implements MediaStore {
             eq(mediaTable.collection, collection),
           );
     const rows = await this.db
-      .select()
+      .select(this.columns)
       .from(mediaTable)
       .where(where)
       .orderBy(asc(mediaTable.order));
@@ -110,6 +154,7 @@ export class DrizzleMediaStore implements MediaStore {
       ...(filter.ownerType !== undefined ? [eq(mediaTable.ownerType, filter.ownerType)] : []),
       ...(filter.collection !== undefined ? [eq(mediaTable.collection, filter.collection)] : []),
       ...(filter.disk !== undefined ? [eq(mediaTable.disk, filter.disk)] : []),
+      ...(filter.tenant ? [tenantCondition(mediaTable.tenantId, filter.tenant)] : []),
     ];
     const rows = await this.db
       .select({ value: count() })
@@ -123,6 +168,7 @@ export class DrizzleMediaStore implements MediaStore {
     const rows = await this.db
       .select({ key: column, count: count(), sumSize: sum(mediaTable.size) })
       .from(mediaTable)
+      .where(query.tenant ? tenantCondition(mediaTable.tenantId, query.tenant) : undefined)
       .groupBy(column);
     return rows.map((row) => ({
       key: row.key,
@@ -139,6 +185,7 @@ export class DrizzleMediaStore implements MediaStore {
       ...(filter.ownerType !== undefined ? [eq(mediaTable.ownerType, filter.ownerType)] : []),
       ...(filter.collection !== undefined ? [eq(mediaTable.collection, filter.collection)] : []),
       ...(filter.disk !== undefined ? [eq(mediaTable.disk, filter.disk)] : []),
+      ...(filter.tenant ? [tenantCondition(mediaTable.tenantId, filter.tenant)] : []),
       ...(cursor
         ? [
             or(
@@ -150,7 +197,7 @@ export class DrizzleMediaStore implements MediaStore {
     ];
 
     const rows = await this.db
-      .select()
+      .select(this.columns)
       .from(mediaTable)
       .where(filterConditions.length ? and(...filterConditions) : undefined)
       .orderBy(asc(mediaTable.createdAt), asc(mediaTable.id))

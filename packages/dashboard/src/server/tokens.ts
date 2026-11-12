@@ -10,6 +10,8 @@ export const MEDIA_STORE: symbol = Symbol.for('nestjs-media:store');
 export const MEDIA_UPLOAD_SESSIONS: symbol = Symbol.for('nestjs-media:upload-sessions');
 /** The multipart side-cars by disk name (`MediaModuleOptions.multipart`), provided by `MediaModule`. */
 export const MEDIA_MULTIPART: symbol = Symbol.for('nestjs-media:multipart');
+/** The request's tenant scope (`MediaModuleOptions.tenancy`), provided by `MediaModule`. */
+export const MEDIA_TENANCY: symbol = Symbol.for('nestjs-media:tenancy');
 
 /** Carries the resolved UI mount base (e.g. `/media`) to the UI controller. */
 export const MEDIA_DASHBOARD_BASE_PATH: symbol = Symbol('MEDIA_DASHBOARD_BASE_PATH');
