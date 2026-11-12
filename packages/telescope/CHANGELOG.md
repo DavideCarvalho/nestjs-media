@@ -1,5 +1,11 @@
 # @dudousxd/nestjs-media-telescope
 
+## 0.6.2
+
+### Patch Changes
+
+- [#208](https://github.com/DavideCarvalho/nestjs-media/pull/208) [`80b05c1`](https://github.com/DavideCarvalho/nestjs-media/commit/80b05c18e369b89b82e79168c0a7e8012a7409f5) Thanks [@DavideCarvalho](https://github.com/DavideCarvalho)! - Accept `@dudousxd/nestjs-telescope` 3.x as a peer (tested against 3.0.0).
+
 ## 0.6.1
 
 ### Patch Changes
