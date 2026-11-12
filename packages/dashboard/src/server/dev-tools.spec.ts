@@ -178,6 +178,8 @@ describe('mediaDevTools', () => {
     await expect(
       tool('media_delete_objects').run({ disk: 'nope', keys: ['a.txt'] }),
     ).rejects.toThrow('disk "nope" not found');
+    // The console's own reason stays in the message.
+    await expect(tool('media_get_object').run({ disk: 'nope', key: 'x' })).rejects.toThrow(/nope/);
   });
 
   it('media_list_uploads and media_get_upload', async () => {

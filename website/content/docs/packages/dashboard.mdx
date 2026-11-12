@@ -517,7 +517,7 @@ never returned.
 | `media_list_collections` | read | `collection?`, `disk?`, `cursor?`, `limit?` (without `collection` or `disk`: the collection summary) |
 | `media_get_media` | read | `id` |
 | `media_abort_upload` | action | `id` |
-| `media_delete_objects` | action, destructive | `disk`, `keys` (1 to 100) |
+| `media_delete_objects` | action, destructive | `disk`, `keys` (1 to 100); idempotent: a missing key is reported as deleted |
 
 Lists return `{ items, next }`; pass `next` back as `cursor`. An unknown disk, key or id is an error
 that says "not found". The two actions are offered only when the console has `actions: true` and the

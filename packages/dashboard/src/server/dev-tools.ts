@@ -149,7 +149,9 @@ async function call<T>(what: () => string, run: () => Promise<T>): Promise<T> {
   try {
     return await run();
   } catch (error) {
-    if (error instanceof NotFoundException) throw new Error(`${what()} not found`);
+    // Keep the console's own reason (e.g. "Unknown disk: nope") next to what was asked for.
+    if (error instanceof NotFoundException)
+      throw new Error(`${what()} not found (${error.message})`);
     if (error instanceof HttpException) throw new Error(error.message);
     throw error;
   }
@@ -354,7 +356,7 @@ export function mediaDevTools(
       name: 'media_delete_objects',
       kind: 'action',
       destructive: true,
-      description: `Deletes objects from a disk by key, at most ${MAX_DELETE_KEYS} per call. Returns { deleted } with the keys deleted. Stops at the first key that fails and returns { deleted, failed: { key, error }, skipped } so you know exactly what was applied. An error when the disk does not exist.`,
+      description: `Deletes objects from a disk by key, at most ${MAX_DELETE_KEYS} per call. Returns { deleted } with the keys deleted. Deleting is idempotent: a key that does not exist is reported as deleted. Stops at the first key that fails and returns { deleted, failed: { key, error }, skipped } so you know exactly what was applied. An error when the disk does not exist.`,
       input: {
         type: 'object',
         properties: {
