@@ -9,7 +9,7 @@ import {
   type ConsoleAuthorize,
   type ConsoleAuthorizer,
   authorizeByToken,
-  normalizeConsoleResult,
+  normalizeConsoleDecision,
   resolveConsoleAuthorize,
 } from './console-authorize.js';
 
@@ -58,7 +58,7 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe('normalizeConsoleResult', () => {
+describe('normalizeConsoleDecision', () => {
   it.each([
     [true, { allowed: true }],
     [{ allowed: true }, { allowed: true }],
@@ -76,13 +76,13 @@ describe('normalizeConsoleResult', () => {
     [undefined, { allowed: false, reason: 'forbidden' }],
     ['yes', { allowed: false, reason: 'forbidden' }],
   ])('%j → %j', (result, decision) => {
-    expect(normalizeConsoleResult(result)).toEqual(decision);
+    expect(normalizeConsoleDecision(result)).toEqual(decision);
   });
 
   it('returns a fresh object every time (no shared denial singleton)', () => {
     for (const result of [true, false, { allowed: false, reason: 'unauthenticated' }]) {
-      const first = normalizeConsoleResult(result);
-      const second = normalizeConsoleResult(result);
+      const first = normalizeConsoleDecision(result);
+      const second = normalizeConsoleDecision(result);
       expect(first).toEqual(second);
       expect(first).not.toBe(second);
     }
