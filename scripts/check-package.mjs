@@ -56,7 +56,10 @@ for (const dir of dirs) {
       ],
       { stdio: 'inherit' },
     );
-  } catch {
+  } catch (error) {
+    // publint and attw print their findings above; this names the package and covers a
+    // failed `pnpm pack`, whose output is not shown.
+    console.error(`✗ ${pkg.name}: ${error instanceof Error ? error.message : String(error)}`);
     failed++;
   } finally {
     rmSync(out, { recursive: true, force: true });
