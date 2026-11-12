@@ -48,7 +48,7 @@
     "typecheck": "tsc -p tsconfig.server.json --noEmit && tsc -p tsconfig.app.json --noEmit && tsc -p tsconfig.spec.json --noEmit"
   },
   "peerDependencies": {
-    "@dudousxd/nestjs-media-core": ">=0.8.0 <1.0.0",
+    "@dudousxd/nestjs-media-core": ">=0.11.0 <1.0.0",
     "@nestjs/common": "^12.1.0",
     "@nestjs/core": "^12.1.0",
     "rxjs": "^7.0.0",
