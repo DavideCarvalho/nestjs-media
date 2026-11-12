@@ -2,9 +2,11 @@ import { useQuery } from '@tanstack/react-query';
 import { useEffect, useState } from 'react';
 import {
   ConsoleAccessError,
+  consoleSearchEndpoint,
   mediaConsoleClient,
   onConsoleAccessDenied,
 } from '../client/media-console-client.js';
+import { ConsoleSearch } from './ConsoleSearch.js';
 import { ConsoleSwitcher, readSwitcherConfig } from './ConsoleSwitcher.js';
 import { Button, Dot } from './ui.js';
 import { useHashRoute } from './useHashRoute.js';
@@ -83,6 +85,7 @@ export function App(): JSX.Element {
     retry: (count, error) => !(error instanceof ConsoleAccessError) && count < 1,
   });
   const reported = useAccessDenied();
+  const [searching, setSearching] = useState(false);
   const denied =
     reported ?? (topology.error instanceof ConsoleAccessError ? topology.error : undefined);
 
@@ -103,6 +106,7 @@ export function App(): JSX.Element {
           <ConsoleSwitcher
             config={switcherConfig}
             current={{ title: 'Media', icon: 'media' }}
+            onSearch={() => setSearching(true)}
             brand={
               <div className="flex items-center gap-2.5">
                 <div className="grid h-7 w-7 place-items-center rounded-md border border-accent/30 bg-accent/10">
@@ -129,21 +133,36 @@ export function App(): JSX.Element {
             ))}
           </nav>
 
-          {topology.data && (
-            <div className="ml-auto flex items-center gap-3">
-              <span className="mono tnum text-[10px] text-zinc-500">
-                {topology.data.disks} {topology.data.disks === 1 ? 'disk' : 'disks'}
-              </span>
-              {stat('store', topology.data.hasStore)}
-              {stat('uploads', topology.data.hasUploads)}
-              {stat('actions', topology.data.actions)}
-              <span className="ml-1 flex items-center gap-1.5 text-xs text-zinc-500">
-                <Dot tone="ok" pulse />
-                live
-              </span>
-            </div>
-          )}
+          <div className="ml-auto flex items-center gap-3">
+            <Button
+              tone="quiet"
+              className="gap-2 px-2.5 py-1 text-xs"
+              onClick={() => setSearching(true)}
+            >
+              Search
+              <kbd className="mono text-[10px] text-zinc-500">⌘K</kbd>
+            </Button>
+            {topology.data && (
+              <>
+                <span className="mono tnum text-[10px] text-zinc-500">
+                  {topology.data.disks} {topology.data.disks === 1 ? 'disk' : 'disks'}
+                </span>
+                {stat('store', topology.data.hasStore)}
+                {stat('uploads', topology.data.hasUploads)}
+                {stat('actions', topology.data.actions)}
+                <span className="ml-1 flex items-center gap-1.5 text-xs text-zinc-500">
+                  <Dot tone="ok" pulse />
+                  live
+                </span>
+              </>
+            )}
+          </div>
         </header>
+        <ConsoleSearch
+          endpoint={consoleSearchEndpoint()}
+          open={searching}
+          onOpenChange={setSearching}
+        />
 
         <main className="min-h-0 flex-1 overflow-auto p-6">
           {denied && <AccessDenied error={denied} />}

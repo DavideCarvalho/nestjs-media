@@ -44,6 +44,27 @@ function tenantWhere(match: MediaTenantMatch): Record<string, unknown> {
     : { tenantId: match.id };
 }
 
+/** `MediaListFilter.nameContains`: `name` or `fileName` contains `text`, ignoring case. */
+function matchesName(record: MediaRecord, text: string | undefined): boolean {
+  if (text === undefined) return true;
+  const needle = text.toLowerCase();
+  return (
+    record.name.toLowerCase().includes(needle) || record.fileName.toLowerCase().includes(needle)
+  );
+}
+
+/** The `nameContains` rule as a Prisma `where`; `insensitive` adds `mode` (Postgres, MongoDB). */
+function nameWhere(text: string, insensitive: boolean): Record<string, unknown> {
+  const contains = insensitive ? { contains: text, mode: 'insensitive' } : { contains: text };
+  return { OR: [{ name: contains }, { fileName: contains }] };
+}
+
+/** Whether `error` is Prisma refusing the `mode` argument (a provider without it: MySQL, SQLite). */
+function rejectsMode(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : '';
+  return /`mode`/.test(message);
+}
+
 /** Structural subset of the generated Prisma `media` delegate the store relies on. */
 export interface PrismaMediaDelegate {
   upsert(args: Args): Promise<MediaRecord>;
@@ -72,6 +93,8 @@ export interface PrismaClientLike {
  */
 export class PrismaMediaStore implements MediaStore {
   private tenancy = false;
+  /** Whether the provider takes `mode: 'insensitive'`; learned on the first name search. */
+  private insensitiveMode = true;
 
   constructor(private readonly prisma: PrismaClientLike) {}
 
@@ -157,30 +180,47 @@ export class PrismaMediaStore implements MediaStore {
   async list(filter: MediaListFilter = {}, page: MediaListPage = {}): Promise<MediaListResult> {
     const limit = page.limit ?? 50;
     const cursor = page.cursor !== undefined ? decodeListCursor(page.cursor) : null;
+    const text = filter.nameContains;
 
-    const rows = await this.prisma.media.findMany({
-      where: {
-        ...(filter.ownerType !== undefined ? { ownerType: filter.ownerType } : {}),
-        ...(filter.collection !== undefined ? { collection: filter.collection } : {}),
-        ...(filter.disk !== undefined ? { disk: filter.disk } : {}),
-        ...(filter.tenant ? { AND: [tenantWhere(filter.tenant)] } : {}),
-        ...(cursor
-          ? {
-              OR: [
-                { createdAt: { gt: cursor.createdAt } },
-                { createdAt: cursor.createdAt, id: { gt: cursor.id } },
-              ],
-            }
-          : {}),
-      },
-      orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
-      take: limit + 1,
-    });
+    const query = (insensitive: boolean) => {
+      const and = [
+        ...(filter.tenant ? [tenantWhere(filter.tenant)] : []),
+        ...(text !== undefined ? [nameWhere(text, insensitive)] : []),
+      ];
+      return this.prisma.media.findMany({
+        where: {
+          ...(filter.ownerType !== undefined ? { ownerType: filter.ownerType } : {}),
+          ...(filter.collection !== undefined ? { collection: filter.collection } : {}),
+          ...(filter.disk !== undefined ? { disk: filter.disk } : {}),
+          ...(and.length > 0 ? { AND: and } : {}),
+          ...(cursor
+            ? {
+                OR: [
+                  { createdAt: { gt: cursor.createdAt } },
+                  { createdAt: cursor.createdAt, id: { gt: cursor.id } },
+                ],
+              }
+            : {}),
+        },
+        orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+        take: limit + 1,
+      });
+    };
+    let rows: MediaRecord[];
+    try {
+      rows = await query(text !== undefined && this.insensitiveMode);
+    } catch (error) {
+      // MySQL and SQLite have no `mode`: their `contains` already ignores (ASCII) case.
+      if (text === undefined || !this.insensitiveMode || !rejectsMode(error)) throw error;
+      this.insensitiveMode = false;
+      rows = await query(false);
+    }
 
     const hasMore = rows.length > limit;
-    const records = rows.slice(0, limit);
-    const last = records[records.length - 1];
-    const result: MediaListResult = { records };
+    const read = rows.slice(0, limit);
+    // The cursor follows the last row read, so a page the exact name check thinned stays in order.
+    const last = read[read.length - 1];
+    const result: MediaListResult = { records: read.filter((r) => matchesName(r, text)) };
     if (hasMore && last !== undefined) {
       result.cursor = encodeListCursor(last);
     }

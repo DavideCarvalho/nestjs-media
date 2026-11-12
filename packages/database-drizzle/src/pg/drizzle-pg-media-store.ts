@@ -10,7 +10,7 @@ import type {
 } from '@dudousxd/nestjs-media-core';
 import { and, asc, count, eq, getTableColumns, gt, max, or, sum } from 'drizzle-orm';
 import { decodeListCursor, encodeListCursor } from '../list-cursor';
-import { assertTenantColumn, selectable, tenantCondition } from '../tenancy';
+import { assertTenantColumn, nameContainsCondition, selectable, tenantCondition } from '../tenancy';
 import { mediaPgTableWithoutTenant } from './columns';
 import type { DrizzlePgDatabase } from './db';
 import { mediaPgTable } from './schema';
@@ -154,6 +154,9 @@ export class DrizzlePgMediaStore implements MediaStore {
       ...(filter.ownerType !== undefined ? [eq(mediaPgTable.ownerType, filter.ownerType)] : []),
       ...(filter.collection !== undefined ? [eq(mediaPgTable.collection, filter.collection)] : []),
       ...(filter.disk !== undefined ? [eq(mediaPgTable.disk, filter.disk)] : []),
+      ...(filter.nameContains !== undefined
+        ? [nameContainsCondition(mediaPgTable.name, mediaPgTable.fileName, filter.nameContains)]
+        : []),
       ...(filter.tenant ? [tenantCondition(mediaPgTable.tenantId, filter.tenant)] : []),
       ...(cursor
         ? [

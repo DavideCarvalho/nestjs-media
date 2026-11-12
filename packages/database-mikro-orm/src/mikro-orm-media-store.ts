@@ -49,6 +49,28 @@ function tenantSql(match: MediaTenantMatch | undefined): { sql: string; params: 
     : { sql: ' where tenant_id = ?', params: [match.id] };
 }
 
+/** `MediaListFilter.nameContains`: `name` or `fileName` contains `text`, ignoring case. */
+function matchesName(record: MediaRecord, text: string | undefined): boolean {
+  if (text === undefined) return true;
+  const needle = text.toLowerCase();
+  return (
+    record.name.toLowerCase().includes(needle) || record.fileName.toLowerCase().includes(needle)
+  );
+}
+
+/**
+ * A `LIKE` filter that keeps at least every record {@link matchesName} keeps: `%`, `_` and a backslash
+ * become `_` (any one character), so no escape syntax is needed on any dialect. `ilike` on Postgres,
+ * `like` elsewhere (case-insensitive by default on MySQL and, for ASCII, on SQLite). The rows are
+ * then filtered exactly with {@link matchesName}.
+ */
+function nameWhere(em: EntityManager, text: string): FilterQuery<MediaRecord> {
+  const pattern = `%${text.replace(/[\\%_]/g, '_')}%`;
+  const postgres = /postgre/i.test(em.getPlatform().constructor.name);
+  const like = postgres ? { $ilike: pattern } : { $like: pattern };
+  return { $or: [{ name: like }, { fileName: like }] };
+}
+
 /**
  * Non-destructive schema management (§3.10). MikroORM gets create + add-column for
  * free via `updateSchema({ safe: true })` — it never drops or alters existing columns.
@@ -178,16 +200,23 @@ export class MikroOrmMediaStore implements MediaStore {
         : {}),
     };
 
-    const rows = await em.find(
-      MediaEntity,
-      filter.tenant ? { $and: [where, tenantWhere(filter.tenant)] } : where,
-      { orderBy: { createdAt: 'asc', id: 'asc' }, limit: limit + 1, ...this.withTenant },
-    );
+    const and = [
+      ...(filter.tenant ? [tenantWhere(filter.tenant)] : []),
+      ...(filter.nameContains !== undefined ? [nameWhere(em, filter.nameContains)] : []),
+    ];
+    const rows = await em.find(MediaEntity, and.length > 0 ? { $and: [where, ...and] } : where, {
+      orderBy: { createdAt: 'asc', id: 'asc' },
+      limit: limit + 1,
+      ...this.withTenant,
+    });
 
     const hasMore = rows.length > limit;
-    const records = rows.slice(0, limit);
-    const last = records[records.length - 1];
-    const result: MediaListResult = { records };
+    const read = rows.slice(0, limit);
+    // The cursor follows the last row read, so a page the exact name check thinned stays in order.
+    const last = read[read.length - 1];
+    const result: MediaListResult = {
+      records: read.filter((record) => matchesName(record, filter.nameContains)),
+    };
     if (hasMore && last !== undefined) {
       result.cursor = encodeListCursor(last);
     }

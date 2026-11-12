@@ -13,7 +13,7 @@ import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
 import { decodeListCursor, encodeListCursor } from './list-cursor';
 import { mediaTableWithoutTenant } from './media-columns';
 import { mediaTable } from './media.schema';
-import { assertTenantColumn, selectable, tenantCondition } from './tenancy';
+import { assertTenantColumn, nameContainsCondition, selectable, tenantCondition } from './tenancy';
 
 type DB = BetterSQLite3Database<Record<string, never>>;
 
@@ -185,6 +185,9 @@ export class DrizzleMediaStore implements MediaStore {
       ...(filter.ownerType !== undefined ? [eq(mediaTable.ownerType, filter.ownerType)] : []),
       ...(filter.collection !== undefined ? [eq(mediaTable.collection, filter.collection)] : []),
       ...(filter.disk !== undefined ? [eq(mediaTable.disk, filter.disk)] : []),
+      ...(filter.nameContains !== undefined
+        ? [nameContainsCondition(mediaTable.name, mediaTable.fileName, filter.nameContains)]
+        : []),
       ...(filter.tenant ? [tenantCondition(mediaTable.tenantId, filter.tenant)] : []),
       ...(cursor
         ? [

@@ -83,6 +83,14 @@ const SWEEP_LIMIT = 1000;
  */
 export const FOLDER_KEEP_FILE = '.keep';
 
+/** `MediaListFilter.nameContains`: `name` or `fileName` contains `text`, ignoring case. */
+function matchesName(record: MediaRecord, text: string): boolean {
+  const needle = text.toLowerCase();
+  return (
+    record.name.toLowerCase().includes(needle) || record.fileName.toLowerCase().includes(needle)
+  );
+}
+
 /** Last path segment of a folder prefix, ignoring a trailing slash. */
 function lastSegment(prefix: string): string {
   const trimmed = prefix.replace(/\/+$/, '');
@@ -615,6 +623,91 @@ export class MediaConsoleService {
       }
     }
     await this.store.delete(id);
+  }
+
+  /**
+   * Global search (the console switcher's): files whose name matches `q`, scoped like every other
+   * read. A library record by its exact id, library records whose name or file name contains `q`
+   * (both by the request's tenant), and, when no tenant scope applies, disk objects whose key starts
+   * with `q`. At most `limit` hits, linking into the console at `page` (`#/library/<id>`,
+   * `#/disks/<disk>?prefix=<folder>&preview=<key>`). A source that fails is skipped.
+   */
+  async search(
+    q: string,
+    limit: number,
+    page: string,
+  ): Promise<Array<{ title: string; subtitle?: string; href: string }>> {
+    const quiet = <T>(read: () => Promise<T>, fallback: T): Promise<T> =>
+      Promise.resolve()
+        .then(read)
+        .catch(() => fallback);
+    const tenant = await this.tenantMatch();
+    const recordHit = (record: MediaRecord) => ({
+      title: record.name !== '' ? record.name : record.fileName,
+      subtitle: ['Library', record.collection, record.fileName].join(' · '),
+      href: `${page}#/library/${encodeURIComponent(record.id)}`,
+    });
+    const store = this.store;
+    const [byId, named, files] = await Promise.all([
+      quiet(async () => {
+        const record = store ? await store.find(q) : null;
+        return record && (await this.canSee(record.tenantId)) ? record : null;
+      }, null),
+      quiet(async () => {
+        if (!store || typeof store.list !== 'function') return [];
+        const found = await store.list(
+          { nameContains: q, ...(tenant ? { tenant } : {}) },
+          { limit },
+        );
+        // A store that predates `nameContains` ignores it: keep only real matches.
+        return found.records.filter((record) => matchesName(record, q));
+      }, [] as MediaRecord[]),
+      // Disk objects carry no tenant: searched only when the request sees every tenant's rows.
+      tenant === undefined
+        ? quiet(() => this.filesByKey(q.replace(/^\/+/, ''), limit, page), [])
+        : Promise.resolve([]),
+    ]);
+    const hits = [...(byId ? [recordHit(byId)] : []), ...named.map(recordHit), ...files];
+    const seen = new Set<string>();
+    return hits
+      .filter((hit) => {
+        if (seen.has(hit.href)) return false;
+        seen.add(hit.href);
+        return true;
+      })
+      .slice(0, limit);
+  }
+
+  /** Objects on every disk whose key starts with `prefix`, as search hits. */
+  private async filesByKey(
+    prefix: string,
+    limit: number,
+    page: string,
+  ): Promise<Array<{ title: string; subtitle: string; href: string }>> {
+    const storage = this.storage;
+    if (!storage || prefix === '') return [];
+    const perDisk = await Promise.all(
+      storage.names().map(async (name) => {
+        const listed = await storage
+          .disk(name)
+          .list({ prefix, limit: limit + 1 })
+          .catch(() => ({ entries: [] }));
+        return listed.entries
+          .filter((entry) => lastSegment(entry.key) !== FOLDER_KEEP_FILE)
+          .map((entry) => {
+            const slash = entry.key.lastIndexOf('/');
+            const params = new URLSearchParams();
+            if (slash !== -1) params.set('prefix', entry.key.slice(0, slash + 1));
+            params.set('preview', entry.key);
+            return {
+              title: entry.key.slice(slash + 1),
+              subtitle: `${name} · ${entry.key}`,
+              href: `${page}#/disks/${encodeURIComponent(name)}?${params.toString()}`,
+            };
+          });
+      }),
+    );
+    return perDisk.flat().slice(0, limit);
   }
 
   topology(): Topology {

@@ -255,6 +255,15 @@ export class TypeOrmMediaStore implements MediaStore {
     if (filter.tenant) {
       qb.andWhere(tenantWhere(filter.tenant), tenantParameters(filter.tenant));
     }
+    if (filter.nameContains !== undefined) {
+      // Case-insensitive substring; `!` escapes `%`, `_` and itself so they match literally.
+      qb.andWhere(
+        "(LOWER(m.name) LIKE :namePattern ESCAPE '!' OR LOWER(m.fileName) LIKE :namePattern ESCAPE '!')",
+        {
+          namePattern: `%${filter.nameContains.toLowerCase().replace(/[!%_]/g, (c) => `!${c}`)}%`,
+        },
+      );
+    }
     const decodedCursor = page.cursor !== undefined ? this.decodeCursor(page.cursor) : null;
     if (decodedCursor) {
       qb.andWhere(
