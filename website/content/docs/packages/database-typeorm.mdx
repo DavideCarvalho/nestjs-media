@@ -35,6 +35,8 @@ await ensureMediaSchema(ds);                             // or call it explicitl
 
 The entity is declared via `EntitySchema` (not decorators), so the package carries no decorator-metadata build requirement, and `order` maps to a `position` column to avoid the reserved word.
 
+The entity also declares a nullable `tenant_id` (and the `idx_media_tenant` index), used only for [tenancy](/docs/concepts/tenancy). Auto-schema adds it to an existing table only once tenancy is on (`ensureMediaSchema(ds, { tenancy: true })` does the same by hand); while tenancy is off the store never reads or writes it.
+
 <Callout type="info" title="Portable timestamps">
 Timestamps are stored as ISO strings (`varchar`) rather than a dialect-specific date type — so the same schema works on **sqlite, mysql, and postgres** alike. This is verified by an integration suite running the store against real Postgres (testcontainers).
 </Callout>

@@ -8,6 +8,7 @@ import type {
   MediaRecord,
   MediaStore,
 } from '@dudousxd/nestjs-media-core';
+import { matchesTenant } from '@dudousxd/nestjs-media-core';
 
 /** Opaque keyset cursor over `(createdAt, id)`. */
 function encodeCursor(record: MediaRecord): string {
@@ -66,13 +67,15 @@ export class InMemoryMediaStore implements MediaStore {
       (r) =>
         (filter.ownerType === undefined || r.ownerType === filter.ownerType) &&
         (filter.collection === undefined || r.collection === filter.collection) &&
-        (filter.disk === undefined || r.disk === filter.disk),
+        (filter.disk === undefined || r.disk === filter.disk) &&
+        matchesTenant(filter.tenant, r.tenantId),
     ).length;
   }
 
   async aggregate(query: MediaAggregateQuery): Promise<MediaAggregateResult> {
     const buckets = new Map<string, { key: string; count: number; sumSize: number }>();
     for (const record of this.records.values()) {
+      if (!matchesTenant(query.tenant, record.tenantId)) continue;
       const key = query.groupBy === 'collection' ? record.collection : record.disk;
       const bucket = buckets.get(key) ?? { key, count: 0, sumSize: 0 };
       bucket.count += 1;
@@ -90,7 +93,8 @@ export class InMemoryMediaStore implements MediaStore {
         (r) =>
           (filter.ownerType === undefined || r.ownerType === filter.ownerType) &&
           (filter.collection === undefined || r.collection === filter.collection) &&
-          (filter.disk === undefined || r.disk === filter.disk),
+          (filter.disk === undefined || r.disk === filter.disk) &&
+          matchesTenant(filter.tenant, r.tenantId),
       )
       .sort((a, b) => {
         const byDate = a.createdAt.getTime() - b.createdAt.getTime();
@@ -109,4 +113,7 @@ export class InMemoryMediaStore implements MediaStore {
     const last = records.at(-1);
     return hasMore && last ? { records, cursor: encodeCursor(last) } : { records };
   }
+
+  /** Tenancy needs no schema here: `tenantId` is kept on the record as is. */
+  async enableTenancy(): Promise<void> {}
 }

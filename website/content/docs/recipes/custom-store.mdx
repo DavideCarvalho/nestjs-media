@@ -106,6 +106,19 @@ export class MyMediaStore implements MediaStore {
 }
 ```
 
+## Tenancy (optional)
+
+To run with [tenancy](/docs/concepts/tenancy) on, implement `enableTenancy()`. `MediaLibrary` calls it once, at boot and before the first scoped operation, and only when tenancy is on:
+
+```ts
+async enableTenancy(): Promise<void> {
+  // Check the column exists; throw MediaTenancyUnavailableError (from core) with the fix if not.
+  this.tenancy = true; // from now on: persist record.tenantId, honour filter.tenant
+}
+```
+
+After that, `save` persists `record.tenantId` (`null` = no tenant), reads return it, and `count` / `aggregate` / `list` keep only the rows matching their `tenant` filter: `{ id }` → `tenant_id = id`, `{ id: null }` → `tenant_id IS NULL`, `{ id, orNull: true }` → either. Before it is called, never touch the column. The conformance suite checks all of it when the method exists.
+
 ## Verify it
 
 ```ts title="my-store.spec.ts"

@@ -7,7 +7,9 @@ import type {
   MediaListResult,
   MediaRecord,
   MediaStore,
+  MediaTenantMatch,
 } from '@dudousxd/nestjs-media-core';
+import { MediaTenancyUnavailableError } from '@dudousxd/nestjs-media-core';
 
 // Prisma's per-model query args are generated generics; left as `any` at this single
 // boundary so a real, generated `PrismaClient` delegate is structurally assignable to
@@ -32,6 +34,14 @@ function decodeListCursor(cursor: string): DecodedListCursor | null {
   const createdAt = new Date(decoded.slice(0, separator));
   if (Number.isNaN(createdAt.getTime())) return null;
   return { createdAt, id: decoded.slice(separator + 1) };
+}
+
+/** The matching rule as a Prisma `where` on `tenantId`. */
+function tenantWhere(match: MediaTenantMatch): Record<string, unknown> {
+  if (match.id === null) return { tenantId: null };
+  return match.orNull
+    ? { OR: [{ tenantId: match.id }, { tenantId: null }] }
+    : { tenantId: match.id };
 }
 
 /** Structural subset of the generated Prisma `media` delegate the store relies on. */
@@ -61,10 +71,34 @@ export interface PrismaClientLike {
  * is consumer-managed (the app owns its prisma schema + migrations).
  */
 export class PrismaMediaStore implements MediaStore {
+  private tenancy = false;
+
   constructor(private readonly prisma: PrismaClientLike) {}
 
+  /**
+   * Tenancy: checks the `Media` model has `tenantId`, then writes it (reads return whatever the
+   * model has). Called by the library when tenancy is on; until then `tenantId` is never written
+   * or queried.
+   */
+  async enableTenancy(): Promise<void> {
+    try {
+      await this.prisma.media.findMany({ select: { tenantId: true }, take: 1 });
+    } catch (error) {
+      throw Object.assign(
+        new MediaTenancyUnavailableError(
+          'the Prisma `Media` model has no `tenantId` field',
+          'Add `tenantId String? @map("tenant_id")` and `@@index([tenantId, ownerType, ownerId, collection])` to the model, then run `prisma migrate dev` and `prisma generate`.',
+        ),
+        { cause: error },
+      );
+    }
+    this.tenancy = true;
+  }
+
   async save(record: MediaRecord): Promise<MediaRecord> {
-    await this.prisma.media.upsert({ where: { id: record.id }, create: record, update: record });
+    const { tenantId, ...rest } = record;
+    const data = this.tenancy ? { ...rest, tenantId: tenantId ?? null } : rest;
+    await this.prisma.media.upsert({ where: { id: record.id }, create: data, update: data });
     return record;
   }
 
@@ -97,6 +131,7 @@ export class PrismaMediaStore implements MediaStore {
         ...(filter.ownerType !== undefined ? { ownerType: filter.ownerType } : {}),
         ...(filter.collection !== undefined ? { collection: filter.collection } : {}),
         ...(filter.disk !== undefined ? { disk: filter.disk } : {}),
+        ...(filter.tenant ? { AND: [tenantWhere(filter.tenant)] } : {}),
       },
     });
   }
@@ -104,6 +139,7 @@ export class PrismaMediaStore implements MediaStore {
   async aggregate(query: MediaAggregateQuery): Promise<MediaAggregateResult> {
     const rows = await this.prisma.media.groupBy({
       by: [query.groupBy],
+      ...(query.tenant ? { where: tenantWhere(query.tenant) } : {}),
       _count: true,
       _sum: { size: true },
     });
@@ -126,6 +162,7 @@ export class PrismaMediaStore implements MediaStore {
         ...(filter.ownerType !== undefined ? { ownerType: filter.ownerType } : {}),
         ...(filter.collection !== undefined ? { collection: filter.collection } : {}),
         ...(filter.disk !== undefined ? { disk: filter.disk } : {}),
+        ...(filter.tenant ? { AND: [tenantWhere(filter.tenant)] } : {}),
         ...(cursor
           ? {
               OR: [

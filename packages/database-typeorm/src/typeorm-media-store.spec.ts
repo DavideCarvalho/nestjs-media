@@ -40,3 +40,72 @@ describe('ensureMediaSchema', () => {
     await qr.release();
   });
 });
+
+describe('TypeOrmMediaStore tenancy schema', () => {
+  const record = {
+    id: 'a',
+    ownerType: 'Post',
+    ownerId: '1',
+    collection: 'gallery',
+    name: 'a',
+    fileName: 'a.txt',
+    mimeType: 'text/plain',
+    size: 1,
+    disk: 'local',
+    path: 'p',
+    order: 0,
+    customProperties: {},
+    conversions: {},
+    createdAt: new Date(0),
+    updatedAt: new Date(0),
+  };
+
+  async function legacyTable(ds: DataSource): Promise<void> {
+    await ds.query(`CREATE TABLE media (
+      id varchar PRIMARY KEY NOT NULL, ownerType varchar NOT NULL, ownerId varchar NOT NULL,
+      collection varchar NOT NULL, name varchar NOT NULL, fileName varchar NOT NULL,
+      mimeType varchar NOT NULL, size integer NOT NULL, disk varchar NOT NULL, path varchar NOT NULL,
+      position integer NOT NULL, customProperties text NOT NULL, conversions text NOT NULL,
+      createdAt varchar NOT NULL, updatedAt varchar NOT NULL
+    )`);
+  }
+
+  it('with tenancy off, never adds or touches tenant_id on an existing table', async () => {
+    const ds = await makeDataSource();
+    await legacyTable(ds);
+    const store = new TypeOrmMediaStore(ds);
+    await store.save({ ...record, tenantId: 'ignored-while-off' });
+    expect(await store.find('a')).toMatchObject({ id: 'a' });
+    expect(await store.listByOwner('Post', '1')).toHaveLength(1);
+    expect(await store.count()).toBe(1);
+    expect((await store.list()).records).toHaveLength(1);
+    const qr = ds.createQueryRunner();
+    expect(await qr.hasColumn('media', 'tenant_id')).toBe(false);
+    await qr.release();
+  });
+
+  it('enableTenancy adds the column and index under autoCreateSchema', async () => {
+    const ds = await makeDataSource();
+    await legacyTable(ds);
+    const store = new TypeOrmMediaStore(ds);
+    await store.save(record);
+    await store.enableTenancy();
+    const qr = ds.createQueryRunner();
+    expect(await qr.hasColumn('media', 'tenant_id')).toBe(true);
+    expect((await qr.getTable('media'))?.indices.map((i) => i.name)).toContain('idx_media_tenant');
+    await qr.release();
+    expect((await store.find('a'))?.tenantId).toBeNull();
+    await store.save({ ...record, tenantId: 'org_1' });
+    expect((await store.find('a'))?.tenantId).toBe('org_1');
+  });
+
+  it('enableTenancy fails with the fix when autoCreateSchema is off and the column is missing', async () => {
+    const ds = await makeDataSource();
+    await legacyTable(ds);
+    const store = new TypeOrmMediaStore(ds, { autoCreateSchema: false });
+    await expect(store.enableTenancy()).rejects.toMatchObject({
+      name: 'MediaTenancyUnavailableError',
+      message: expect.stringContaining('ALTER TABLE media ADD COLUMN tenant_id'),
+    });
+  });
+});

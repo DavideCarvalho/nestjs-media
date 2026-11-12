@@ -6,6 +6,7 @@ import {
   ConversionNotDefinedError,
   ImageProcessorMissingError,
   MediaNotFoundError,
+  MediaTenancyUnavailableError,
   MimeNotAllowedError,
 } from './errors';
 import type { ConversionPreset, ImageProcessor } from './image-processor';
@@ -14,6 +15,13 @@ import { type MediaCollectionConfig, MediaCollectionRegistry } from './media-col
 import type { MediaConversion, MediaRecord } from './media-record';
 import type { MediaStore } from './media-store';
 import { deleteKeys, fileUrl } from './storage-helpers';
+import {
+  type MediaTenancy,
+  type MediaTenancyOption,
+  canSeeRow,
+  readTenancy,
+  rowTenantId,
+} from './tenancy';
 import type { MediaDisks } from './types';
 
 export interface MediaLibraryOptions {
@@ -29,6 +37,13 @@ export interface MediaLibraryOptions {
   idGenerator?: () => string;
   /** Injectable for deterministic tests. Defaults to `() => new Date()`. */
   clock?: () => Date;
+  /**
+   * Scope records by the request's tenant (from `@dudousxd/nestjs-context`). Default `'inherit'`:
+   * on only when the context turns tenancy on. See {@link MediaTenancyOption}.
+   */
+  tenancy?: MediaTenancyOption;
+  /** The context's `CONTEXT_ACCESSOR`, when injected. Default: the global slot the context publishes. */
+  contextAccessor?: unknown;
 }
 
 export interface AttachInput {
@@ -44,6 +59,11 @@ export interface AttachInput {
   customProperties?: Record<string, unknown>;
   /** Disk override (else collection disk, else storage default). */
   disk?: string;
+  /**
+   * The tenant to stamp (`null` = none), instead of the request's tenant. Used only while tenancy
+   * is on; ignored otherwise.
+   */
+  tenantId?: string | null;
 }
 
 /**
@@ -67,6 +87,9 @@ export class MediaLibrary {
   private readonly newId: () => string;
   private readonly now: () => Date;
   private readonly conversionsInFlight = new Map<string, Promise<MediaRecord>>();
+  private readonly tenancyOption: MediaTenancyOption;
+  private readonly contextAccessor: unknown;
+  private tenancyReady: Promise<void> | undefined;
 
   constructor(options: MediaLibraryOptions) {
     this.storage = options.storage;
@@ -76,6 +99,56 @@ export class MediaLibrary {
     this.emitDiagnostics = options.emitDiagnostics ?? true;
     this.newId = options.idGenerator ?? (() => randomUUID());
     this.now = options.clock ?? (() => new Date());
+    this.tenancyOption = options.tenancy ?? 'inherit';
+    this.contextAccessor = options.contextAccessor;
+  }
+
+  /**
+   * Fails fast when tenancy is on and the store can't scope by tenant (no `tenant_id` column, or
+   * a store without tenancy support). `MediaModule` calls it at boot; every operation also checks.
+   * Resolves to whether tenancy is on.
+   */
+  async prepareTenancy(): Promise<boolean> {
+    return (await this.tenancy()).enabled;
+  }
+
+  /** The tenancy of this operation; with tenancy on, the store is switched to it first. */
+  private async tenancy(): Promise<MediaTenancy> {
+    const tenancy = readTenancy(this.tenancyOption, this.contextAccessor);
+    if (!tenancy.enabled) return tenancy;
+    this.tenancyReady ??= this.enableStoreTenancy();
+    await this.tenancyReady;
+    return tenancy;
+  }
+
+  private async enableStoreTenancy(): Promise<void> {
+    if (typeof this.store.enableTenancy !== 'function') {
+      this.tenancyReady = undefined;
+      throw new MediaTenancyUnavailableError(
+        `the media store (${this.store.constructor?.name ?? 'custom'}) has no \`enableTenancy()\``,
+        'Use a store that supports tenancy (every first-party store does, from this version).',
+      );
+    }
+    try {
+      await this.store.enableTenancy();
+    } catch (error) {
+      // Not cached: a store fixed later (a migration ran) is retried on the next call.
+      this.tenancyReady = undefined;
+      throw error;
+    }
+  }
+
+  /** A record by id, or `null` when there is none or the request's tenant can't see it. */
+  async get(id: string): Promise<MediaRecord | null> {
+    const tenancy = await this.tenancy();
+    const record = await this.store.find(id);
+    return record && canSeeRow(tenancy, record.tenantId) ? record : null;
+  }
+
+  private async require(id: string): Promise<MediaRecord> {
+    const record = await this.get(id);
+    if (!record) throw new MediaNotFoundError(id);
+    return record;
   }
 
   private emit<E extends 'attach' | 'delete' | 'conversion'>(
@@ -87,6 +160,7 @@ export class MediaLibrary {
 
   async attach(input: AttachInput): Promise<MediaRecord> {
     const config = this.collections.get(input.collection);
+    const tenancy = await this.tenancy();
 
     if (config.acceptsMimeTypes && !config.acceptsMimeTypes.includes(input.mimeType)) {
       throw new MimeNotAllowedError(input.collection, input.mimeType);
@@ -99,7 +173,9 @@ export class MediaLibrary {
         input.ownerId,
         input.collection,
       );
-      for (const record of existing) await this.delete(record.id);
+      for (const record of existing) {
+        if (canSeeRow(tenancy, record.tenantId)) await this.delete(record.id);
+      }
     }
 
     const disk = input.disk ?? config.disk ?? this.storage.defaultDisk;
@@ -134,6 +210,9 @@ export class MediaLibrary {
       conversions: {},
       createdAt: timestamp,
       updatedAt: timestamp,
+      ...(tenancy.enabled
+        ? { tenantId: input.tenantId !== undefined ? input.tenantId : rowTenantId(tenancy) }
+        : {}),
     });
 
     this.emit('attach', {
@@ -172,22 +251,25 @@ export class MediaLibrary {
    * Generate (if absent) and persist a named conversion; returns the updated record. Lazy entry point.
    * Concurrent calls for the same media and conversion share one generation.
    */
-  ensureConversion(id: string, conversionName: string): Promise<MediaRecord> {
+  async ensureConversion(id: string, conversionName: string): Promise<MediaRecord> {
+    // Checked per caller before joining a shared generation, so a record another tenant is
+    // converting stays not-found here.
+    const record = await this.require(id);
+    if (record.conversions[conversionName]) return record;
     const key = `${id}\u0000${conversionName}`;
     const pending = this.conversionsInFlight.get(key);
     if (pending) return pending;
-    const run = this.ensureConversionNow(id, conversionName).finally(() => {
+    const run = this.ensureConversionNow(record, conversionName).finally(() => {
       this.conversionsInFlight.delete(key);
     });
     this.conversionsInFlight.set(key, run);
     return run;
   }
 
-  private async ensureConversionNow(id: string, conversionName: string): Promise<MediaRecord> {
-    const record = await this.store.find(id);
-    if (!record) throw new MediaNotFoundError(id);
-    if (record.conversions[conversionName]) return record;
-
+  private async ensureConversionNow(
+    record: MediaRecord,
+    conversionName: string,
+  ): Promise<MediaRecord> {
     const preset = (this.collections.get(record.collection).conversions ?? []).find(
       (p) => p.name === conversionName,
     );
@@ -230,8 +312,11 @@ export class MediaLibrary {
     return updated;
   }
 
-  list(ownerType: string, ownerId: string, collection?: string): Promise<MediaRecord[]> {
-    return this.store.listByOwner(ownerType, ownerId, collection);
+  /** An owner's records (all collections, or one), ordered; only those the request's tenant can see. */
+  async list(ownerType: string, ownerId: string, collection?: string): Promise<MediaRecord[]> {
+    const tenancy = await this.tenancy();
+    const records = await this.store.listByOwner(ownerType, ownerId, collection);
+    return tenancy.enabled ? records.filter((r) => canSeeRow(tenancy, r.tenantId)) : records;
   }
 
   /**
@@ -248,7 +333,7 @@ export class MediaLibrary {
   }
 
   async delete(id: string): Promise<void> {
-    const record = await this.store.find(id);
+    const record = await this.get(id);
     if (!record) return;
     await deleteKeys(this.storage, [
       { disk: record.disk, path: record.path },
@@ -278,8 +363,7 @@ export class MediaLibrary {
         fileName: `${stripExtension(record.fileName)}-${conversion}${ext}`,
       };
     }
-    const record = await this.store.find(id);
-    if (!record) throw new MediaNotFoundError(id);
+    const record = await this.require(id);
     return { record, disk: record.disk, path: record.path, fileName: record.fileName };
   }
 

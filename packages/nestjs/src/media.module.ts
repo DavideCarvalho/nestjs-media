@@ -6,10 +6,15 @@ import {
   MediaLibrary,
   type MediaRecord,
   type MediaStore,
+  type MediaTenancyOption,
+  type MediaTenantMatch,
   type MultipartDrivers,
   ResumableUploadManager,
   TusUploadHandler,
   type UploadSessionStore,
+  canSeeRow,
+  readTenancy,
+  tenantMatch,
 } from '@dudousxd/nestjs-media-core';
 import {
   type DynamicModule,
@@ -34,6 +39,7 @@ import {
   MEDIA_MULTIPART,
   MEDIA_OPTIONS,
   MEDIA_STORE,
+  MEDIA_TENANCY,
   MEDIA_TUS,
   MEDIA_UPLOADS,
   MEDIA_UPLOAD_SESSIONS,
@@ -81,7 +87,26 @@ export interface MediaFactory<T> {
   useFactory: (...args: any[]) => T | Promise<T>;
 }
 
+/**
+ * The request's tenant scope, under `MEDIA_TENANCY`: what the media dashboard applies to the
+ * stores it reads directly. Both methods switch the stores to tenancy first when it is on.
+ */
+export interface MediaTenancyScope {
+  /** The store filter for this request: `undefined` when every row is visible. */
+  match(): Promise<MediaTenantMatch | undefined>;
+  /** Whether this request may see a row whose tenant is `tenantId`. */
+  canSee(tenantId: string | null | undefined): Promise<boolean>;
+}
+
 export interface MediaModuleOptions {
+  /**
+   * Scope media by the request's tenant (from `@dudousxd/nestjs-context`). Default `'inherit'`:
+   * on only when `ContextModule` turns tenancy on (it is off by default). With tenancy on, uploads
+   * and attaches are stamped with the tenant, and reads (`library`, `serve`, `url`, conversions,
+   * upload sessions, the dashboard) only see that tenant's records; any other record is not found.
+   * `false` keeps media out of tenancy. See the "Tenancy" docs page.
+   */
+  tenancy?: MediaTenancyOption;
   /**
    * Enable the media-library layer (layer 2) by providing a persistence store: an instance, or a
    * {@link MediaFactory} (e.g. `typeOrmMediaStore({ connectionName: 'media' })`).
@@ -285,6 +310,8 @@ function checkMultipart(
 }
 
 const STORAGE_DEP = { token: Storage, optional: true };
+/** `@dudousxd/nestjs-context`'s `CONTEXT_ACCESSOR`, read structurally (no import, optional). */
+const CONTEXT_DEP = { token: Symbol.for('@dudousxd/nestjs-context:accessor'), optional: true };
 
 /** A store provider: the static factory when there is one, else the runtime option (or null). */
 function storeProvider<T>(
@@ -331,16 +358,19 @@ function mediaProviders(
     },
     {
       provide: MEDIA_LIBRARY,
-      inject: [STORAGE_DEP, MEDIA_STORE, MEDIA_OPTIONS],
+      inject: [STORAGE_DEP, MEDIA_STORE, MEDIA_OPTIONS, CONTEXT_DEP],
       useFactory: (
         storage: Storage | null,
         store: MediaStore | null,
         options: MediaModuleRuntimeOptions,
+        contextAccessor: unknown,
       ) =>
         store
           ? new MediaLibrary({
               storage: requireStorage(storage),
               store,
+              ...(options.tenancy !== undefined ? { tenancy: options.tenancy } : {}),
+              ...(contextAccessor ? { contextAccessor } : {}),
               ...(options.collections ? { collections: options.collections } : {}),
               ...(options.imageProcessor ? { imageProcessor: options.imageProcessor } : {}),
             })
@@ -348,18 +378,21 @@ function mediaProviders(
     },
     {
       provide: MEDIA_UPLOADS,
-      inject: [STORAGE_DEP, MEDIA_UPLOAD_SESSIONS, MEDIA_MULTIPART, MEDIA_OPTIONS],
+      inject: [STORAGE_DEP, MEDIA_UPLOAD_SESSIONS, MEDIA_MULTIPART, MEDIA_OPTIONS, CONTEXT_DEP],
       useFactory: (
         storage: Storage | null,
         sessions: UploadSessionStore | null,
         multipart: MultipartDrivers,
         options: MediaModuleRuntimeOptions,
+        contextAccessor: unknown,
       ) =>
         sessions
           ? new ResumableUploadManager({
               storage: requireStorage(storage),
               sessions,
               multipart,
+              ...(options.tenancy !== undefined ? { tenancy: options.tenancy } : {}),
+              ...(contextAccessor ? { contextAccessor } : {}),
               ...(options.uploadTmpPrefix ? { tmpPrefix: options.uploadTmpPrefix } : {}),
             })
           : null,
@@ -403,6 +436,29 @@ function mediaProviders(
             })
           : null,
     },
+    {
+      provide: MEDIA_TENANCY,
+      inject: [MEDIA_LIBRARY, MEDIA_UPLOADS, MEDIA_OPTIONS, CONTEXT_DEP],
+      useFactory: (
+        library: MediaLibrary | null,
+        uploads: ResumableUploadManager | null,
+        options: MediaModuleRuntimeOptions,
+        contextAccessor: unknown,
+      ): MediaTenancyScope => {
+        const current = async () => {
+          const tenancy = readTenancy(options.tenancy, contextAccessor ?? undefined);
+          if (tenancy.enabled) {
+            await library?.prepareTenancy();
+            await uploads?.prepareTenancy();
+          }
+          return tenancy;
+        };
+        return {
+          match: async () => tenantMatch(await current()),
+          canSee: async (tenantId) => canSeeRow(await current(), tenantId),
+        };
+      },
+    },
     MediaService,
   ];
 }
@@ -417,6 +473,7 @@ const EXPORTS = [
   MEDIA_STORE,
   MEDIA_UPLOAD_SESSIONS,
   MEDIA_MULTIPART,
+  MEDIA_TENANCY,
 ];
 
 /**

@@ -1,10 +1,13 @@
 import type { MediaRecord } from './media-record';
+import type { MediaTenantMatch } from './tenancy';
 
 /** Filter for {@link MediaStore.count}. All fields AND together; omit for a global count. */
 export interface MediaCountFilter {
   ownerType?: string;
   collection?: string;
   disk?: string;
+  /** Tenancy only (see {@link MediaStore.enableTenancy}): keep only rows of this tenant. */
+  tenant?: MediaTenantMatch;
 }
 
 /** Group-by aggregate query for {@link MediaStore.aggregate}. */
@@ -13,6 +16,8 @@ export interface MediaAggregateQuery {
   groupBy: 'collection' | 'disk';
   /** Include a summed byte total per group when `'size'`. */
   sum?: 'size';
+  /** Tenancy only (see {@link MediaStore.enableTenancy}): aggregate only rows of this tenant. */
+  tenant?: MediaTenantMatch;
 }
 
 /** One group of the aggregate result. `sumSize` is 0 when `sum` was not requested. */
@@ -29,6 +34,8 @@ export interface MediaListFilter {
   ownerType?: string;
   collection?: string;
   disk?: string;
+  /** Tenancy only (see {@link MediaStore.enableTenancy}): keep only rows of this tenant. */
+  tenant?: MediaTenantMatch;
 }
 
 /** Pagination for {@link MediaStore.list}. `cursor` is opaque (from a prior result); `limit` defaults to 50. */
@@ -72,4 +79,13 @@ export interface MediaStore {
    * Dashboard/admin use. Optional — see {@link MediaStore.count}.
    */
   list?(filter?: MediaListFilter, page?: MediaListPage): Promise<MediaListResult>;
+  /**
+   * Switch the store to tenancy: called once, at boot and before the first operation, only when
+   * tenancy is on. Verify (or, for a store that repairs its own schema, add) the nullable
+   * `tenant_id` column and throw `MediaTenancyUnavailableError` with the fix when it is missing.
+   * From then on, persist and return {@link MediaRecord.tenantId} and honour the `tenant` field of
+   * the `count`/`aggregate`/`list` filters. Until it is called, never touch the tenant column.
+   * A store without it can't run with tenancy on.
+   */
+  enableTenancy?(): Promise<void>;
 }

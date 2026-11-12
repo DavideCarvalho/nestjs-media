@@ -10,6 +10,7 @@ import {
   Inject,
   Injectable,
   NotFoundException,
+  type OnApplicationBootstrap,
   Optional,
   type StreamableFile,
 } from '@nestjs/common';
@@ -42,7 +43,7 @@ export interface MediaCaller {
 export type MediaServeOptions = ServeFileOptions & MediaCaller;
 
 @Injectable()
-export class MediaService {
+export class MediaService implements OnApplicationBootstrap {
   constructor(
     @Optional() @Inject(Storage) private readonly storage: Storage | null,
     @Inject(MEDIA_LIBRARY) private readonly mediaLibrary: MediaLibrary | null,
@@ -53,6 +54,15 @@ export class MediaService {
     @Inject(MEDIA_OPTIONS)
     private readonly options: MediaModuleRuntimeOptions | null = null,
   ) {}
+
+  /**
+   * With tenancy on, fails the boot when a store can't scope by tenant (no `tenant_id` column),
+   * with the fix in the message, instead of failing requests later.
+   */
+  async onApplicationBootstrap(): Promise<void> {
+    await this.mediaLibrary?.prepareTenancy();
+    await this.uploadManager?.prepareTenancy();
+  }
 
   /** Attachment-as-column API (adonis-attachment style): `media.attachments.createFromFile(...)`. */
   get attachments(): AttachmentManager {

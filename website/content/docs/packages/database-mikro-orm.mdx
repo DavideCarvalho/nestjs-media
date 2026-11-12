@@ -23,6 +23,8 @@ MikroORM gives non-destructive create + add-column for free via `updateSchema({ 
 
 The entity is an `EntitySchema` with `order` mapped to a `position` column. JSON columns carry `customProperties` and `conversions`.
 
+The entity also declares a nullable, lazy `tenant_id` (with the `idx_media_tenant` index), used only for [tenancy](/docs/concepts/tenancy). The store never reads or writes it while tenancy is off.
+
 <Callout type="info">
 Verified by an integration suite running the store against real Postgres (testcontainers), in addition to the in-memory and sqlite unit runs.
 </Callout>

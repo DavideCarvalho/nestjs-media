@@ -4,11 +4,30 @@ import { describe, expect, it } from 'vitest';
 import type { PrismaClientLike, PrismaMediaDelegate } from './prisma-media-store';
 import { PrismaMediaStore } from './prisma-media-store';
 
-/** Minimal in-memory fake mirroring the Prisma delegate semantics the store relies on. */
-function fakeClient(): PrismaClientLike & { rows: Map<string, MediaRecord> } {
+type TenantClause = { tenantId: string | null } | { OR: { tenantId: string | null }[] };
+
+/** The tenant part of a `where` (`AND: [clause]` in lists/counts, the clause itself in groupBy). */
+function matchesTenant(r: MediaRecord, clause: TenantClause | undefined): boolean {
+  if (!clause) return true;
+  const row = r.tenantId ?? null;
+  if ('OR' in clause) return clause.OR.some((c) => c.tenantId === row);
+  return clause.tenantId === row;
+}
+
+/**
+ * Minimal in-memory fake mirroring the Prisma delegate semantics the store relies on.
+ * `withTenantId: false` mimics a model without `tenantId` (Prisma rejects the unknown field).
+ */
+function fakeClient(
+  options: { withTenantId?: boolean } = {},
+): PrismaClientLike & { rows: Map<string, MediaRecord> } {
+  const withTenantId = options.withTenantId ?? true;
   const rows = new Map<string, MediaRecord>();
   const media: PrismaMediaDelegate = {
     async upsert({ where, create, update }) {
+      if (!withTenantId && ('tenantId' in create || 'tenantId' in update)) {
+        throw new Error('Unknown argument `tenantId`');
+      }
       const row = rows.has(where.id) ? { ...update } : { ...create };
       rows.set(where.id, row);
       return row;
@@ -16,7 +35,11 @@ function fakeClient(): PrismaClientLike & { rows: Map<string, MediaRecord> } {
     async findUnique({ where }) {
       return rows.get(where.id) ?? null;
     },
-    async findMany({ where, orderBy, take }) {
+    async findMany({ where, orderBy, take, select }) {
+      if (select) {
+        if (select.tenantId && !withTenantId) throw new Error('Unknown field `tenantId`');
+        return [];
+      }
       // `list()` orders by [{createdAt},{id}] (array); `listByOwner()` orders by a
       // single `{order}` field — branch on shape to mirror both call sites.
       if (Array.isArray(orderBy)) {
@@ -36,6 +59,7 @@ function fakeClient(): PrismaClientLike & { rows: Map<string, MediaRecord> } {
             (where.ownerType === undefined || r.ownerType === where.ownerType) &&
             (where.collection === undefined || r.collection === where.collection) &&
             (where.disk === undefined || r.disk === where.disk) &&
+            matchesTenant(r, where.AND?.[0]) &&
             matchesCursor(r),
         );
         list.sort(
@@ -73,14 +97,16 @@ function fakeClient(): PrismaClientLike & { rows: Map<string, MediaRecord> } {
         (r) =>
           (where?.ownerType === undefined || r.ownerType === where.ownerType) &&
           (where?.collection === undefined || r.collection === where.collection) &&
-          (where?.disk === undefined || r.disk === where.disk),
+          (where?.disk === undefined || r.disk === where.disk) &&
+          matchesTenant(r, where?.AND?.[0]),
       ).length;
     },
-    async groupBy({ by }: { by: (keyof MediaRecord)[] }) {
+    async groupBy({ by, where }: { by: (keyof MediaRecord)[]; where?: TenantClause }) {
       const groups = new Map<string, MediaRecord[]>();
       const [groupField] = by;
       if (!groupField) return [];
       for (const r of rows.values()) {
+        if (!matchesTenant(r, where)) continue;
         const key = String(r[groupField]);
         groups.set(key, [...(groups.get(key) ?? []), r]);
       }
@@ -122,5 +148,48 @@ describe('PrismaMediaStore', () => {
     });
     expect(client.rows.get('a')?.id).toBe('a');
     expect((await store.find('a'))?.id).toBe('a');
+  });
+});
+
+describe('PrismaMediaStore tenancy', () => {
+  const record: MediaRecord = {
+    id: 'a',
+    ownerType: 'Post',
+    ownerId: '1',
+    collection: 'gallery',
+    name: 'n',
+    fileName: 'n.png',
+    mimeType: 'image/png',
+    size: 1,
+    disk: 'local',
+    path: 'p',
+    order: 0,
+    customProperties: {},
+    conversions: {},
+    createdAt: new Date(0),
+    updatedAt: new Date(0),
+  };
+
+  it('never writes tenantId until tenancy is enabled, so a model without it works', async () => {
+    const store = new PrismaMediaStore(fakeClient({ withTenantId: false }));
+    await store.save({ ...record, tenantId: 'org_1' });
+    expect((await store.find('a'))?.id).toBe('a');
+    expect(await store.count()).toBe(1);
+  });
+
+  it('enableTenancy fails with the fix when the model has no tenantId', async () => {
+    const store = new PrismaMediaStore(fakeClient({ withTenantId: false }));
+    await expect(store.enableTenancy()).rejects.toMatchObject({
+      name: 'MediaTenancyUnavailableError',
+      message: expect.stringContaining('tenantId String? @map("tenant_id")'),
+    });
+  });
+
+  it('writes tenantId (null when absent) once enabled', async () => {
+    const client = fakeClient();
+    const store = new PrismaMediaStore(client);
+    await store.enableTenancy();
+    await store.save(record);
+    expect(client.rows.get('a')?.tenantId).toBeNull();
   });
 });

@@ -22,4 +22,9 @@ export interface MediaRecord {
   conversions: Record<string, MediaConversion>;
   createdAt: Date;
   updatedAt: Date;
+  /**
+   * The tenant the record belongs to (`null` = none). Set only while tenancy is on; stores leave
+   * it `undefined` otherwise and never read or write their tenant column.
+   */
+  tenantId?: string | null;
 }

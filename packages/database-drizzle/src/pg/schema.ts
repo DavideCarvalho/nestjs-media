@@ -1,14 +1,5 @@
-import type { MediaConversion } from '@dudousxd/nestjs-media-core';
-import {
-  bigint,
-  index,
-  integer,
-  jsonb,
-  pgTable,
-  primaryKey,
-  text,
-  timestamp,
-} from 'drizzle-orm/pg-core';
+import { index, integer, pgTable, primaryKey, text } from 'drizzle-orm/pg-core';
+import { mediaPgColumns, uploadSessionPgColumns } from './columns';
 
 /**
  * Drizzle (Postgres) media table — the same logical shape as the sqlite `mediaTable`.
@@ -18,21 +9,9 @@ import {
 export const mediaPgTable = pgTable(
   'media',
   {
-    id: text('id').primaryKey(),
-    ownerType: text('owner_type').notNull(),
-    ownerId: text('owner_id').notNull(),
-    collection: text('collection').notNull(),
-    name: text('name').notNull(),
-    fileName: text('file_name').notNull(),
-    mimeType: text('mime_type').notNull(),
-    size: bigint('size', { mode: 'number' }).notNull(),
-    disk: text('disk').notNull(),
-    path: text('path').notNull(),
-    order: integer('position').notNull(),
-    customProperties: jsonb('custom_properties').$type<Record<string, unknown>>().notNull(),
-    conversions: jsonb('conversions').$type<Record<string, MediaConversion>>().notNull(),
-    createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' }).notNull(),
-    updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' }).notNull(),
+    ...mediaPgColumns(),
+    /** Tenancy only: read and written once the store's `enableTenancy()` ran. */
+    tenantId: text('tenant_id'),
   },
   (table) => [
     index('idx_media_owner').on(table.ownerType, table.ownerId, table.collection),
@@ -40,23 +19,20 @@ export const mediaPgTable = pgTable(
     index('idx_media_disk').on(table.disk),
     index('idx_media_created_at').on(table.createdAt),
     index('idx_media_collection_created_at').on(table.collection, table.createdAt, table.id),
+    index('idx_media_tenant').on(table.tenantId, table.ownerType, table.ownerId, table.collection),
   ],
 );
 
 /** Resumable-upload sessions (the Postgres `UploadSessionStore`). */
-export const mediaUploadSessionsPgTable = pgTable('media_upload_sessions', {
-  id: text('id').primaryKey(),
-  disk: text('disk').notNull(),
-  key: text('key').notNull(),
-  contentType: text('content_type'),
-  size: bigint('size', { mode: 'number' }),
-  offset: bigint('offset', { mode: 'number' }).notNull().default(0),
-  parts: integer('parts').notNull().default(0),
-  multipartUploadId: text('multipart_upload_id'),
-  metadata: jsonb('metadata').$type<Record<string, unknown>>(),
-  createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
-  updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
-});
+export const mediaUploadSessionsPgTable = pgTable(
+  'media_upload_sessions',
+  {
+    ...uploadSessionPgColumns(),
+    /** Tenancy only: read and written once the store's `enableTenancy()` ran. */
+    tenantId: text('tenant_id'),
+  },
+  (table) => [index('idx_media_upload_sessions_tenant').on(table.tenantId)],
+);
 
 /** One row per uploaded multipart part; `addPart` upserts on `(session_id, part_number)`. */
 export const mediaUploadPartsPgTable = pgTable(

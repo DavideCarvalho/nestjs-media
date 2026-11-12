@@ -64,3 +64,17 @@ export class InvalidPartNumberError extends Error {
     this.name = 'InvalidPartNumberError';
   }
 }
+
+/**
+ * Tenancy is on, but a store can't scope by tenant: its table has no `tenant_id` column, or the
+ * store doesn't support tenancy at all. Thrown at boot (and on first use), never as a SQL error.
+ */
+export class MediaTenancyUnavailableError extends Error {
+  readonly code = 'MEDIA_TENANCY_UNAVAILABLE';
+  constructor(problem: string, fix: string) {
+    super(
+      `Media tenancy is on, but ${problem}. ${fix} Or turn tenancy off for media with \`MediaModule.forRoot({ tenancy: false })\`.`,
+    );
+    this.name = 'MediaTenancyUnavailableError';
+  }
+}

@@ -2,6 +2,7 @@ import type { Readable } from 'node:stream';
 import {
   type MediaRecord,
   type MediaStore,
+  type MediaTenantMatch,
   type MultipartDrivers,
   type UploadSession,
   type UploadSessionStore,
@@ -58,8 +59,18 @@ import {
   MEDIA_DASHBOARD_ACTIONS,
   MEDIA_MULTIPART,
   MEDIA_STORE,
+  MEDIA_TENANCY,
   MEDIA_UPLOAD_SESSIONS,
 } from './tokens.js';
+
+/**
+ * The request's tenant scope `MediaModule` provides under `MEDIA_TENANCY` (structural: the console
+ * doesn't import `@dudousxd/nestjs-media`). Absent, as with an older `MediaModule`, nothing is scoped.
+ */
+export interface ConsoleTenancyScope {
+  match(): Promise<MediaTenantMatch | undefined>;
+  canSee(tenantId: string | null | undefined): Promise<boolean>;
+}
 
 /** Seconds a signed object URL stays valid. */
 const URL_TTL_SECONDS = 300;
@@ -192,7 +203,21 @@ export class MediaConsoleService {
     @Optional()
     @Inject(MEDIA_MULTIPART)
     private readonly multipart: MultipartDrivers | null = null,
+    /** `MediaModuleOptions.tenancy`: library records and upload sessions follow the request's tenant. */
+    @Optional()
+    @Inject(MEDIA_TENANCY)
+    private readonly tenancy: ConsoleTenancyScope | null = null,
   ) {}
+
+  /** The store filter for this request (`undefined`: every row). */
+  private async tenantMatch(): Promise<MediaTenantMatch | undefined> {
+    return this.tenancy ? this.tenancy.match() : undefined;
+  }
+
+  /** Whether this request may see a row of `tenantId`; a hidden row is reported as not found. */
+  private async canSee(tenantId: string | null | undefined): Promise<boolean> {
+    return this.tenancy ? this.tenancy.canSee(tenantId) : true;
+  }
 
   private readonly logger = new Logger(MediaConsoleService.name);
 
@@ -484,9 +509,11 @@ export class MediaConsoleService {
 
   async listUploads(filter: { disk?: string; prefix?: string }): Promise<UploadListResponse> {
     if (!this.uploads || typeof this.uploads.list !== 'function') return { uploads: [] };
+    const tenant = await this.tenantMatch();
     const sessions = await this.uploads.list({
       ...(filter.disk ? { disk: filter.disk } : {}),
       ...(filter.prefix ? { keyPrefix: filter.prefix } : {}),
+      ...(tenant ? { tenant } : {}),
     });
     return { uploads: sessions.map(mapUpload) };
   }
@@ -494,7 +521,9 @@ export class MediaConsoleService {
   async uploadDetail(id: string): Promise<UploadDetailResponse> {
     if (!this.uploads) throw new NotFoundException('No upload store configured');
     const session = await this.uploads.get(id);
-    if (!session) throw new NotFoundException(`Unknown upload: ${id}`);
+    if (!session || !(await this.canSee(session.tenantId))) {
+      throw new NotFoundException(`Unknown upload: ${id}`);
+    }
     const parts = this.uploads.listParts ? await this.uploads.listParts(id) : [];
     return { upload: mapUpload(session), parts };
   }
@@ -508,12 +537,23 @@ export class MediaConsoleService {
    */
   async abortUpload(id: string): Promise<void> {
     if (!this.uploads) throw new NotFoundException('No upload store configured');
+    if (this.tenancy) {
+      const session = await this.uploads.get(id);
+      if (session && !(await this.canSee(session.tenantId))) {
+        throw new NotFoundException(`Unknown upload: ${id}`);
+      }
+    }
     await this.uploads.delete(id);
   }
 
   async listCollections(): Promise<CollectionsResponse> {
     if (!this.store || typeof this.store.aggregate !== 'function') return { collections: [] };
-    const buckets = await this.store.aggregate({ groupBy: 'collection', sum: 'size' });
+    const tenant = await this.tenantMatch();
+    const buckets = await this.store.aggregate({
+      groupBy: 'collection',
+      sum: 'size',
+      ...(tenant ? { tenant } : {}),
+    });
     return { collections: buckets };
   }
 
@@ -524,10 +564,12 @@ export class MediaConsoleService {
     limit?: number;
   }): Promise<LibraryListResponse> {
     if (!this.store || typeof this.store.list !== 'function') return { records: [] };
+    const tenant = await this.tenantMatch();
     const page = await this.store.list(
       {
         ...(filter.collection ? { collection: filter.collection } : {}),
         ...(filter.disk ? { disk: filter.disk } : {}),
+        ...(tenant ? { tenant } : {}),
       },
       {
         limit: filter.limit ?? DEFAULT_PAGE_LIMIT,
@@ -543,7 +585,9 @@ export class MediaConsoleService {
   async libraryDetail(id: string): Promise<LibraryDetailResponse> {
     if (!this.store) throw new NotFoundException('No media store configured');
     const record = await this.store.find(id);
-    if (!record) throw new NotFoundException(`Unknown media record: ${id}`);
+    if (!record || !(await this.canSee(record.tenantId))) {
+      throw new NotFoundException(`Unknown media record: ${id}`);
+    }
     const variants = await Promise.all(
       Object.entries(record.conversions).map(async ([name, conversion]) => {
         const disk = this.storage?.names().includes(conversion.disk)
@@ -562,6 +606,12 @@ export class MediaConsoleService {
 
   async deleteLibraryRecord(id: string): Promise<void> {
     if (!this.store) throw new NotFoundException('No media store configured');
+    if (this.tenancy) {
+      const record = await this.store.find(id);
+      if (record && !(await this.canSee(record.tenantId))) {
+        throw new NotFoundException(`Unknown media record: ${id}`);
+      }
+    }
     await this.store.delete(id);
   }
 

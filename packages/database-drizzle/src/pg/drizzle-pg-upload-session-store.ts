@@ -4,11 +4,15 @@ import type {
   UploadSessionListFilter,
   UploadSessionStore,
 } from '@dudousxd/nestjs-media-core';
-import { and, asc, eq, like, sql } from 'drizzle-orm';
+import { and, asc, eq, getTableColumns, like, sql } from 'drizzle-orm';
+import { assertTenantColumn, selectable, tenantCondition } from '../tenancy';
+import { mediaUploadSessionsPgTableWithoutTenant } from './columns';
 import type { DrizzlePgDatabase } from './db';
 import { mediaUploadPartsPgTable, mediaUploadSessionsPgTable } from './schema';
 
-type SessionRow = typeof mediaUploadSessionsPgTable.$inferSelect;
+type SessionRow = Omit<typeof mediaUploadSessionsPgTable.$inferSelect, 'tenantId'> & {
+  tenantId?: string | null;
+};
 
 /** Escape `\`, `%` and `_` so a user-supplied prefix matches literally under `LIKE` (default escape `\`). */
 function escapeLike(value: string): string {
@@ -28,11 +32,13 @@ function toSession(row: SessionRow): UploadSession {
   };
   if (row.multipartUploadId != null) session.multipartUploadId = row.multipartUploadId;
   if (row.metadata != null) session.metadata = row.metadata;
+  if (row.tenantId !== undefined) session.tenantId = row.tenantId;
   return session;
 }
 
-function toColumns(session: UploadSession) {
+function toColumns(session: UploadSession, tenancy: boolean) {
   return {
+    ...(tenancy ? { tenantId: session.tenantId ?? null } : {}),
     disk: session.disk,
     key: session.key,
     contentType: session.contentType ?? null,
@@ -51,19 +57,51 @@ function toColumns(session: UploadSession) {
  * Tables: `mediaUploadSessionsPgTable` + `mediaUploadPartsPgTable` (or `createMediaPgTables(db)`).
  */
 export class DrizzlePgUploadSessionStore implements UploadSessionStore {
+  private tenancy = false;
+
   constructor(private readonly db: DrizzlePgDatabase) {}
+
+  /** Off: the table without `tenant_id`, which Drizzle would otherwise list in an INSERT. */
+  private get sessionsTable() {
+    return this.tenancy ? mediaUploadSessionsPgTable : mediaUploadSessionsPgTableWithoutTenant;
+  }
+
+  /** The columns to read: `tenant_id` only once tenancy is on. */
+  private get columns() {
+    return selectable(getTableColumns(mediaUploadSessionsPgTable), this.tenancy);
+  }
+
+  /**
+   * Tenancy: checks the `tenant_id` column exists, then reads and writes it. Called by the upload
+   * manager when tenancy is on; until then the column is never touched.
+   */
+  async enableTenancy(): Promise<void> {
+    await assertTenantColumn(
+      'media_upload_sessions',
+      () =>
+        this.db
+          .select({ tenantId: mediaUploadSessionsPgTable.tenantId })
+          .from(mediaUploadSessionsPgTable)
+          .limit(1),
+      'Generate a migration with drizzle-kit from `mediaUploadSessionsPgTable` (it declares `tenant_id` and its index), or run `ALTER TABLE media_upload_sessions ADD COLUMN tenant_id text; CREATE INDEX idx_media_upload_sessions_tenant ON media_upload_sessions (tenant_id);`.',
+    );
+    this.tenancy = true;
+  }
 
   async create(session: UploadSession): Promise<UploadSession> {
     const createdAt = session.createdAt ?? new Date();
-    await this.db
-      .insert(mediaUploadSessionsPgTable)
-      .values({ id: session.id, ...toColumns(session), createdAt, updatedAt: new Date() });
+    await this.db.insert(this.sessionsTable).values({
+      id: session.id,
+      ...toColumns(session, this.tenancy),
+      createdAt,
+      updatedAt: new Date(),
+    });
     return { ...session, createdAt };
   }
 
   async get(id: string): Promise<UploadSession | null> {
     const rows = await this.db
-      .select()
+      .select(this.columns)
       .from(mediaUploadSessionsPgTable)
       .where(eq(mediaUploadSessionsPgTable.id, id))
       .limit(1);
@@ -73,13 +111,13 @@ export class DrizzlePgUploadSessionStore implements UploadSessionStore {
 
   async update(session: UploadSession): Promise<UploadSession> {
     const columns = {
-      ...toColumns(session),
+      ...toColumns(session, this.tenancy),
       ...(session.createdAt !== undefined ? { createdAt: session.createdAt } : {}),
       updatedAt: new Date(),
     };
     // Upsert, matching the in-memory store (update of an unknown id stores it).
     await this.db
-      .insert(mediaUploadSessionsPgTable)
+      .insert(this.sessionsTable)
       .values({ id: session.id, ...columns })
       .onConflictDoUpdate({ target: mediaUploadSessionsPgTable.id, set: columns });
     return { ...session };
@@ -118,9 +156,12 @@ export class DrizzlePgUploadSessionStore implements UploadSessionStore {
       ...(filter.keyPrefix !== undefined
         ? [like(mediaUploadSessionsPgTable.key, `${escapeLike(filter.keyPrefix)}%`)]
         : []),
+      ...(filter.tenant
+        ? [tenantCondition(mediaUploadSessionsPgTable.tenantId, filter.tenant)]
+        : []),
     ];
     const rows = await this.db
-      .select()
+      .select(this.columns)
       .from(mediaUploadSessionsPgTable)
       .where(conditions.length ? and(...conditions) : undefined)
       .orderBy(asc(mediaUploadSessionsPgTable.createdAt), asc(mediaUploadSessionsPgTable.id));

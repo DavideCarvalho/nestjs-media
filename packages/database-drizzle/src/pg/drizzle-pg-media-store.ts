@@ -8,15 +8,23 @@ import type {
   MediaRecord,
   MediaStore,
 } from '@dudousxd/nestjs-media-core';
-import { and, asc, count, eq, gt, max, or, sum } from 'drizzle-orm';
+import { and, asc, count, eq, getTableColumns, gt, max, or, sum } from 'drizzle-orm';
 import { decodeListCursor, encodeListCursor } from '../list-cursor';
+import { assertTenantColumn, selectable, tenantCondition } from '../tenancy';
+import { mediaPgTableWithoutTenant } from './columns';
 import type { DrizzlePgDatabase } from './db';
 import { mediaPgTable } from './schema';
 
-type MediaRow = typeof mediaPgTable.$inferSelect;
+type MediaRow = Omit<typeof mediaPgTable.$inferSelect, 'tenantId'> & { tenantId?: string | null };
 
 function toRecord(row: MediaRow): MediaRecord {
   return { ...row, size: Number(row.size) };
+}
+
+/** The `media` row of a record: `tenant_id` only once tenancy is on. */
+function toRow(record: MediaRecord, tenancy: boolean) {
+  const { tenantId, ...rest } = record;
+  return tenancy ? { ...rest, tenantId: tenantId ?? null } : rest;
 }
 
 /**
@@ -25,19 +33,45 @@ function toRecord(row: MediaRow): MediaRecord {
  * `mediaPgTable`, or `createMediaPgTables(db)` in tests/dev.
  */
 export class DrizzlePgMediaStore implements MediaStore {
+  private tenancy = false;
+
   constructor(private readonly db: DrizzlePgDatabase) {}
 
+  /** The columns to read: `tenant_id` only once tenancy is on. */
+  private get columns() {
+    return selectable(getTableColumns(mediaPgTable), this.tenancy);
+  }
+
+  /**
+   * Tenancy: checks the `tenant_id` column exists, then reads and writes it. Called by the
+   * library when tenancy is on; until then the column is never touched.
+   */
+  async enableTenancy(): Promise<void> {
+    await assertTenantColumn(
+      'media',
+      () => this.db.select({ tenantId: mediaPgTable.tenantId }).from(mediaPgTable).limit(1),
+      'Generate a migration with drizzle-kit from `mediaPgTable` (it declares `tenant_id` and the `idx_media_tenant` index), or run `ALTER TABLE media ADD COLUMN tenant_id text; CREATE INDEX idx_media_tenant ON media (tenant_id, owner_type, owner_id, collection);`.',
+    );
+    this.tenancy = true;
+  }
+
   async save(record: MediaRecord): Promise<MediaRecord> {
-    const { id: _id, ...rest } = record;
+    const row = toRow(record, this.tenancy);
+    const { id: _id, ...rest } = row;
+    // Off: through the table without `tenant_id`, which Drizzle would otherwise list in the INSERT.
     await this.db
-      .insert(mediaPgTable)
-      .values(record)
+      .insert(this.tenancy ? mediaPgTable : mediaPgTableWithoutTenant)
+      .values(row)
       .onConflictDoUpdate({ target: mediaPgTable.id, set: rest });
     return record;
   }
 
   async find(id: string): Promise<MediaRecord | null> {
-    const rows = await this.db.select().from(mediaPgTable).where(eq(mediaPgTable.id, id)).limit(1);
+    const rows = await this.db
+      .select(this.columns)
+      .from(mediaPgTable)
+      .where(eq(mediaPgTable.id, id))
+      .limit(1);
     const row = rows[0];
     return row ? toRecord(row) : null;
   }
@@ -56,7 +90,7 @@ export class DrizzlePgMediaStore implements MediaStore {
             eq(mediaPgTable.collection, collection),
           );
     const rows = await this.db
-      .select()
+      .select(this.columns)
       .from(mediaPgTable)
       .where(where)
       .orderBy(asc(mediaPgTable.order), asc(mediaPgTable.id));
@@ -87,6 +121,7 @@ export class DrizzlePgMediaStore implements MediaStore {
       ...(filter.ownerType !== undefined ? [eq(mediaPgTable.ownerType, filter.ownerType)] : []),
       ...(filter.collection !== undefined ? [eq(mediaPgTable.collection, filter.collection)] : []),
       ...(filter.disk !== undefined ? [eq(mediaPgTable.disk, filter.disk)] : []),
+      ...(filter.tenant ? [tenantCondition(mediaPgTable.tenantId, filter.tenant)] : []),
     ];
     const rows = await this.db
       .select({ value: count() })
@@ -100,6 +135,7 @@ export class DrizzlePgMediaStore implements MediaStore {
     const rows = await this.db
       .select({ key: column, count: count(), sumSize: sum(mediaPgTable.size) })
       .from(mediaPgTable)
+      .where(query.tenant ? tenantCondition(mediaPgTable.tenantId, query.tenant) : undefined)
       .groupBy(column);
     return rows.map((row) => ({
       key: row.key,
@@ -117,6 +153,7 @@ export class DrizzlePgMediaStore implements MediaStore {
       ...(filter.ownerType !== undefined ? [eq(mediaPgTable.ownerType, filter.ownerType)] : []),
       ...(filter.collection !== undefined ? [eq(mediaPgTable.collection, filter.collection)] : []),
       ...(filter.disk !== undefined ? [eq(mediaPgTable.disk, filter.disk)] : []),
+      ...(filter.tenant ? [tenantCondition(mediaPgTable.tenantId, filter.tenant)] : []),
       ...(cursor
         ? [
             or(
@@ -128,7 +165,7 @@ export class DrizzlePgMediaStore implements MediaStore {
     ];
 
     const rows = await this.db
-      .select()
+      .select(this.columns)
       .from(mediaPgTable)
       .where(filterConditions.length ? and(...filterConditions) : undefined)
       .orderBy(asc(mediaPgTable.createdAt), asc(mediaPgTable.id))
