@@ -94,7 +94,7 @@ export class DrizzlePgUploadSessionStore implements UploadSessionStore {
           .select({ tenantId: this.t.uploadSessions.tenantId })
           .from(this.t.uploadSessions)
           .limit(1),
-      'Generate a migration with drizzle-kit from `this.t.uploadSessions` (it declares `tenant_id` and its index), or run `ALTER TABLE media_upload_sessions ADD COLUMN tenant_id text; CREATE INDEX idx_media_upload_sessions_tenant ON media_upload_sessions (tenant_id);`.',
+      'Generate a migration with drizzle-kit from `mediaUploadSessionsPgTable` (or the tables of `mediaPgTables(schema)`; it declares `tenant_id` and its index), or run `ALTER TABLE media_upload_sessions ADD COLUMN tenant_id text; CREATE INDEX idx_media_upload_sessions_tenant ON media_upload_sessions (tenant_id);`.',
     );
     this.tenancy = true;
   }

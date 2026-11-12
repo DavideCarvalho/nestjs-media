@@ -66,7 +66,7 @@ export class DrizzlePgMediaStore implements MediaStore {
     await assertTenantColumn(
       'media',
       () => this.db.select({ tenantId: this.t.media.tenantId }).from(this.t.media).limit(1),
-      'Generate a migration with drizzle-kit from `this.t.media` (it declares `tenant_id` and the `idx_media_tenant` index), or run `ALTER TABLE media ADD COLUMN tenant_id text; CREATE INDEX idx_media_tenant ON media (tenant_id, owner_type, owner_id, collection);`.',
+      'Generate a migration with drizzle-kit from `mediaPgTable` (or the tables of `mediaPgTables(schema)`; it declares `tenant_id` and the `idx_media_tenant` index), or run `ALTER TABLE media ADD COLUMN tenant_id text; CREATE INDEX idx_media_tenant ON media (tenant_id, owner_type, owner_id, collection);`.',
     );
     this.tenancy = true;
   }
