@@ -41,6 +41,7 @@ interface MediaDashboardOptions {
   routes?: boolean;                           // false → mount no controller (mount them yourself)
   objectInsights?: ObjectInsightProvider[];  // host context shown in the preview
   objectUrls?: 'auto' | 'proxy';             // presigned store URLs, or same-origin — default 'auto'
+  devTools?: boolean;                         // MCP tools on /mcp/aviary — default: on when routes are mounted
 }
 ```
 
@@ -55,6 +56,7 @@ interface MediaDashboardOptions {
 | `imports` | Modules providing the dependencies of a guard you pass through `decorators`. |
 | `objectInsights` | Annotate an object in the preview with what *your app* knows about it — see [Object insights](#object-insights). |
 | `objectUrls` | Whether an object's reported `url` is presigned straight to the store or routed through this server — see [Reaching an object's bytes](#reaching-an-objects-bytes). |
+| `devTools` | Serve the console's reads (and, with `actions`, two of its actions) as [MCP tools](#mcp-tools). Default: on when `routes` is not `false`. |
 
 `MediaDashboardModule.forRootAsync(options)` mirrors this, building `objectInsights` through an injected `useObjectInsights(...deps)` factory (`inject` lists the deps). `authorize`, `decorators`, `routes`, `actions` and the mount paths stay static fields on the async options object, since they shape the routes when the module is built.
 
@@ -152,6 +154,24 @@ MediaDashboardModule.forRoot({ authorize: authorizeByToken({ token: process.env.
 
 A browser navigation sends no `Authorization` header, so this suits API clients and scripts more
 than the SPA.
+
+An allow can also name who it let in: `{ allowed: true, caller: 'user:42' }`. The [MCP tools](#mcp-tools)
+log that name as the caller of each call. Never put a secret in it. `authorizeByToken` names its caller
+`token:<hash>`.
+
+### A token or a session: `anyAuthorize`
+
+`anyAuthorize(...forms)` allows a request when any of its forms allows it. If none does, the result
+is `unauthenticated` when any form said so, and `forbidden` otherwise. Each form is any of the five
+`authorize` forms.
+
+```ts
+import { anyAuthorize, authorizeByToken } from '@dudousxd/nestjs-media-dashboard';
+
+MediaDashboardModule.forRoot({
+  authorize: anyAuthorize(authorizeByToken({ token: process.env.CONSOLE_TOKEN }), AdminAuthorizer),
+});
+```
 
 ### Without `authorize`
 
@@ -426,6 +446,7 @@ The response shapes are exported as types — see [the client subpath](#the-type
 | `GET library` | `collection?`, `disk?`, `cursor?`, `limit?` | `LibraryListResponse` |
 | `GET library/:id` | — | `LibraryDetailResponse` |
 | `GET topology` | — | `Topology` |
+| `GET consoles` | — | the other Aviary consoles this viewer may open (see [Switching between consoles](#switching-between-consoles)) |
 
 A `cursor` on `disks/:disk/objects` that is not one a previous page returned answers 400 (`InvalidListingCursorError`), not 500.
 
@@ -477,6 +498,42 @@ MediaDashboardModule.forRoot({
 | `proxy` | the console's own `object/raw` route, same-origin | the browser cannot reach the store. The trade: the URL only means anything to a session that can reach this server, and every byte travels through it. |
 
 `objectUrls` does not affect downloading — that route is same-origin either way.
+
+## MCP tools
+
+When the app imports the agent's MCP server (`AgentMcpServerModule` from
+`@dudousxd/nestjs-agent-mcp-server`), the console is also served as developer tools on its dev
+endpoint, `/mcp/aviary`. Each call is gated by this console's `authorize` and goes through
+`MediaConsoleService`, so tenancy applies as it does in the console. Object and variant URLs are
+never returned.
+
+| Tool | Kind | Input |
+|---|---|---|
+| `media_list_disks` | read | — |
+| `media_list_objects` | read | `disk`, `prefix?`, `cursor?`, `limit?` |
+| `media_get_object` | read | `disk`, `key` |
+| `media_list_uploads` | read | `disk?`, `prefix?`, `cursor?`, `limit?` |
+| `media_get_upload` | read | `id` |
+| `media_list_collections` | read | `collection?`, `disk?`, `cursor?`, `limit?` (without `collection` or `disk`: the collection summary) |
+| `media_get_media` | read | `id` |
+| `media_abort_upload` | action | `id` |
+| `media_delete_objects` | action, destructive | `disk`, `keys` (1 to 100); idempotent: a missing key is reported as deleted |
+
+Lists return `{ items, next }`; pass `next` back as `cursor`. An unknown disk, key or id is an error
+that says "not found". The two actions are offered only when the console has `actions: true` and the
+MCP server lists actions.
+
+The tools are registered while the console's routes are mounted. `devTools: true` keeps them with
+`routes: false`, and `devTools: false` turns them off.
+
+## Switching between consoles
+
+When the app mounts other Aviary consoles too (durable's Workflows, Telescope, Agents), the console's
+brand becomes a menu that lists the ones the viewer may open, and links to them. Each is listed only
+when its own `authorize` allows the viewer. That `authorize` then also runs once each time the page
+loads. With no other console, or none the viewer may open, the brand stays as it is. There is
+nothing to configure. The media console is listed in the other consoles' menus while its routes are
+mounted.
 
 ## The typed browser client (`/client` subpath)
 

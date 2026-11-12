@@ -23,6 +23,7 @@ export {
   CONSOLE_PAGE_METADATA,
   ConsolePage,
   normalizeConsoleResult,
+  anyAuthorize,
   authorizeByToken,
   resolveConsoleAuthorize,
   ConsoleAuthorizeGuard,
@@ -32,6 +33,33 @@ export {
 } from './console-authorize.js';
 export type { ObjectUrlConfig, ObjectUrlStrategy } from './object-urls.js';
 export { MediaConsoleService } from './media-console.service.js';
+// Developer tools over MCP (the agent's dev endpoint) and the console switcher.
+export {
+  DEV_TOOLS_SLOT,
+  MAX_DELETE_KEYS,
+  MediaDevToolsRegistration,
+  mediaDevTools,
+  type DevToolCall,
+  type DevToolInputProperty,
+  type DevToolInputSchema,
+  type DevToolsDecision,
+  type MediaDevTool,
+} from './dev-tools.js';
+export {
+  AVIARY_CONSOLES_SLOT,
+  CONSOLE_PROBE_TIMEOUT_MS,
+  MEDIA_CONSOLE_ID,
+  MediaConsoleRegistration,
+  MediaConsolesController,
+  listVisibleConsoles,
+  registerAviaryConsole,
+  type AviaryConsoleDecision,
+  type AviaryConsoleEntry,
+  type AviaryConsoleIcon,
+  type AviaryConsoleRegistry,
+  type VisibleConsole,
+  type VisibleConsoles,
+} from './console-switcher.js';
 // The controllers, for a host that mounts the console itself (`routes: false`) by extending them.
 export { MediaDashboardUiController } from './media-dashboard-ui.controller.js';
 export { MediaConsoleReadController } from './media-console-read.controller.js';

@@ -7,6 +7,7 @@ import {
 import type { InjectionToken } from '@nestjs/common';
 import { RouterModule } from '@nestjs/core';
 import type { ConsoleAuthorize } from './console-authorize.js';
+import { MediaConsoleRegistration } from './console-switcher.js';
 import { consoleController } from './controller-decorators.js';
 import { MediaConsoleApiModule } from './media-console-api.module.js';
 import { MediaDashboardUiController } from './media-dashboard-ui.controller.js';
@@ -122,6 +123,12 @@ export interface MediaDashboardOptions {
    * Default `true`.
    */
   routes?: boolean;
+  /**
+   * Register the console's reads (and, with `actions: true`, its upload abort and object delete) as
+   * developer tools on the agent MCP server's dev endpoint (`/mcp/aviary`), gated by this console's
+   * `authorize`. Default: on when the console's routes are mounted, off with `routes: false`.
+   */
+  devTools?: boolean;
 }
 
 /**
@@ -157,6 +164,8 @@ export interface MediaDashboardAsyncOptions {
   authorize?: ConsoleAuthorize;
   /** See {@link MediaDashboardOptions.routes}. Static, like `decorators`. */
   routes?: boolean;
+  /** See {@link MediaDashboardOptions.devTools}. */
+  devTools?: boolean;
 }
 
 /** Leading slash, no trailing slash. */
@@ -203,6 +212,7 @@ export class MediaDashboardModule {
       authorize?: ConsoleAuthorize;
       decorators?: ClassDecorator[];
       routes?: boolean;
+      devTools?: boolean;
     },
     insightsProvider: Provider,
   ): DynamicModule {
@@ -224,6 +234,7 @@ export class MediaDashboardModule {
           moduleName: name,
           ...(options.decorators ? { decorators: options.decorators } : {}),
           routes: mount,
+          ...(options.devTools !== undefined ? { devTools: options.devTools } : {}),
         }),
         ...(mount
           ? [
@@ -238,6 +249,8 @@ export class MediaDashboardModule {
       providers: [
         { provide: MEDIA_DASHBOARD_BASE_PATH, useValue: basePath },
         { provide: MEDIA_DASHBOARD_API_PATH, useValue: apiBasePath },
+        // The console switcher lists this console only where it serves its own page.
+        ...(mount ? [MediaConsoleRegistration] : []),
       ],
       // Re-export the API module so its MediaConsoleService reaches importers if they want it; the
       // resolved paths too, so a host mounting the controllers itself (`routes: false`) can extend

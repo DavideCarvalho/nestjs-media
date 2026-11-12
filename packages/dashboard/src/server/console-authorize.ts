@@ -19,9 +19,14 @@ import { HttpAdapterHost, ModuleRef } from '@nestjs/core';
 
 // ── The contract (same names and shapes in every Aviary console) ─────────────────────────────────
 
+/**
+ * What an `authorize` check answers. An allow may name who it let in (`caller`, for example
+ * `'user:42'`): the dev MCP endpoint logs it as the caller of a developer tool. Never put a secret
+ * in it.
+ */
 export type ConsoleAuthorizeResult =
   | boolean
-  | { allowed: true }
+  | { allowed: true; caller?: string }
   | { allowed: false; reason?: 'unauthenticated' | 'forbidden' }
   | { redirectTo: string };
 
@@ -45,7 +50,7 @@ export type ConsoleAuthorize =
   | string;
 
 export type ConsoleDecision =
-  | { allowed: true }
+  | { allowed: true; caller?: string }
   | { allowed: false; reason: 'unauthenticated' | 'forbidden'; redirectTo?: string };
 
 /** The provider `@dudousxd/nestjs-authz`'s `AuthzModule` registers to resolve gate names. */
@@ -73,7 +78,8 @@ export function consoleAuthorizeMissingWarning(registration: string): string {
 }
 
 // Every decision is a fresh object: a caller may mutate what it gets back.
-const allow = (): ConsoleDecision => ({ allowed: true });
+const allow = (caller?: string): ConsoleDecision =>
+  caller !== undefined && caller !== '' ? { allowed: true, caller } : { allowed: true };
 const forbidden = (): ConsoleDecision => ({ allowed: false, reason: 'forbidden' });
 const unauthenticated = (): ConsoleDecision => ({ allowed: false, reason: 'unauthenticated' });
 
@@ -116,11 +122,18 @@ function isLazyModule(value: unknown): value is { default: ConsoleAuthorizerClas
 export function normalizeConsoleResult(result: unknown): ConsoleDecision {
   if (result === true) return allow();
   if (typeof result !== 'object' || result === null) return forbidden();
-  const shape = result as { allowed?: unknown; reason?: unknown; redirectTo?: unknown };
+  const shape = result as {
+    allowed?: unknown;
+    reason?: unknown;
+    redirectTo?: unknown;
+    caller?: unknown;
+  };
   if (typeof shape.redirectTo === 'string' && shape.allowed !== true) {
     return { allowed: false, reason: 'unauthenticated', redirectTo: shape.redirectTo };
   }
-  if (shape.allowed === true) return allow();
+  if (shape.allowed === true) {
+    return allow(typeof shape.caller === 'string' ? shape.caller : undefined);
+  }
   return shape.reason === 'unauthenticated' ? unauthenticated() : forbidden();
 }
 
@@ -242,7 +255,7 @@ export async function resolveConsoleAuthorize(
       );
     }
     const production = isProduction();
-    return async () => (production ? forbidden() : allow());
+    return async () => (production ? forbidden() : allow('dev-open'));
   }
 
   let decide: ConsoleDecide;
@@ -287,7 +300,8 @@ const sha256 = (value: string): Buffer => createHash('sha256').update(value).dig
 /**
  * Allows a request carrying `Authorization: Bearer <token>` (compared timing-safe); anything else
  * is `unauthenticated`. Header only: no query string, no custom header. Throws when `token` is
- * empty, so a missing env var fails at config time instead of opening the console.
+ * empty, so a missing env var fails at config time instead of opening the console. The allow names
+ * its caller `token:<first 12 hex of sha256(token)>`, never the token.
  */
 export function authorizeByToken(options: { token: string | undefined }): ConsoleAuthorize {
   const token = options.token;
@@ -295,13 +309,60 @@ export function authorizeByToken(options: { token: string | undefined }): Consol
     throw new Error('authorizeByToken: `token` is empty; set it (e.g. from an env var).');
   }
   const expected = sha256(token);
+  const caller = `token:${expected.toString('hex').slice(0, 12)}`;
   return (context: ExecutionContext): ConsoleAuthorizeResult => {
     const header = context.switchToHttp().getRequest<{ headers?: Record<string, unknown> }>()
       ?.headers?.authorization;
     const match = typeof header === 'string' ? /^Bearer\s+(.+)$/i.exec(header.trim()) : null;
-    if (match?.[1] && timingSafeEqual(sha256(match[1]), expected)) return true;
+    if (match?.[1] && timingSafeEqual(sha256(match[1]), expected)) {
+      return { allowed: true, caller };
+    }
     return { allowed: false, reason: 'unauthenticated' };
   };
+}
+
+/**
+ * One `authorize` from several: allowed when any form allows (checked in order, stopping at the
+ * first that does, whose `caller` it keeps); otherwise `unauthenticated` when any form said so
+ * (keeping the first `redirectTo`), else `forbidden`. Each form is any `authorize` value: a
+ * function, a class, a lazy import, `{ policy, ability }` or a gate name.
+ *
+ * ```ts
+ * authorize: anyAuthorize(authorizeByToken({ token: process.env.CONSOLE_TOKEN }), AdminSessionAuthorizer)
+ * ```
+ */
+export function anyAuthorize(...forms: ConsoleAuthorize[]): ConsoleAuthorizerClass {
+  if (forms.length === 0) throw new Error('anyAuthorize: pass at least one authorize form.');
+  class AnyConsoleAuthorizer implements ConsoleAuthorizer {
+    #decides: Promise<ConsoleDecide[]> | undefined;
+
+    constructor(private readonly moduleRef: ModuleRef) {}
+
+    async authorize(context: ExecutionContext): Promise<ConsoleAuthorizeResult> {
+      this.#decides ??= Promise.all(
+        forms.map((form) =>
+          resolveConsoleAuthorize(form, this.moduleRef, { warnIfMissing: false }),
+        ),
+      );
+      // A failed resolution is retried on the next request, not cached as a permanent denial.
+      this.#decides.catch(() => {
+        this.#decides = undefined;
+      });
+      let unauthenticated: ConsoleDecision | undefined;
+      for (const decide of await this.#decides) {
+        const decision = await decide(context);
+        if (decision.allowed) return decision;
+        if (decision.reason === 'unauthenticated') unauthenticated ??= decision;
+      }
+      if (unauthenticated === undefined) return { allowed: false, reason: 'forbidden' };
+      return 'redirectTo' in unauthenticated && unauthenticated.redirectTo !== undefined
+        ? { redirectTo: unauthenticated.redirectTo }
+        : { allowed: false, reason: 'unauthenticated' };
+    }
+  }
+  // `ModuleRef` by explicit metadata: the class is created with DI whatever the build emits.
+  Reflect.defineMetadata('design:paramtypes', [ModuleRef], AnyConsoleAuthorizer);
+  return AnyConsoleAuthorizer;
 }
 
 // ── Enforcement: a guard (decides) + a filter scoped to the console controllers (answers) ─────────

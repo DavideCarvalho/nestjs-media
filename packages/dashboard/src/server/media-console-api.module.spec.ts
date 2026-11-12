@@ -3,6 +3,7 @@ import type { Type } from '@nestjs/common';
 import { GUARDS_METADATA } from '@nestjs/common/constants.js';
 import { describe, expect, it } from 'vitest';
 import { ConsoleAuthorizeGuard } from './console-authorize.js';
+import { MediaConsolesController } from './console-switcher.js';
 import { MediaConsoleActionsController } from './media-console-actions.controller.js';
 import { MediaConsoleApiModule } from './media-console-api.module.js';
 import { MediaConsoleReadController } from './media-console-read.controller.js';
@@ -17,13 +18,17 @@ const parents = (controllers: unknown[] | undefined): unknown[] =>
 describe('MediaConsoleApiModule.register', () => {
   it('mounts the read controller when actions are disabled', () => {
     const module = MediaConsoleApiModule.register({ ...base, actions: false });
-    expect(parents(module.controllers)).toEqual([MediaConsoleReadController]);
+    expect(parents(module.controllers)).toEqual([
+      MediaConsoleReadController,
+      MediaConsolesController,
+    ]);
   });
 
   it('mounts the actions controller when actions are enabled', () => {
     const module = MediaConsoleApiModule.register({ ...base, actions: true });
     expect(parents(module.controllers)).toEqual([
       MediaConsoleReadController,
+      MediaConsolesController,
       MediaConsoleActionsController,
     ]);
   });

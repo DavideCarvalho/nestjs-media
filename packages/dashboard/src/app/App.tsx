@@ -5,11 +5,15 @@ import {
   mediaConsoleClient,
   onConsoleAccessDenied,
 } from '../client/media-console-client.js';
+import { ConsoleSwitcher, readSwitcherConfig } from './ConsoleSwitcher.js';
 import { Button, Dot } from './ui.js';
 import { useHashRoute } from './useHashRoute.js';
 import { DisksView } from './views/DisksView.js';
 import { LibraryView } from './views/LibraryView.js';
 import { UploadsView } from './views/UploadsView.js';
+
+/** The switcher config the server put in the page (absent when this console is alone). */
+const switcherConfig = readSwitcherConfig('media-dashboard-config');
 
 const TABS: ReadonlyArray<{ id: 'disks' | 'uploads' | 'library'; label: string }> = [
   { id: 'disks', label: 'disks' },
@@ -96,17 +100,23 @@ export function App(): JSX.Element {
       <div className="app-bg" />
       <div className="relative z-10 flex h-full flex-col">
         <header className="z-10 flex items-center gap-4 border-b border-border px-5 py-3">
-          <div className="flex items-center gap-2.5">
-            <div className="grid h-7 w-7 place-items-center rounded-md border border-accent/30 bg-accent/10">
-              <LogoMark className="h-4 w-4 text-accent" />
-            </div>
-            <div className="leading-none">
-              <div className="text-sm font-semibold tracking-tight">media</div>
-              <div className="mono text-[10px] uppercase tracking-[0.2em] text-zinc-600">
-                console
+          <ConsoleSwitcher
+            config={switcherConfig}
+            current={{ title: 'Media', icon: 'media' }}
+            brand={
+              <div className="flex items-center gap-2.5">
+                <div className="grid h-7 w-7 place-items-center rounded-md border border-accent/30 bg-accent/10">
+                  <LogoMark className="h-4 w-4 text-accent" />
+                </div>
+                <div className="leading-none">
+                  <div className="text-sm font-semibold tracking-tight">media</div>
+                  <div className="mono text-[10px] uppercase tracking-[0.2em] text-zinc-600">
+                    console
+                  </div>
+                </div>
               </div>
-            </div>
-          </div>
+            }
+          />
 
           <nav className="ml-2 flex flex-wrap items-center gap-1">
             {TABS.map((tab) => (

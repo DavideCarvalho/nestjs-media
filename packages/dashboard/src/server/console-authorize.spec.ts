@@ -1,4 +1,5 @@
 import 'reflect-metadata';
+import { createHash } from 'node:crypto';
 import { AuthorizationModule, Policy } from '@nestjs/authorization';
 import { type ExecutionContext, Injectable, Logger, Module } from '@nestjs/common';
 import { ModuleRef } from '@nestjs/core';
@@ -8,6 +9,7 @@ import {
   CONSOLE_AUTHORIZE_MISSING_WARNING,
   type ConsoleAuthorize,
   type ConsoleAuthorizer,
+  anyAuthorize,
   authorizeByToken,
   normalizeConsoleResult,
   resolveConsoleAuthorize,
@@ -100,8 +102,8 @@ describe('resolveConsoleAuthorize', () => {
       process.env.NODE_ENV = 'development';
       const warn = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
       const check = await resolveConsoleAuthorize(undefined, await moduleRefWith());
-      expect(await check(ctx())).toEqual({ allowed: true });
-      expect(await check(ctx())).toEqual({ allowed: true });
+      expect(await check(ctx())).toEqual({ allowed: true, caller: 'dev-open' });
+      expect(await check(ctx())).toEqual({ allowed: true, caller: 'dev-open' });
       expect(warn).toHaveBeenCalledTimes(1);
       expect(warn).toHaveBeenCalledWith(
         '[@dudousxd/nestjs-media-dashboard] console has no `authorize` configured: it is open outside production and denies every request in production. Set `authorize` in MediaDashboardModule.forRoot().',
@@ -316,11 +318,15 @@ describe('resolveConsoleAuthorize', () => {
   });
 });
 
+const CALLER = `token:${createHash('sha256').update('s3cret').digest('hex').slice(0, 12)}`;
+
 describe('authorizeByToken', () => {
   const byToken = authorizeByToken({ token: 's3cret' }) as (c: ExecutionContext) => unknown;
 
-  it('allows a matching Bearer header', () => {
-    expect(byToken(ctx({ headers: { authorization: 'Bearer s3cret' } }))).toBe(true);
+  it('allows a matching Bearer header, naming the caller by a hash of the token', () => {
+    const decision = byToken(ctx({ headers: { authorization: 'Bearer s3cret' } }));
+    expect(decision).toEqual({ allowed: true, caller: CALLER });
+    expect(JSON.stringify(decision)).not.toContain('s3cret');
   });
 
   it('a mismatch, a missing header, or another scheme is unauthenticated', () => {
@@ -354,6 +360,66 @@ describe('authorizeByToken', () => {
     const check = await resolveConsoleAuthorize(authorize, await moduleRefWith());
     expect(await check(ctx({ headers: { authorization: 'Bearer s3cret' } }))).toEqual({
       allowed: true,
+      caller: CALLER,
     });
+  });
+});
+
+describe('anyAuthorize', () => {
+  async function decideWith(...forms: ConsoleAuthorize[]) {
+    return resolveConsoleAuthorize(anyAuthorize(...forms), await moduleRefWith());
+  }
+
+  it('allows when any form allows: a token OR an admin session (a DI class)', async () => {
+    const decide = await decideWith(authorizeByToken({ token: 's3cret' }), ConsoleAccess);
+    expect(await decide(ctx({ headers: { authorization: 'Bearer s3cret' } }))).toEqual({
+      allowed: true,
+      caller: CALLER,
+    });
+    expect(await decide(ctx({ user: { admin: true } }))).toEqual({ allowed: true });
+    expect(await decide(ctx({ user: { admin: false } }))).toEqual({
+      allowed: false,
+      reason: 'unauthenticated',
+    });
+  });
+
+  it('keeps the caller of the form that allowed, not of a token that did not match', async () => {
+    const decide = await decideWith(authorizeByToken({ token: 's3cret' }), () => ({
+      allowed: true,
+      caller: 'user:9',
+    }));
+    expect(await decide(ctx({ headers: { authorization: 'Bearer nope' } }))).toEqual({
+      allowed: true,
+      caller: 'user:9',
+    });
+  });
+
+  it('is unauthenticated when any form said so, keeping the first redirectTo', async () => {
+    const decide = await decideWith(
+      () => false,
+      () => ({ redirectTo: '/login' }),
+      () => ({ allowed: false, reason: 'unauthenticated' }) as const,
+    );
+    expect(await decide(ctx())).toEqual({
+      allowed: false,
+      reason: 'unauthenticated',
+      redirectTo: '/login',
+    });
+  });
+
+  it('is forbidden when every form forbids, and stops at the first allow', async () => {
+    const last = vi.fn(() => true);
+    const forbidden = await decideWith(
+      () => false,
+      () => ({ allowed: false, reason: 'forbidden' }) as const,
+    );
+    expect(await forbidden(ctx())).toEqual({ allowed: false, reason: 'forbidden' });
+    const first = await decideWith(() => true, last);
+    expect(await first(ctx())).toEqual({ allowed: true });
+    expect(last).not.toHaveBeenCalled();
+  });
+
+  it('needs at least one form', () => {
+    expect(() => anyAuthorize()).toThrow(/at least one/);
   });
 });
