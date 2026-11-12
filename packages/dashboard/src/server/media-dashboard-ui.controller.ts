@@ -11,11 +11,15 @@ import {
   StreamableFile,
 } from '@nestjs/common';
 import { ConsolePage } from './console-authorize.js';
+import { MEDIA_CONSOLE_ID, consoleSwitcherConfig } from './console-switcher.js';
 import { OpenToAuthorization } from './controller-decorators.js';
 import { MEDIA_DASHBOARD_API_PATH, MEDIA_DASHBOARD_BASE_PATH } from './tokens.js';
 
 /** The base the SPA bundle was built with (Vite `base`); rewritten to the configured base at serve time. */
 const BUILD_BASE = '/media';
+
+/** The id of the page's JSON config block. */
+export const MEDIA_DASHBOARD_CONFIG_ID = 'media-dashboard-config';
 
 /** dist/server/index.js -> ../spa (the Vite build output). */
 function spaDir(): string {
@@ -66,8 +70,21 @@ export class MediaDashboardUiController {
       `="${BUILD_BASE}/`,
       `="${this.basePath}/`,
     );
-    const inject = `<script>window.__MEDIA_BASE__='${this.basePath}';window.__MEDIA_API__='${this.apiBasePath}';</script>`;
+    const inject = `<script>window.__MEDIA_BASE__='${this.basePath}';window.__MEDIA_API__='${this.apiBasePath}';</script>${this.configBlock()}`;
     return html.includes('</head>') ? html.replace('</head>', `${inject}</head>`) : inject + html;
+  }
+
+  /**
+   * The page's JSON config block (`media-dashboard-config`, CSP-safe: data, not script). It carries
+   * `switcher` only when another Aviary console is registered.
+   */
+  private configBlock(): string {
+    const switcher = consoleSwitcherConfig(MEDIA_CONSOLE_ID, `${this.apiBasePath}/consoles`);
+    const json = JSON.stringify({
+      apiBase: this.apiBasePath,
+      ...(switcher !== undefined ? { switcher } : {}),
+    }).replaceAll('<', '\\u003c');
+    return `<script type="application/json" id="${MEDIA_DASHBOARD_CONFIG_ID}">${json}</script>`;
   }
 
   @Get('assets/:file')

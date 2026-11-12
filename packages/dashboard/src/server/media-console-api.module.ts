@@ -4,7 +4,9 @@ import {
   type ConsoleAuthorize,
   consoleAuthorizeProvider,
 } from './console-authorize.js';
+import { MediaConsolesController } from './console-switcher.js';
 import { consoleController } from './controller-decorators.js';
+import { MediaDevToolsRegistration } from './dev-tools.js';
 import { MediaConsoleActionsController } from './media-console-actions.controller.js';
 import { MediaConsoleReadController } from './media-console-read.controller.js';
 import { MediaConsoleService } from './media-console.service.js';
@@ -13,6 +15,7 @@ import {
   MEDIA_CONSOLE_OBJECT_INSIGHTS,
   MEDIA_CONSOLE_OBJECT_URLS,
   MEDIA_DASHBOARD_ACTIONS,
+  MEDIA_DASHBOARD_DEV_TOOLS,
 } from './tokens.js';
 
 export interface MediaConsoleApiModuleOptions {
@@ -43,6 +46,8 @@ export interface MediaConsoleApiModuleOptions {
    * controllers itself — see `MediaDashboardOptions.routes`. Default `true`.
    */
   routes?: boolean;
+  /** See `MediaDashboardOptions.devTools`. Default: on when the routes are mounted. */
+  devTools?: boolean;
 }
 
 /**
@@ -60,6 +65,7 @@ export class MediaConsoleApiModule {
           ? []
           : [
               consoleController(MediaConsoleReadController, options.decorators),
+              consoleController(MediaConsolesController, options.decorators),
               ...(options.actions
                 ? [consoleController(MediaConsoleActionsController, options.decorators)]
                 : []),
@@ -71,6 +77,11 @@ export class MediaConsoleApiModule {
           options.moduleName ?? 'MediaConsoleApiModule.register()',
         ),
         { provide: MEDIA_DASHBOARD_ACTIONS, useValue: options.actions },
+        {
+          provide: MEDIA_DASHBOARD_DEV_TOOLS,
+          useValue: options.devTools ?? options.routes !== false,
+        },
+        MediaDevToolsRegistration,
         { provide: MEDIA_CONSOLE_OBJECT_URLS, useValue: options.objectUrls },
         options.insightsProvider ?? {
           provide: MEDIA_CONSOLE_OBJECT_INSIGHTS,

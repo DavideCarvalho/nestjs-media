@@ -26,3 +26,6 @@ export const MEDIA_CONSOLE_OBJECT_INSIGHTS: symbol = Symbol('MEDIA_CONSOLE_OBJEC
 /** Carries the resolved `ObjectUrlConfig` (`options.objectUrls` + the API mount) to the console
  *  service, which decides from it whether an object's `url` is presigned or same-origin. */
 export const MEDIA_CONSOLE_OBJECT_URLS: symbol = Symbol('MEDIA_CONSOLE_OBJECT_URLS');
+
+/** Carries whether the media tools register into the dev-tools slot (`options.devTools`). */
+export const MEDIA_DASHBOARD_DEV_TOOLS: symbol = Symbol('MEDIA_DASHBOARD_DEV_TOOLS');
