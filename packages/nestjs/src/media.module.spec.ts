@@ -7,7 +7,13 @@ import { MediaDirectUploadController } from './media-direct-upload.controller';
 import { MediaUploadController } from './media-upload.controller';
 import { MediaModule } from './media.module';
 import { MediaService } from './media.service';
-import { MEDIA_MULTIPART, MEDIA_STORE, MEDIA_UPLOAD_SESSIONS } from './tokens';
+import {
+  MEDIA_LIBRARY,
+  MEDIA_MULTIPART,
+  MEDIA_STORE,
+  MEDIA_UPLOADS,
+  MEDIA_UPLOAD_SESSIONS,
+} from './tokens';
 
 describe('MediaModule', () => {
   it('forRoot stores attachments on the StorageModule disks', async () => {
@@ -23,6 +29,21 @@ describe('MediaModule', () => {
       contents: Buffer.from('yo'),
     });
     expect(await local.getText(att.path)).toBe('yo');
+  });
+
+  it('boots with the library and upload manager replaced by pre-tenancy test doubles', async () => {
+    const local = new InMemoryDisk();
+    const mod = await Test.createTestingModule({
+      imports: [StorageModule.forRoot({ disks: { local } }), MediaModule.forRoot({})],
+    })
+      .overrideProvider(MEDIA_LIBRARY)
+      .useValue({ list: async () => [] })
+      .overrideProvider(MEDIA_UPLOADS)
+      .useValue({ createUpload: async () => ({}), abort: async () => {} })
+      .compile();
+    const app = mod.createNestApplication();
+    await expect(app.init()).resolves.toBeDefined();
+    await app.close();
   });
 
   it('without StorageModule, boot fails naming it', async () => {

@@ -60,8 +60,12 @@ export class MediaService implements OnApplicationBootstrap {
    * with the fix in the message, instead of failing requests later.
    */
   async onApplicationBootstrap(): Promise<void> {
-    await this.mediaLibrary?.prepareTenancy();
-    await this.uploadManager?.prepareTenancy();
+    // `typeof` guards, not `?.`: an app may replace the library or the upload manager with a test
+    // double written against the pre-tenancy interface, and must still boot.
+    const library = this.mediaLibrary as { prepareTenancy?: () => Promise<boolean> } | undefined;
+    const uploads = this.uploadManager as { prepareTenancy?: () => Promise<boolean> } | undefined;
+    if (typeof library?.prepareTenancy === 'function') await library.prepareTenancy();
+    if (typeof uploads?.prepareTenancy === 'function') await uploads.prepareTenancy();
   }
 
   /** Attachment-as-column API (adonis-attachment style): `media.attachments.createFromFile(...)`. */
