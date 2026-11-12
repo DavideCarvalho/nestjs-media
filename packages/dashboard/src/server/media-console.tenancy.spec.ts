@@ -173,11 +173,26 @@ describe('MediaConsoleService tenancy: labels, required, pathPrefix', () => {
   it('search: no tenant where one is required finds nothing, and does not throw', async () => {
     const { service } = await setup({
       match: async () => {
-        throw Object.assign(new Error('tenant required'), { status: 403 });
+        throw Object.assign(new Error('tenant required'), {
+          status: 403,
+          code: 'E_TENANT_REQUIRED',
+        });
       },
       canSee: async () => false,
     });
     await expect(service.search('a', 5, '/media')).resolves.toEqual([]);
+  });
+
+  it('search: any other tenancy failure (a store that cannot scope) fails the search', async () => {
+    const { service } = await setup({
+      match: async () => {
+        throw Object.assign(new Error('no tenant_id column'), {
+          code: 'MEDIA_TENANCY_UNAVAILABLE',
+        });
+      },
+      canSee: async () => false,
+    });
+    await expect(service.search('a', 5, '/media')).rejects.toThrow('no tenant_id column');
   });
 
   it('search: with pathPrefix, a tenant searches the disks under its own t/<tenantId>/', async () => {

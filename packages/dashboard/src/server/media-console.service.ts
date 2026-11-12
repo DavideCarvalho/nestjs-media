@@ -678,9 +678,11 @@ export class MediaConsoleService {
     try {
       tenant = await this.tenantMatch();
       tenantPrefix = tenant ? await this.tenancy?.pathPrefix?.() : undefined;
-    } catch {
-      // No tenant where one is required (the context's 403): nothing this viewer may see.
-      return [];
+    } catch (error) {
+      // No tenant where one is required (the context's `TenantRequiredError`, 403): nothing this
+      // viewer may see. Anything else (a store that can't scope by tenant) fails the search.
+      if ((error as { code?: unknown } | null)?.code === 'E_TENANT_REQUIRED') return [];
+      throw error;
     }
     const store = this.store;
     const [byId, named, files] = await Promise.all([

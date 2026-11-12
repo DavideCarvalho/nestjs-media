@@ -89,10 +89,6 @@ export interface MediaFactory<T> {
 }
 
 /**
- * The request's tenant scope, under `MEDIA_TENANCY`: what the media dashboard applies to the
- * stores it reads directly. Both methods switch the stores to tenancy first when it is on.
- */
-/**
  * Console labels keyed by tenant id: the context's `tenantLabels` (its `tenancy.label`, context >=
  * 2.1), else the slug, else the id. Read structurally, like the rest of the tenancy contract.
  */
@@ -116,6 +112,10 @@ async function labelTenants(
   return Object.fromEntries(tenants.map((t) => [t.id, t.slug || t.id]));
 }
 
+/**
+ * The request's tenant scope, under `MEDIA_TENANCY`: what the media dashboard applies to the
+ * stores it reads directly. Both methods switch the stores to tenancy first when it is on.
+ */
 export interface MediaTenancyScope {
   /** The store filter for this request: `undefined` when every row is visible. */
   match(): Promise<MediaTenantMatch | undefined>;
