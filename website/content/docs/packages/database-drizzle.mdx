@@ -54,6 +54,39 @@ MediaModule.forRoot({
 
 For drizzle-kit, re-export `mediaPgTable`, `mediaUploadSessionsPgTable` and `mediaUploadPartsPgTable` from your schema file and generate migrations as usual.
 
+## Database schema
+
+The Postgres stores can keep their tables in a schema of their own (`"media"."media"`), while your app stays in `public`:
+
+```ts
+import {
+  DrizzlePgMediaStore,
+  DrizzlePgUploadSessionStore,
+  createMediaPgTables,
+  mediaPgTables,
+} from '@dudousxd/nestjs-media-database-drizzle/pg';
+
+await createMediaPgTables(db, { schema: 'media' }); // creates the schema too (dev/test)
+
+MediaModule.forRoot({
+  store: new DrizzlePgMediaStore(db, { schema: 'media' }),
+  uploadSessions: new DrizzlePgUploadSessionStore(db, { schema: 'media' }),
+});
+```
+
+With `drizzlePgMediaStore` / `drizzlePgUploadSessions` (below), pass `schema` next to `connectionName`.
+
+For drizzle-kit, export the tables of `mediaPgTables('media')` from your schema file (`media`, `uploadSessions`, `uploadParts`) instead of the unqualified `mediaPgTable` set. `mediaPgDdl('media')` gives the matching SQL.
+
+- **Names:** a letter or `_`, then letters, digits, `_` or `$`; at most 63 characters. `'public'` is refused: leave `schema` unset to use it.
+- **Permissions:** `createMediaPgTables` runs `CREATE SCHEMA IF NOT EXISTS`. A role without `CREATE` on the database fails with the grant it needs; create the schema yourself in that case.
+- **SQLite** has no schemas: `schema` on `DrizzleMediaStore`, `createMediaTable` or `drizzleMediaStore` throws.
+- Without `schema`, nothing changes: the tables are unqualified, as before.
+
+<Callout type="warn" title="Don't use search_path">
+Don't point the connection at the schema with `search_path` (or a connection option that sets it). Behind PgBouncer in transaction mode, `SET search_path` leaks to other clients' connections. With `schema`, every statement the store issues names the schema itself.
+</Callout>
+
 ## On a `@nestjs/drizzle` connection (`/nest`)
 
 With `@nestjs/drizzle`, let Nest inject the database instead of building it yourself:

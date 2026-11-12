@@ -1,5 +1,5 @@
 import type { MediaConversion } from '@dudousxd/nestjs-media-core';
-import { bigint, integer, jsonb, pgTable, text, timestamp } from 'drizzle-orm/pg-core';
+import { bigint, integer, jsonb, text, timestamp } from 'drizzle-orm/pg-core';
 
 /** The `media` columns but `tenant_id` (fresh builders per call: one set per table). */
 export function mediaPgColumns() {
@@ -38,13 +38,3 @@ export function uploadSessionPgColumns() {
     updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
   };
 }
-
-/**
- * Internal: the tables without `tenant_id`. The stores insert through them while tenancy is off,
- * because Drizzle lists every column of a table in an `INSERT`. Not exported.
- */
-export const mediaPgTableWithoutTenant = pgTable('media', mediaPgColumns());
-export const mediaUploadSessionsPgTableWithoutTenant = pgTable(
-  'media_upload_sessions',
-  uploadSessionPgColumns(),
-);

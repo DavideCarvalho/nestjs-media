@@ -16,11 +16,74 @@ import {
   IsNull,
   type SelectQueryBuilder,
   Table,
+  type TableIndex,
 } from 'typeorm';
-import { MediaEntity } from './media.entity';
+import { mediaEntity } from './media.entity';
 
 const TENANT_COLUMN = 'tenant_id';
 const TENANT_INDEX = 'idx_media_tenant';
+
+/** Drivers without schemas: a `schema` there fails instead of being ignored. */
+const SQLITE_DRIVERS = new Set([
+  'sqlite',
+  'better-sqlite3',
+  'sqljs',
+  'capacitor',
+  'cordova',
+  'expo',
+  'nativescript',
+  'react-native',
+]);
+
+/** Fails when `schema` is set on a driver without schemas (SQLite). */
+function assertSchemaSupported(dataSource: DataSource, schema: string | undefined): void {
+  if (schema !== undefined && SQLITE_DRIVERS.has(String(dataSource.options.type))) {
+    throw new Error(
+      `[nestjs-media] \`schema: ${JSON.stringify(schema)}\` was set, but ${dataSource.options.type} has no schemas. Remove \`schema\`, or use Postgres or MySQL.`,
+    );
+  }
+}
+
+function isMysql(dataSource: DataSource): boolean {
+  return ['mysql', 'mariadb', 'aurora-mysql'].includes(String(dataSource.options.type));
+}
+
+/** `idx_media_tenant` on MySQL, with 191-character prefixes so it fits the key limit. */
+async function createMysqlTenantIndex(
+  queryRunner: ReturnType<DataSource['createQueryRunner']>,
+  dataSource: DataSource,
+  path: string,
+  index: TableIndex | undefined,
+): Promise<void> {
+  if (!index) return;
+  const quote = (name: string) => dataSource.driver.escape(name);
+  const table = path.split('.').map(quote).join('.');
+  // The index's database column names (they follow the app's naming strategy).
+  const columns = index.columnNames.map((column) => `${quote(column)}(191)`).join(', ');
+  await queryRunner.query(`CREATE INDEX ${quote(TENANT_INDEX)} ON ${table} (${columns})`);
+}
+
+/** Creates `schema` (Postgres) or the database of that name (MySQL) when it is missing. */
+async function createSchema(
+  queryRunner: ReturnType<DataSource['createQueryRunner']>,
+  dataSource: DataSource,
+  schema: string,
+): Promise<void> {
+  const mysql = isMysql(dataSource);
+  try {
+    if (mysql) await queryRunner.createDatabase(schema, true);
+    else await queryRunner.createSchema(schema, true);
+  } catch (error) {
+    throw Object.assign(
+      new Error(
+        mysql
+          ? `[nestjs-media] could not create the database \`${schema}\`. Create it yourself, or grant the user CREATE: GRANT CREATE ON \`${schema}\`.* TO <user>. (${(error as Error).message})`
+          : `[nestjs-media] could not create the schema "${schema}". Create it yourself, or grant the role CREATE on the database: GRANT CREATE ON DATABASE <db> TO <role>. (${(error as Error).message})`,
+      ),
+      { cause: error },
+    );
+  }
+}
 
 export interface EnsureMediaSchemaOptions {
   /**
@@ -28,6 +91,11 @@ export interface EnsureMediaSchemaOptions {
    * existing table only gets it once tenancy is on. A new table always has it.
    */
   tenancy?: boolean;
+  /**
+   * The schema (Postgres) or database (MySQL) of the `media` table. Created when missing; every
+   * statement names it. Register `mediaEntity({ schema })` in the DataSource.
+   */
+  schema?: string;
 }
 
 /**
@@ -38,27 +106,37 @@ export async function ensureMediaSchema(
   dataSource: DataSource,
   options: EnsureMediaSchemaOptions = {},
 ): Promise<void> {
-  const metadata = dataSource.getMetadata(MediaEntity);
+  assertSchemaSupported(dataSource, options.schema);
+  const metadata = dataSource.getMetadata(mediaEntity({ schema: options.schema }));
   // Table.create() builds dialect-correct TableColumns from the entity metadata —
   // reuse them for both the initial create and any add-column.
   const table = Table.create(metadata, dataSource.driver);
+  // `schema.media` (or `database.media`) with a schema: every catalog lookup names it.
+  const path = metadata.tablePath;
+  // MySQL: the tenant index's four varchar(255) columns pass InnoDB's 3072-byte key limit in
+  // utf8mb4, and TypeORM can't declare prefix lengths; it is created with 191-character prefixes.
+  const mysql = isMysql(dataSource);
+  const tenantIndex = table.indices.find((candidate) => candidate.name === TENANT_INDEX);
+  if (mysql) table.indices = table.indices.filter((candidate) => candidate !== tenantIndex);
   const queryRunner = dataSource.createQueryRunner();
   try {
-    if (!(await queryRunner.hasTable(metadata.tableName))) {
+    if (options.schema !== undefined) await createSchema(queryRunner, dataSource, options.schema);
+    if (!(await queryRunner.hasTable(path))) {
       await queryRunner.createTable(table, true);
+      if (mysql) await createMysqlTenantIndex(queryRunner, dataSource, path, tenantIndex);
       return;
     }
     for (const column of table.columns) {
       if (column.name === TENANT_COLUMN && !options.tenancy) continue;
-      if (!(await queryRunner.hasColumn(metadata.tableName, column.name))) {
-        await queryRunner.addColumn(metadata.tableName, column);
+      if (!(await queryRunner.hasColumn(path, column.name))) {
+        await queryRunner.addColumn(path, column);
       }
     }
     if (options.tenancy) {
-      const existing = await queryRunner.getTable(metadata.tableName);
-      const index = table.indices.find((candidate) => candidate.name === TENANT_INDEX);
-      if (index && !existing?.indices.some((candidate) => candidate.name === TENANT_INDEX)) {
-        await queryRunner.createIndex(metadata.tableName, index);
+      const existing = await queryRunner.getTable(path);
+      if (!existing?.indices.some((candidate) => candidate.name === TENANT_INDEX)) {
+        if (mysql) await createMysqlTenantIndex(queryRunner, dataSource, path, tenantIndex);
+        else if (tenantIndex) await queryRunner.createIndex(path, tenantIndex);
       }
     }
   } finally {
@@ -69,6 +147,12 @@ export async function ensureMediaSchema(
 export interface TypeOrmMediaStoreOptions {
   /** Create the table/columns on first use (default true, non-destructive). */
   autoCreateSchema?: boolean;
+  /**
+   * The schema (Postgres) or database (MySQL) of the `media` table; every statement names it
+   * (`search_path` is never used). Register `mediaEntity({ schema })` in the DataSource. Default:
+   * unqualified. SQLite has none: setting it throws.
+   */
+  schema?: string;
 }
 
 /**
@@ -80,22 +164,31 @@ export class TypeOrmMediaStore implements MediaStore {
   private readonly autoCreateSchema: boolean;
   private ensured: Promise<void> | undefined;
   private tenancy = false;
+  private readonly schema: string | undefined;
+  private readonly entity: ReturnType<typeof mediaEntity>;
 
   constructor(
     private readonly dataSource: DataSource,
     options: TypeOrmMediaStoreOptions = {},
   ) {
     this.autoCreateSchema = options.autoCreateSchema ?? true;
+    this.schema = options.schema;
+    this.entity = mediaEntity({ schema: options.schema });
+    assertSchemaSupported(dataSource, options.schema);
   }
 
   private async ready(): Promise<void> {
     if (!this.autoCreateSchema) return;
-    this.ensured ??= ensureMediaSchema(this.dataSource);
+    this.ensured ??= ensureMediaSchema(this.dataSource, this.schemaOption);
     await this.ensured;
   }
 
+  private get schemaOption(): { schema?: string } {
+    return this.schema !== undefined ? { schema: this.schema } : {};
+  }
+
   private get repo() {
-    return this.dataSource.getRepository(MediaEntity);
+    return this.dataSource.getRepository(this.entity);
   }
 
   /**
@@ -104,10 +197,10 @@ export class TypeOrmMediaStore implements MediaStore {
    * the column is never touched.
    */
   async enableTenancy(): Promise<void> {
-    const tableName = this.dataSource.getMetadata(MediaEntity).tableName;
+    const tableName = this.dataSource.getMetadata(this.entity).tablePath;
     if (this.autoCreateSchema) {
       await this.ready();
-      await ensureMediaSchema(this.dataSource, { tenancy: true });
+      await ensureMediaSchema(this.dataSource, { tenancy: true, ...this.schemaOption });
     }
     const queryRunner = this.dataSource.createQueryRunner();
     try {
@@ -141,11 +234,16 @@ export class TypeOrmMediaStore implements MediaStore {
     // statement, in the same transaction: the row is never visible, or left, with another tenant.
     const persisted = { ...rest, tenantId: tenantId ?? null };
     await this.dataSource.transaction(async (manager) => {
-      await manager.getRepository(MediaEntity).save(rest);
+      await manager.getRepository(this.entity).save(rest);
       const driver = this.dataSource.driver;
-      const table = this.dataSource.getMetadata(MediaEntity).tableName;
+      // `"schema"."media"` with a schema: each part quoted on its own.
+      const table = this.dataSource
+        .getMetadata(this.entity)
+        .tablePath.split('.')
+        .map((part) => driver.escape(part))
+        .join('.');
       const [sql, parameters] = driver.escapeQueryWithParameters(
-        `UPDATE ${driver.escape(table)} SET ${driver.escape(TENANT_COLUMN)} = :tenantId WHERE ${driver.escape('id')} = :id`,
+        `UPDATE ${table} SET ${driver.escape(TENANT_COLUMN)} = :tenantId WHERE ${driver.escape('id')} = :id`,
         { tenantId: persisted.tenantId, id: record.id },
         {},
       );

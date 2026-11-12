@@ -21,17 +21,25 @@ export interface PgTestDatabase {
   teardown(): Promise<void>;
 }
 
+/** A Postgres server: `MEDIA_PG_URL`, else a testcontainers `postgres:16-alpine`. */
+export async function startPgServer(): Promise<{ url: string; stop(): Promise<void> }> {
+  if (externalPgUrl) return { url: externalPgUrl, stop: async () => {} };
+  const container: StartedTestContainer = await new GenericContainer('postgres:16-alpine')
+    .withEnvironment({ POSTGRES_PASSWORD: 'test', POSTGRES_DB: 'media' })
+    .withExposedPorts(5432)
+    .withWaitStrategy(Wait.forLogMessage(/database system is ready to accept connections/, 2))
+    .start();
+  return {
+    url: `postgres://postgres:test@${container.getHost()}:${container.getMappedPort(5432)}/media`,
+    stop: async () => {
+      await container.stop();
+    },
+  };
+}
+
 export async function startPgTestDatabase(): Promise<PgTestDatabase> {
-  let container: StartedTestContainer | undefined;
-  let url = externalPgUrl;
-  if (!url) {
-    container = await new GenericContainer('postgres:16-alpine')
-      .withEnvironment({ POSTGRES_PASSWORD: 'test', POSTGRES_DB: 'media' })
-      .withExposedPorts(5432)
-      .withWaitStrategy(Wait.forLogMessage(/database system is ready to accept connections/, 2))
-      .start();
-    url = `postgres://postgres:test@${container.getHost()}:${container.getMappedPort(5432)}/media`;
-  }
+  const server = await startPgServer();
+  const url = server.url;
 
   const schema = `media_test_${randomBytes(6).toString('hex')}`;
   const admin = new pg.Client({ connectionString: url });
@@ -56,7 +64,7 @@ export async function startPgTestDatabase(): Promise<PgTestDatabase> {
         await pool.query(`DROP SCHEMA IF EXISTS "${schema}" CASCADE`);
       } finally {
         await pool.end();
-        await container?.stop();
+        await server.stop();
       }
     },
   };

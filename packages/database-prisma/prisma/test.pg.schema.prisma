@@ -1,0 +1,41 @@
+// Test-only schema: the `Media` model in its own Postgres schema (`@@schema`), generated into the
+// gitignored generated/pg-schema-client for the schema-option db.spec. NOT shipped.
+generator client {
+  provider = "prisma-client-js"
+  output   = "../generated/pg-schema-client"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("PRISMA_PG_URL")
+  schemas  = ["media_lib"]
+}
+
+// Consumers must add matching @@index on collection, disk, createdAt for the media dashboard aggregates.
+model Media {
+  id               String   @id
+  ownerType        String
+  ownerId          String
+  collection       String
+  name             String
+  fileName         String
+  mimeType         String
+  size             Int
+  disk             String
+  path             String
+  order            Int      @map("position")
+  customProperties Json
+  conversions      Json
+  createdAt        DateTime
+  updatedAt        DateTime
+  tenantId         String?  @map("tenant_id")
+
+  @@index([ownerType, ownerId, collection])
+  @@index([collection])
+  @@index([disk])
+  @@index([createdAt])
+  @@index([collection, createdAt, id])
+  @@index([tenantId, ownerType, ownerId, collection])
+  @@map("media")
+  @@schema("media_lib")
+}
