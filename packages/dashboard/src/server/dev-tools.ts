@@ -247,7 +247,11 @@ export function mediaDevTools(
         const { uploads } = await service.listUploads(
           given({ disk: str(input.disk), prefix: str(input.prefix) }),
         );
-        const start = Math.max(0, Number.parseInt(str(input.cursor) ?? '0', 10) || 0);
+        const cursor = str(input.cursor);
+        if (cursor !== undefined && !/^\d+$/.test(cursor)) {
+          throw new Error(`"cursor" must be the \`next\` of a previous page, got "${cursor}"`);
+        }
+        const start = cursor === undefined ? 0 : Number(cursor);
         const end = start + limitOf(input);
         return {
           items: uploads.slice(start, end),

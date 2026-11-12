@@ -196,6 +196,7 @@ describe('mediaDevTools', () => {
     };
     expect(second.items.map((u) => u.id)).toEqual(['m2']);
     expect(second.next).toBeNull();
+    await expect(tool('media_list_uploads').run({ cursor: 'nope' })).rejects.toThrow(/cursor/);
     const detail = (await tool('media_get_upload').run({ id: 'm1' })) as {
       upload: { id: string; percent: number };
     };
