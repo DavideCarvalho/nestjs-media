@@ -1,7 +1,7 @@
 ---
 title: Diagnostics & the glue points
 icon: Activity
-description: Media emits to nestjs:media:* diagnostics channels with zero coupling; Telescope, Codegen, and React plug in from there.
+description: Media emits to aviary:media:* diagnostics channels with zero coupling; Telescope, Codegen, and React plug in from there.
 ---
 
 import { Callout } from 'fumadocs-ui/components/callout';
@@ -13,13 +13,13 @@ media is wired into the same four glue points every `@dudousxd/nestjs-*` library
 Every layer of the library publishes to `node:diagnostics_channel` with the standard ecosystem envelope. This is the lowest-coupling integration there is: media doesn't import Telescope or know it exists — it just emits, and anything that cares subscribes. When nobody's listening, publishing is a no-op (a cheap `hasSubscribers` check), so it's always on by default with no measurable cost.
 
 ```ts
-// channel: nestjs:media:<event>
+// channel: aviary:media:<event>
 { ts: number, lib: 'media', event: 'attach', payload: { id, ownerType, ownerId, collection, disk, path, size, mimeType } }
 ```
 
 ### Every event
 
-Each event is its own channel (`nestjs:media:<event>`) carrying a typed payload. The full set (`MEDIA_DIAGNOSTIC_EVENTS` is exported for convenience):
+Each event is its own channel (`aviary:media:<event>`) carrying a typed payload. The full set (`MEDIA_DIAGNOSTIC_EVENTS` is exported for convenience):
 
 | Event | Emitted by | Payload |
 |---|---|---|
@@ -37,14 +37,15 @@ This is what makes "do something on upload start / end" a two-line subscription 
 
 ```ts
 import { subscribe } from 'node:diagnostics_channel';
-import type { MediaDiagnosticEnvelope, UploadCompletePayload } from '@dudousxd/nestjs-media-core';
+import { channelName, type DiagnosticEvent } from '@dudousxd/nestjs-diagnostics';
+import type { UploadCompletePayload } from '@dudousxd/nestjs-media-core';
 
-subscribe('nestjs:media:upload.start', (msg) => {
-  console.log('upload started', (msg as MediaDiagnosticEnvelope).payload);
+subscribe(channelName('media', 'upload.start'), (msg) => {
+  console.log('upload started', (msg as DiagnosticEvent).payload);
 });
 
-subscribe('nestjs:media:upload.complete', (msg) => {
-  const { key, size } = (msg as MediaDiagnosticEnvelope<UploadCompletePayload>).payload;
+subscribe(channelName('media', 'upload.complete'), (msg) => {
+  const { key, size } = (msg as DiagnosticEvent<UploadCompletePayload>).payload;
   metrics.observe('media.upload.bytes', size, { key });
 });
 ```

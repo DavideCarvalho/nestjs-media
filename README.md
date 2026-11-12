@@ -35,7 +35,7 @@ Upgrading from the versions with their own storage layer (`StorageManager`, `Loc
 | `@dudousxd/nestjs-media-react` | `useMediaUpload` hook + `MediaUploader` (wraps the client) |
 | `@dudousxd/nestjs-media-testing` | in-memory store/upload-session, `storageOf()`, disk + store conformance suites |
 
-Requires NestJS 12.1+ and Node 20.19+ (the floor of `@nestjs/storage`).
+Requires NestJS 12.1+ and Node 24+.
 
 ## Quick start
 

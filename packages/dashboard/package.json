@@ -99,5 +99,8 @@
     "xlsx": "0.18.5",
     "@nestjs/storage": "0.0.5",
     "@dudousxd/nestjs-media-testing": "workspace:*"
+  },
+  "engines": {
+    "node": ">=24"
   }
 }

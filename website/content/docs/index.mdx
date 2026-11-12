@@ -48,7 +48,7 @@ The media-library writes bytes *through* a `@nestjs/storage` disk and records me
 - **Media-library**: spatie-style collections (single-file or multi), ordering, MIME validation, custom properties, and `attach / list / delete / url`.
 - **Image conversions**: a pluggable `ImageProcessor` (sharp by default), generated **lazily** on first access (and cached) or **eagerly** on upload.
 - **Four ORM stores**: TypeORM, MikroORM, Drizzle, Prisma — POJO adapters that all satisfy the same `MediaStore` contract, with non-destructive auto-schema where the ORM allows.
-- **Ecosystem glue points**: `nestjs:media:*` diagnostics channels, a [Telescope](/docs/telescope) watcher, a codegen-emitted typed client, and a React `useMediaUpload` hook + `<MediaUploader/>`.
+- **Ecosystem glue points**: `aviary:media:*` diagnostics channels, a [Telescope](/docs/telescope) watcher, a codegen-emitted typed client, and a React `useMediaUpload` hook + `<MediaUploader/>`.
 
 ## When (and when not) to use it
 

@@ -56,5 +56,8 @@
     "@nestjs/core": "12.3.2",
     "reflect-metadata": "0.2.2",
     "rxjs": "7.8.2"
+  },
+  "engines": {
+    "node": ">=24"
   }
 }

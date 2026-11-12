@@ -74,7 +74,7 @@
     "@dudousxd/nestjs-media-testing": "workspace:*",
     "@types/better-sqlite3": "7.6.13",
     "@types/pg": "8.23.1",
-    "better-sqlite3": "11.10.0",
+    "better-sqlite3": "12.11.1",
     "drizzle-orm": "0.45.4",
     "pg": "8.23.1",
     "testcontainers": "10.18.0",
@@ -97,5 +97,8 @@
     "@nestjs/drizzle": {
       "optional": true
     }
+  },
+  "engines": {
+    "node": ">=24"
   }
 }

@@ -4,7 +4,7 @@ icon: Telescope
 description: Telescope watcher that surfaces media events in the observability console.
 ---
 
-The observability glue point. A `MediaWatcher` subscribes to the [`nestjs:media:*` diagnostics channels](/docs/concepts/diagnostics) and records a `media` entry per milestone — `attach` / `delete` / `conversion`, the resumable `upload.start` / `upload.complete` / `upload.abort`, and `attachment.create` / `attachment.delete` — so file activity shows up in the [Telescope](/docs/telescope) console alongside your requests, queries, jobs, and mails, correlated under the same batch.
+The observability glue point. A `MediaWatcher` subscribes to the [`aviary:media:*` diagnostics channels](/docs/concepts/diagnostics) and records a `media` entry per milestone — `attach` / `delete` / `conversion`, the resumable `upload.start` / `upload.complete` / `upload.abort`, and `attachment.create` / `attachment.delete` — so file activity shows up in the [Telescope](/docs/telescope) console alongside your requests, queries, jobs, and mails, correlated under the same batch.
 
 ```ts
 import { MediaWatcher } from '@dudousxd/nestjs-media-telescope';
