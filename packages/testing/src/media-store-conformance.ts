@@ -145,6 +145,18 @@ export function runMediaStoreConformance(
       expect(result.records.map((r) => r.id)).toEqual(['a']);
     });
 
+    it("save returns the tenantId that was persisted, never one it didn't store", async () => {
+      const store = await makeStore();
+      // Off: a store that doesn't keep `tenantId` must not echo it back.
+      const off = await store.save(makeRecord({ id: 'off', tenantId: 'not-stored' }));
+      expect(off.tenantId ?? null).toEqual((await store.find('off'))?.tenantId ?? null);
+      if (typeof store.enableTenancy !== 'function') return;
+      await store.enableTenancy();
+      const on = await store.save(makeRecord({ id: 'on', tenantId: 't1' }));
+      expect(on.tenantId).toBe('t1');
+      expect((await store.find('on'))?.tenantId).toBe('t1');
+    });
+
     it('with tenancy enabled, persists tenantId and honours tenant filters', async () => {
       const store = await makeStore();
       if (typeof store.enableTenancy !== 'function') return;

@@ -88,6 +88,12 @@ export class DrizzlePgUploadSessionStore implements UploadSessionStore {
     this.tenancy = true;
   }
 
+  /** The session as persisted: off, no `tenantId`; on, `tenantId` or `null`. */
+  private persisted(session: UploadSession): UploadSession {
+    const { tenantId, ...rest } = session;
+    return this.tenancy ? { ...rest, tenantId: tenantId ?? null } : rest;
+  }
+
   async create(session: UploadSession): Promise<UploadSession> {
     const createdAt = session.createdAt ?? new Date();
     await this.db.insert(this.sessionsTable).values({
@@ -96,7 +102,7 @@ export class DrizzlePgUploadSessionStore implements UploadSessionStore {
       createdAt,
       updatedAt: new Date(),
     });
-    return { ...session, createdAt };
+    return { ...this.persisted(session), createdAt };
   }
 
   async get(id: string): Promise<UploadSession | null> {
@@ -120,7 +126,7 @@ export class DrizzlePgUploadSessionStore implements UploadSessionStore {
       .insert(this.sessionsTable)
       .values({ id: session.id, ...columns })
       .onConflictDoUpdate({ target: mediaUploadSessionsPgTable.id, set: columns });
-    return { ...session };
+    return this.persisted(session);
   }
 
   async delete(id: string): Promise<void> {

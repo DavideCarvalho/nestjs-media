@@ -63,7 +63,13 @@ await media.uploads.createUpload({ disk: 's3', key, tenantId: null }); // no ten
 | inside `Context.allTenants()` | visible | visible | visible |
 | no context (boot, workers, scripts) | visible | visible | visible |
 
-A record the request can't see is **not found**: `MediaNotFoundError` from the library, a 404 from `MediaService.serve()`/`url()` and the dashboard, a no-op for `delete()`. It is never a 403, so other tenants' ids don't leak. The check runs before your `authorize` hook, which still runs for every visible record: tenancy only narrows.
+A record or session the request can't see is treated exactly like a missing one, never as a 403, so other tenants' ids don't leak:
+
+- **Library** (`locate()`, `url()`, `ensureConversion`): `MediaNotFoundError`. `get()` returns `null`.
+- **Upload sessions** (`status`, `writeChunk`, `writePart`, `complete`): `UploadSessionNotFoundError`.
+- **`MediaService.serve()`/`url()`:** a 404.
+- **`library.delete()`, `MediaService.delete()` and upload `abort()`:** a silent no-op. Nothing is deleted, and nothing is thrown.
+- **Dashboard:** every library and uploads endpoint returns a 404, including delete record and cancel upload. With tenancy on, deleting or cancelling a missing id is a 404 too. The check runs before your `authorize` hook, which still runs for every visible record: tenancy only narrows.
 
 <Callout type="info">
   Not scoped by tenant: the dashboard's object browser (it lists raw disk keys, not records), direct presigned uploads (they keep no session), the attachment-as-column API (attachments live on your own rows), and the Telescope media panels. Restrict those with your `authorize` hooks.

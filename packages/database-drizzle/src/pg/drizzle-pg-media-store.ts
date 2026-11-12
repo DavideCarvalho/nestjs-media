@@ -63,7 +63,8 @@ export class DrizzlePgMediaStore implements MediaStore {
       .insert(this.tenancy ? mediaPgTable : mediaPgTableWithoutTenant)
       .values(row)
       .onConflictDoUpdate({ target: mediaPgTable.id, set: rest });
-    return record;
+    // What was persisted: off, no `tenantId` (the row has none to read back).
+    return row as MediaRecord;
   }
 
   async find(id: string): Promise<MediaRecord | null> {

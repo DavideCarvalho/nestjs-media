@@ -99,7 +99,8 @@ export class PrismaMediaStore implements MediaStore {
     const { tenantId, ...rest } = record;
     const data = this.tenancy ? { ...rest, tenantId: tenantId ?? null } : rest;
     await this.prisma.media.upsert({ where: { id: record.id }, create: data, update: data });
-    return record;
+    // What was persisted: off, no `tenantId`.
+    return data;
   }
 
   find(id: string): Promise<MediaRecord | null> {

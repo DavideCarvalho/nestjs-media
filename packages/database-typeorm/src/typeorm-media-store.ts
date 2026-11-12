@@ -132,19 +132,26 @@ export class TypeOrmMediaStore implements MediaStore {
   async save(record: MediaRecord): Promise<MediaRecord> {
     await this.ready();
     const { tenantId, ...rest } = record;
-    await this.repo.save(rest);
-    if (this.tenancy) {
-      // `tenant_id` is never written by the entity (see `MediaEntity`), so it is set here.
+    // Off: the row and the returned record carry no `tenantId`.
+    if (!this.tenancy) {
+      await this.repo.save(rest);
+      return rest;
+    }
+    // `tenant_id` is never written by the entity (see `MediaEntity`), so it is set by a second
+    // statement, in the same transaction: the row is never visible, or left, with another tenant.
+    const persisted = { ...rest, tenantId: tenantId ?? null };
+    await this.dataSource.transaction(async (manager) => {
+      await manager.getRepository(MediaEntity).save(rest);
       const driver = this.dataSource.driver;
       const table = this.dataSource.getMetadata(MediaEntity).tableName;
       const [sql, parameters] = driver.escapeQueryWithParameters(
         `UPDATE ${driver.escape(table)} SET ${driver.escape(TENANT_COLUMN)} = :tenantId WHERE ${driver.escape('id')} = :id`,
-        { tenantId: tenantId ?? null, id: record.id },
+        { tenantId: persisted.tenantId, id: record.id },
         {},
       );
-      await this.dataSource.query(sql, parameters);
-    }
-    return record;
+      await manager.query(sql, parameters);
+    });
+    return persisted;
   }
 
   async find(id: string): Promise<MediaRecord | null> {

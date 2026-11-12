@@ -61,7 +61,11 @@ export function readTenancy(
 ): MediaTenancy {
   const slot = (globalThis as unknown as Record<symbol, { current?: unknown } | undefined>)[SLOT];
   const a = (accessor ?? slot?.current) as Accessor | null | undefined;
-  if (option === false || typeof a?.tenancy !== 'function' || !a.tenantFilter) {
+  if (
+    option === false ||
+    typeof a?.tenancy !== 'function' ||
+    typeof a?.tenantFilter !== 'function'
+  ) {
     return { enabled: false };
   }
   const tenantFilter = a.tenantFilter.bind(a);

@@ -93,8 +93,10 @@ export class MikroOrmMediaStore implements MediaStore {
   async save(record: MediaRecord): Promise<MediaRecord> {
     const em = this.em.fork();
     const { tenantId, ...rest } = record;
-    await em.upsert(MediaEntity, this.tenancy ? { ...rest, tenantId: tenantId ?? null } : rest);
-    return record;
+    const data = this.tenancy ? { ...rest, tenantId: tenantId ?? null } : rest;
+    await em.upsert(MediaEntity, data);
+    // What was persisted: off, no `tenantId`.
+    return data;
   }
 
   async find(id: string): Promise<MediaRecord | null> {

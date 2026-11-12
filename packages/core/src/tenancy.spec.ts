@@ -98,6 +98,20 @@ describe('readTenancy', () => {
     expect(readTenancy('inherit', fakeContext(false).accessor)).toEqual({ enabled: false });
   });
 
+  it('is off, without throwing, when the accessor methods are not functions', () => {
+    const enabled = () => ({ enabled: true });
+    const filter = () => ({ mode: 'system' }) as const;
+    expect(readTenancy('inherit', { tenancy: enabled, tenantFilter: {} })).toEqual({
+      enabled: false,
+    });
+    expect(readTenancy('inherit', { tenancy: enabled, tenantFilter: 'x' })).toEqual({
+      enabled: false,
+    });
+    expect(readTenancy('inherit', { tenancy: true, tenantFilter: filter })).toEqual({
+      enabled: false,
+    });
+  });
+
   it('`false` keeps media out even when the context turns tenancy on', () => {
     expect(readTenancy(false, fakeContext(true).accessor)).toEqual({ enabled: false });
   });
@@ -242,6 +256,34 @@ describe('MediaLibrary tenancy', () => {
         }
       });
     }
+  });
+
+  it("reads the context's tenant filter once per list and per replacement scan, not per row", async () => {
+    const ctx = fakeContext();
+    // Seed 5 gallery files and 5 avatars for t1 through a library with no single-file collection.
+    const seeder = makeLibrary(ctx.accessor);
+    ctx.tenant('t1');
+    for (let i = 0; i < 5; i++) {
+      await seeder.attach(file({ fileName: `${i}.txt` }));
+      await seeder.attach(file({ collection: 'avatar', fileName: `${i}.txt` }));
+    }
+    const lib = new MediaLibrary({
+      storage,
+      store,
+      collections: [{ name: 'avatar', single: true }],
+      contextAccessor: ctx.accessor,
+    });
+    const spy = vi.spyOn(ctx.accessor, 'tenantFilter');
+
+    expect(await lib.list('Post', '1', 'gallery')).toHaveLength(5);
+    expect(spy).toHaveBeenCalledTimes(1);
+
+    // One read for the replacement scan, one per delete (each is its own operation), one to stamp
+    // the new row. Per row, the scan alone would add 4 more.
+    spy.mockClear();
+    await lib.attach(file({ collection: 'avatar' }));
+    expect(spy).toHaveBeenCalledTimes(1 + 5 + 1);
+    expect(await lib.list('Post', '1', 'avatar')).toHaveLength(1);
   });
 
   it('a single-file collection only replaces what the request can see', async () => {

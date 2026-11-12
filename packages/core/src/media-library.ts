@@ -19,8 +19,10 @@ import {
   type MediaTenancy,
   type MediaTenancyOption,
   canSeeRow,
+  matchesTenant,
   readTenancy,
   rowTenantId,
+  tenantMatch,
 } from './tenancy';
 import type { MediaDisks } from './types';
 
@@ -173,8 +175,9 @@ export class MediaLibrary {
         input.ownerId,
         input.collection,
       );
+      const match = tenantMatch(tenancy);
       for (const record of existing) {
-        if (canSeeRow(tenancy, record.tenantId)) await this.delete(record.id);
+        if (matchesTenant(match, record.tenantId)) await this.delete(record.id);
       }
     }
 
@@ -316,7 +319,8 @@ export class MediaLibrary {
   async list(ownerType: string, ownerId: string, collection?: string): Promise<MediaRecord[]> {
     const tenancy = await this.tenancy();
     const records = await this.store.listByOwner(ownerType, ownerId, collection);
-    return tenancy.enabled ? records.filter((r) => canSeeRow(tenancy, r.tenantId)) : records;
+    const match = tenantMatch(tenancy);
+    return match ? records.filter((r) => matchesTenant(match, r.tenantId)) : records;
   }
 
   /**

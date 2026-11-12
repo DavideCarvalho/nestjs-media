@@ -538,8 +538,9 @@ export class MediaConsoleService {
   async abortUpload(id: string): Promise<void> {
     if (!this.uploads) throw new NotFoundException('No upload store configured');
     if (this.tenancy) {
+      // Missing and hidden answer alike (404), so another tenant's ids can't be probed.
       const session = await this.uploads.get(id);
-      if (session && !(await this.canSee(session.tenantId))) {
+      if (!session || !(await this.canSee(session.tenantId))) {
         throw new NotFoundException(`Unknown upload: ${id}`);
       }
     }
@@ -607,8 +608,9 @@ export class MediaConsoleService {
   async deleteLibraryRecord(id: string): Promise<void> {
     if (!this.store) throw new NotFoundException('No media store configured');
     if (this.tenancy) {
+      // Missing and hidden answer alike (404), so another tenant's ids can't be probed.
       const record = await this.store.find(id);
-      if (record && !(await this.canSee(record.tenantId))) {
+      if (!record || !(await this.canSee(record.tenantId))) {
         throw new NotFoundException(`Unknown media record: ${id}`);
       }
     }

@@ -104,6 +104,18 @@ describe('MediaConsoleService tenancy', () => {
     }
   });
 
+  it('with tenancy on, delete and abort of a missing id are a 404 too, like a hidden one', async () => {
+    const { service } = await setup(scopeFor({ id: 't1' }));
+    await expect(service.deleteLibraryRecord('missing')).rejects.toMatchObject({ status: 404 });
+    await expect(service.abortUpload('missing')).rejects.toMatchObject({ status: 404 });
+  });
+
+  it('with tenancy off, delete and abort of a missing id stay a no-op', async () => {
+    const { service } = await setup(null);
+    await expect(service.deleteLibraryRecord('missing')).resolves.toBeUndefined();
+    await expect(service.abortUpload('missing')).resolves.toBeUndefined();
+  });
+
   it("a tenantless request sees only rows with no tenant; 'shared' adds them to a tenant", async () => {
     const tenantless = await setup(scopeFor({ id: null }));
     expect((await tenantless.service.listLibrary({})).records.map((r) => r.id)).toEqual(['c']);

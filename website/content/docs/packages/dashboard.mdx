@@ -60,7 +60,7 @@ interface MediaDashboardOptions {
 
 ## Access
 
-With [tenancy](/docs/concepts/tenancy) on, the library and uploads views follow the request's tenant like the rest of media: a record or session of another tenant is a 404. The object browser lists raw disk keys and is not scoped.
+With [tenancy](/docs/concepts/tenancy) on, the library and uploads views follow the request's tenant like the rest of media: a record or session of another tenant is a 404, as is a missing one. That includes delete record and cancel upload, where the library's own `delete()`/`abort()` are a silent no-op. The object browser lists raw disk keys and is not scoped.
 
 `authorize` decides who may use the console. It runs on **every** console request: the page, its
 assets, the read API and the actions. It runs after your `decorators` and global guards, so your

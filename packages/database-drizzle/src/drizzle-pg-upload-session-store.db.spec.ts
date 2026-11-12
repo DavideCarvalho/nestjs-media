@@ -181,7 +181,8 @@ describe.skipIf(skipPgSpecs)('DrizzlePgUploadSessionStore (postgres)', () => {
     await store.enableTenancy();
     await store.create(session('a', { tenantId: 't1' }));
     await store.create(session('b', { tenantId: 't2' }));
-    await store.create(session('c', { tenantId: null }));
+    // On: an unset tenant is returned as the `null` that was stored.
+    expect((await store.create(session('c', {}))).tenantId).toBeNull();
     expect((await store.get('a'))?.tenantId).toBe('t1');
     expect((await store.get('c'))?.tenantId).toBeNull();
     await store.update(session('a', { tenantId: 't1', offset: 5 }));
@@ -196,8 +197,13 @@ describe.skipIf(skipPgSpecs)('DrizzlePgUploadSessionStore (postgres)', () => {
   it('with tenancy off, works on a table without tenant_id; enableTenancy then fails with the fix', async () => {
     await pgdb.db.execute(sql`ALTER TABLE media_upload_sessions DROP COLUMN tenant_id`);
     try {
-      await store.create(session('a', { tenantId: 'ignored-while-off' }));
-      await store.update(session('a', { offset: 1 }));
+      // Off: `create`/`update` don't echo a `tenantId` that was never stored.
+      expect(
+        await store.create(session('a', { tenantId: 'ignored-while-off' })),
+      ).not.toHaveProperty('tenantId');
+      expect(
+        await store.update(session('a', { tenantId: 'ignored-while-off', offset: 1 })),
+      ).not.toHaveProperty('tenantId');
       expect(await store.get('a')).not.toHaveProperty('tenantId');
       expect(await store.list()).toHaveLength(1);
       await expect(store.enableTenancy()).rejects.toMatchObject({

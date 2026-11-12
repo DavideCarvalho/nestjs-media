@@ -1,6 +1,6 @@
 import { runMediaStoreConformance } from '@dudousxd/nestjs-media-testing';
-import { DataSource } from 'typeorm';
-import { afterEach, describe, expect, it } from 'vitest';
+import { DataSource, EntityManager } from 'typeorm';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { MediaEntity } from './media.entity';
 import { TypeOrmMediaStore, ensureMediaSchema } from './typeorm-media-store';
 
@@ -97,6 +97,37 @@ describe('TypeOrmMediaStore tenancy schema', () => {
     expect((await store.find('a'))?.tenantId).toBeNull();
     await store.save({ ...record, tenantId: 'org_1' });
     expect((await store.find('a'))?.tenantId).toBe('org_1');
+  });
+
+  it('writes the row and its tenant atomically: a failed tenant write leaves nothing behind', async () => {
+    const ds = await makeDataSource();
+    const store = new TypeOrmMediaStore(ds);
+    await store.enableTenancy();
+    await store.save({ ...record, tenantId: 'org_1' });
+
+    const query = EntityManager.prototype.query;
+    const failTenantWrite = vi.spyOn(EntityManager.prototype, 'query').mockImplementation(function (
+      this: EntityManager,
+      sql: string,
+      parameters?: unknown[],
+    ) {
+      if (/SET\s+"?tenant_id"?/i.test(sql)) return Promise.reject(new Error('tenant write failed'));
+      return query.call(this, sql, parameters);
+    });
+    try {
+      // A new row: its insert is rolled back with the failed tenant write.
+      await expect(store.save({ ...record, id: 'b', tenantId: 'org_1' })).rejects.toThrow(
+        'tenant write failed',
+      );
+      // A move to another tenant: neither the row's fields nor its tenant change.
+      await expect(store.save({ ...record, name: 'renamed', tenantId: 'org_2' })).rejects.toThrow(
+        'tenant write failed',
+      );
+    } finally {
+      failTenantWrite.mockRestore();
+    }
+    expect(await store.find('b')).toBeNull();
+    expect(await store.find('a')).toMatchObject({ name: 'a', tenantId: 'org_1' });
   });
 
   it('enableTenancy fails with the fix when autoCreateSchema is off and the column is missing', async () => {
