@@ -22,12 +22,12 @@ export {
   CONSOLE_AUTHORIZE_MISSING_WARNING,
   CONSOLE_PAGE_METADATA,
   ConsolePage,
-  normalizeConsoleDecision,
+  normalizeConsoleResult,
   authorizeByToken,
   resolveConsoleAuthorize,
   ConsoleAuthorizeGuard,
   ConsoleAuthorizeFilter,
-  ConsoleAccessDeniedException,
+  ConsoleAccessDenied,
   UseConsoleAuthorize,
 } from './console-authorize.js';
 export type { ObjectUrlConfig, ObjectUrlStrategy } from './object-urls.js';
