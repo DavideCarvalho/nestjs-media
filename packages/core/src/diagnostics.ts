@@ -1,23 +1,6 @@
 import { emit } from '@dudousxd/nestjs-diagnostics';
 
 /**
- * Standard ecosystem envelope shape for media diagnostics. Events now flow on
- * `aviary:media:*` channels via `@dudousxd/nestjs-diagnostics` — the canonical
- * envelope is {@link import('@dudousxd/nestjs-diagnostics').DiagnosticEvent}, and
- * the generic telescope bridge auto-captures every `aviary:media:*` event without
- * any per-event wiring.
- *
- * This type is kept for backwards-compatibility with any code that types a received
- * message as `MediaDiagnosticEnvelope`; prefer `DiagnosticEvent` for new observers.
- */
-export interface MediaDiagnosticEnvelope<P = unknown> {
-  ts: number;
-  lib: 'media';
-  event: MediaDiagnosticEvent;
-  payload: P;
-}
-
-/**
  * Every event the library publishes on an `aviary:media:<event>` channel. Subscribe
  * to one (via `node:diagnostics_channel` + `channelName('media', event)` from
  * `@dudousxd/nestjs-diagnostics`) to run code on upload start/finish, attaches,

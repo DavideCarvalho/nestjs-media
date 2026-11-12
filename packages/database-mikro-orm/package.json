@@ -56,5 +56,8 @@
     "testcontainers": "10.18.0",
     "tsup": "8.5.1",
     "typescript": "5.9.3"
+  },
+  "engines": {
+    "node": ">=24"
   }
 }

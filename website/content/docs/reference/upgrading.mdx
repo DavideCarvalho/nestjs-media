@@ -1,0 +1,28 @@
+---
+title: Upgrading
+icon: CircleArrowUp
+description: What to change in your project when you move to a new minor of the nestjs-media packages.
+---
+
+## Node.js 24
+
+Every `@dudousxd/nestjs-media*` package now requires **Node.js 24 or newer** (`engines.node` is `>=24`). Upgrade the
+Node.js version your app runs and builds on, then upgrade the packages. Under `engine-strict`, installing on Node 20
+or 22 fails.
+
+## `MediaDiagnosticEnvelope` is removed
+
+`@dudousxd/nestjs-media-core` no longer exports the `MediaDiagnosticEnvelope` type. Type a message received on an
+`aviary:media:<event>` channel as `DiagnosticEvent` from `@dudousxd/nestjs-diagnostics` instead. It has the same
+shape:
+
+```ts
+// Before
+import type { MediaDiagnosticEnvelope, UploadCompletePayload } from '@dudousxd/nestjs-media-core';
+const { size } = (msg as MediaDiagnosticEnvelope<UploadCompletePayload>).payload;
+
+// After
+import type { DiagnosticEvent } from '@dudousxd/nestjs-diagnostics';
+import type { UploadCompletePayload } from '@dudousxd/nestjs-media-core';
+const { size } = (msg as DiagnosticEvent<UploadCompletePayload>).payload;
+```

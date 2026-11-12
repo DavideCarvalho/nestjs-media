@@ -39,7 +39,7 @@ pnpm add @nestjs/storage @dudousxd/nestjs-media \
   @dudousxd/nestjs-media-database-typeorm @dudousxd/nestjs-media-image-sharp
 ```
 
-Needs NestJS 12.1+ and Node 20.19+. Both modules are global: register them
+Needs NestJS 12.1+ and Node 24+. Both modules are global: register them
 **once**, in `AppModule`.
 
 ```ts
