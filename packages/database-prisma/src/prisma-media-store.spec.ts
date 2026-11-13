@@ -5,6 +5,30 @@ import type { PrismaClientLike, PrismaMediaDelegate } from './prisma-media-store
 import { PrismaMediaStore } from './prisma-media-store';
 
 type TenantClause = { tenantId: string | null } | { OR: { tenantId: string | null }[] };
+type Contains = { contains: string; mode?: 'insensitive' };
+type NameClause = { OR: [{ name: Contains }, { fileName: Contains }] };
+
+function isNameClause(clause: TenantClause | NameClause): clause is NameClause {
+  return 'OR' in clause && clause.OR.some((c) => 'name' in c);
+}
+
+/** A name clause as Prisma runs it: `contains`, case-sensitive unless `mode: 'insensitive'`. */
+function matchesName(r: MediaRecord, clause: NameClause): boolean {
+  return clause.OR.some((c) => {
+    const [field, test] =
+      'name' in c ? (['name', c.name] as const) : (['fileName', c.fileName] as const);
+    return test.mode === 'insensitive'
+      ? r[field].toLowerCase().includes(test.contains.toLowerCase())
+      : r[field].includes(test.contains);
+  });
+}
+
+/** Every `AND` clause of a list `where`: the tenant one and the name one. */
+function matchesAnd(r: MediaRecord, and: (TenantClause | NameClause)[] | undefined): boolean {
+  return (and ?? []).every((clause) =>
+    isNameClause(clause) ? matchesName(r, clause) : matchesTenant(r, clause),
+  );
+}
 
 /** The tenant part of a `where` (`AND: [clause]` in lists/counts, the clause itself in groupBy). */
 function matchesTenant(r: MediaRecord, clause: TenantClause | undefined): boolean {
@@ -19,9 +43,11 @@ function matchesTenant(r: MediaRecord, clause: TenantClause | undefined): boolea
  * `withTenantId: false` mimics a model without `tenantId` (Prisma rejects the unknown field).
  */
 function fakeClient(
-  options: { withTenantId?: boolean } = {},
-): PrismaClientLike & { rows: Map<string, MediaRecord> } {
+  options: { withTenantId?: boolean; withMode?: boolean } = {},
+): PrismaClientLike & { rows: Map<string, MediaRecord>; calls: number } {
   const withTenantId = options.withTenantId ?? true;
+  const withMode = options.withMode ?? true;
+  const client = { calls: 0 };
   const rows = new Map<string, MediaRecord>();
   const media: PrismaMediaDelegate = {
     async upsert({ where, create, update }) {
@@ -43,6 +69,10 @@ function fakeClient(
       // `list()` orders by [{createdAt},{id}] (array); `listByOwner()` orders by a
       // single `{order}` field — branch on shape to mirror both call sites.
       if (Array.isArray(orderBy)) {
+        client.calls += 1;
+        if (!withMode && JSON.stringify(where).includes('"mode"')) {
+          throw new Error('Unknown argument `mode`. Available options are marked with ?.');
+        }
         type OrClause =
           | { createdAt: { getTime(): number }; id: { gt: string } }
           | { createdAt: { gt: { getTime(): number } } };
@@ -59,7 +89,7 @@ function fakeClient(
             (where.ownerType === undefined || r.ownerType === where.ownerType) &&
             (where.collection === undefined || r.collection === where.collection) &&
             (where.disk === undefined || r.disk === where.disk) &&
-            matchesTenant(r, where.AND?.[0]) &&
+            matchesAnd(r, where.AND) &&
             matchesCursor(r),
         );
         list.sort(
@@ -117,7 +147,7 @@ function fakeClient(
       }));
     },
   };
-  return { media, rows };
+  return Object.assign(client, { media, rows });
 }
 
 runMediaStoreConformance(
@@ -191,5 +221,47 @@ describe('PrismaMediaStore tenancy', () => {
     await store.enableTenancy();
     await store.save(record);
     expect(client.rows.get('a')?.tenantId).toBeNull();
+  });
+});
+
+describe('PrismaMediaStore name search', () => {
+  const at = (id: string, name: string, fileName: string, ms: number): MediaRecord => ({
+    id,
+    ownerType: 'Post',
+    ownerId: '1',
+    collection: 'gallery',
+    name,
+    fileName,
+    mimeType: 'image/png',
+    size: 1,
+    disk: 'local',
+    path: 'p',
+    order: 0,
+    customProperties: {},
+    conversions: {},
+    createdAt: new Date(ms),
+    updatedAt: new Date(ms),
+  });
+
+  it('drops `mode` once for a provider without it, and still filters exactly', async () => {
+    const client = fakeClient({ withMode: false });
+    const store = new PrismaMediaStore(client);
+    await store.save(at('a', 'Cat', 'Cat.png', 1000));
+    await store.save(at('b', 'cat', 'other.png', 2000));
+    // Without `mode` the (case-sensitive) fake finds only `b`; the exact check keeps it.
+    expect((await store.list({ nameContains: 'cat' })).records.map((r) => r.id)).toEqual(['b']);
+    expect(client.calls).toBe(2);
+    await store.list({ nameContains: 'cat' });
+    expect(client.calls).toBe(3);
+  });
+
+  it('rethrows any other error', async () => {
+    const client = fakeClient();
+    client.media.findMany = async () => {
+      throw new Error('connection lost');
+    };
+    await expect(new PrismaMediaStore(client).list({ nameContains: 'x' })).rejects.toThrow(
+      'connection lost',
+    );
   });
 });

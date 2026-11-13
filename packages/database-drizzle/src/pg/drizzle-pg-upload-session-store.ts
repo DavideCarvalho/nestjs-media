@@ -6,9 +6,9 @@ import type {
 } from '@dudousxd/nestjs-media-core';
 import { and, asc, eq, getTableColumns, like, sql } from 'drizzle-orm';
 import { assertTenantColumn, selectable, tenantCondition } from '../tenancy';
-import { mediaUploadSessionsPgTableWithoutTenant } from './columns';
 import type { DrizzlePgDatabase } from './db';
-import { mediaUploadPartsPgTable, mediaUploadSessionsPgTable } from './schema';
+import type { DrizzlePgStoreOptions } from './drizzle-pg-media-store';
+import { type MediaPgTables, mediaPgTables, type mediaUploadSessionsPgTable } from './schema';
 
 type SessionRow = Omit<typeof mediaUploadSessionsPgTable.$inferSelect, 'tenantId'> & {
   tenantId?: string | null;
@@ -59,16 +59,27 @@ function toColumns(session: UploadSession, tenancy: boolean) {
 export class DrizzlePgUploadSessionStore implements UploadSessionStore {
   private tenancy = false;
 
-  constructor(private readonly db: DrizzlePgDatabase) {}
+  private readonly t: MediaPgTables;
+
+  /**
+   * `schema`: the Postgres schema of `media_upload_sessions` / `media_upload_parts`. Every
+   * statement names it (`search_path` is never used). Default: unqualified.
+   */
+  constructor(
+    private readonly db: DrizzlePgDatabase,
+    options: DrizzlePgStoreOptions = {},
+  ) {
+    this.t = mediaPgTables(options.schema);
+  }
 
   /** Off: the table without `tenant_id`, which Drizzle would otherwise list in an INSERT. */
   private get sessionsTable() {
-    return this.tenancy ? mediaUploadSessionsPgTable : mediaUploadSessionsPgTableWithoutTenant;
+    return this.tenancy ? this.t.uploadSessions : this.t.uploadSessionsWithoutTenant;
   }
 
   /** The columns to read: `tenant_id` only once tenancy is on. */
   private get columns() {
-    return selectable(getTableColumns(mediaUploadSessionsPgTable), this.tenancy);
+    return selectable(getTableColumns(this.t.uploadSessions), this.tenancy);
   }
 
   /**
@@ -80,10 +91,10 @@ export class DrizzlePgUploadSessionStore implements UploadSessionStore {
       'media_upload_sessions',
       () =>
         this.db
-          .select({ tenantId: mediaUploadSessionsPgTable.tenantId })
-          .from(mediaUploadSessionsPgTable)
+          .select({ tenantId: this.t.uploadSessions.tenantId })
+          .from(this.t.uploadSessions)
           .limit(1),
-      'Generate a migration with drizzle-kit from `mediaUploadSessionsPgTable` (it declares `tenant_id` and its index), or run `ALTER TABLE media_upload_sessions ADD COLUMN tenant_id text; CREATE INDEX idx_media_upload_sessions_tenant ON media_upload_sessions (tenant_id);`.',
+      'Generate a migration with drizzle-kit from `mediaUploadSessionsPgTable` (or the tables of `mediaPgTables(schema)`; it declares `tenant_id` and its index), or run `ALTER TABLE media_upload_sessions ADD COLUMN tenant_id text; CREATE INDEX idx_media_upload_sessions_tenant ON media_upload_sessions (tenant_id);`.',
     );
     this.tenancy = true;
   }
@@ -108,8 +119,8 @@ export class DrizzlePgUploadSessionStore implements UploadSessionStore {
   async get(id: string): Promise<UploadSession | null> {
     const rows = await this.db
       .select(this.columns)
-      .from(mediaUploadSessionsPgTable)
-      .where(eq(mediaUploadSessionsPgTable.id, id))
+      .from(this.t.uploadSessions)
+      .where(eq(this.t.uploadSessions.id, id))
       .limit(1);
     const row = rows[0];
     return row ? toSession(row) : null;
@@ -125,21 +136,21 @@ export class DrizzlePgUploadSessionStore implements UploadSessionStore {
     await this.db
       .insert(this.sessionsTable)
       .values({ id: session.id, ...columns })
-      .onConflictDoUpdate({ target: mediaUploadSessionsPgTable.id, set: columns });
+      .onConflictDoUpdate({ target: this.t.uploadSessions.id, set: columns });
     return this.persisted(session);
   }
 
   async delete(id: string): Promise<void> {
     // Parts go with it (`ON DELETE CASCADE`).
-    await this.db.delete(mediaUploadSessionsPgTable).where(eq(mediaUploadSessionsPgTable.id, id));
+    await this.db.delete(this.t.uploadSessions).where(eq(this.t.uploadSessions.id, id));
   }
 
   async addPart(id: string, part: MultipartPart): Promise<void> {
     await this.db
-      .insert(mediaUploadPartsPgTable)
+      .insert(this.t.uploadParts)
       .values({ sessionId: id, partNumber: part.partNumber, etag: part.etag })
       .onConflictDoUpdate({
-        target: [mediaUploadPartsPgTable.sessionId, mediaUploadPartsPgTable.partNumber],
+        target: [this.t.uploadParts.sessionId, this.t.uploadParts.partNumber],
         set: { etag: sql`excluded.etag` },
       });
   }
@@ -147,30 +158,28 @@ export class DrizzlePgUploadSessionStore implements UploadSessionStore {
   async listParts(id: string): Promise<MultipartPart[]> {
     const rows = await this.db
       .select({
-        partNumber: mediaUploadPartsPgTable.partNumber,
-        etag: mediaUploadPartsPgTable.etag,
+        partNumber: this.t.uploadParts.partNumber,
+        etag: this.t.uploadParts.etag,
       })
-      .from(mediaUploadPartsPgTable)
-      .where(eq(mediaUploadPartsPgTable.sessionId, id))
-      .orderBy(asc(mediaUploadPartsPgTable.partNumber));
+      .from(this.t.uploadParts)
+      .where(eq(this.t.uploadParts.sessionId, id))
+      .orderBy(asc(this.t.uploadParts.partNumber));
     return rows.map((row) => ({ partNumber: Number(row.partNumber), etag: row.etag }));
   }
 
   async list(filter: UploadSessionListFilter = {}): Promise<UploadSession[]> {
     const conditions = [
-      ...(filter.disk !== undefined ? [eq(mediaUploadSessionsPgTable.disk, filter.disk)] : []),
+      ...(filter.disk !== undefined ? [eq(this.t.uploadSessions.disk, filter.disk)] : []),
       ...(filter.keyPrefix !== undefined
-        ? [like(mediaUploadSessionsPgTable.key, `${escapeLike(filter.keyPrefix)}%`)]
+        ? [like(this.t.uploadSessions.key, `${escapeLike(filter.keyPrefix)}%`)]
         : []),
-      ...(filter.tenant
-        ? [tenantCondition(mediaUploadSessionsPgTable.tenantId, filter.tenant)]
-        : []),
+      ...(filter.tenant ? [tenantCondition(this.t.uploadSessions.tenantId, filter.tenant)] : []),
     ];
     const rows = await this.db
       .select(this.columns)
-      .from(mediaUploadSessionsPgTable)
+      .from(this.t.uploadSessions)
       .where(conditions.length ? and(...conditions) : undefined)
-      .orderBy(asc(mediaUploadSessionsPgTable.createdAt), asc(mediaUploadSessionsPgTable.id));
+      .orderBy(asc(this.t.uploadSessions.createdAt), asc(this.t.uploadSessions.id));
     return rows.map(toSession);
   }
 }

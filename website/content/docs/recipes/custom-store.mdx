@@ -61,7 +61,12 @@ interface MediaAggregateQuery {
 type MediaAggregateResult = MediaAggregateBucket[];
 interface MediaAggregateBucket { key: string; count: number; sumSize: number } // sumSize 0 if sum omitted
 
-interface MediaListFilter { ownerType?: string; collection?: string; disk?: string }
+interface MediaListFilter {
+  ownerType?: string;
+  collection?: string;
+  disk?: string;
+  nameContains?: string; // name or fileName contains it, ignoring case
+}
 interface MediaListPage { cursor?: string; limit?: number }   // limit defaults to 50
 interface MediaListResult { records: MediaRecord[]; cursor?: string } // cursor absent on the last page
 ```
@@ -69,6 +74,7 @@ interface MediaListResult { records: MediaRecord[]; cursor?: string } // cursor 
 - **`count`** — a global record count across all owners, optionally narrowed by the filter (fields AND together; omit for everything). Powers the console's totals.
 - **`aggregate`** — a group-by rollup: one `{ key, count, sumSize }` bucket per distinct `collection` (or `disk`), with `sumSize` populated only when you request `sum: 'size'`. Powers the console's per-collection view.
 - **`list`** — a paginated global listing across all owners, filtered like `count`. Ordered by `(createdAt, id)` ascending with an **opaque keyset cursor**: pass the returned `cursor` back as `page.cursor` for the next page, stop when it's absent.
+- **`nameContains`** (on `list` only) — keep records whose `name` or `fileName` contains the text, ignoring case; `%` and `_` match themselves. The console's search uses it. Core exports `matchesNameContains(record, text)` for a store that filters in memory, and `nameContainsPattern(text)` for SQL: compare it with `lower(column) like ? escape '!'`.
 
 <Callout type="info" title="Optional means non-breaking">
 These are additive — an external store that omits them still boots and serves the whole media-library. The dashboard providers **degrade gracefully**: a store without them just reports empty/zero shapes in the admin views (`listLibrary` → `{ records: [] }`, `listCollections` → `{ collections: [] }`). Implement them only if you want your custom store to light up the [console](/docs/packages/dashboard#programmatic-access-with-mediaconsoleservice).

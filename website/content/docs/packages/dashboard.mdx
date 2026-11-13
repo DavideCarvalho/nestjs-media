@@ -418,6 +418,7 @@ It resolves `Storage` (from `StorageModule`), the multipart side-cars, the `Medi
 | `listCollections()` | `CollectionsResponse` | Per-collection counts + byte totals (uses `MediaStore.aggregate`). |
 | `listLibrary({ collection?, disk?, cursor?, limit? })` | `LibraryListResponse` | Paginated media records (uses `MediaStore.list`). |
 | `libraryDetail(id)` / `deleteLibraryRecord(id)` | `LibraryDetailResponse` / `void` | One record + variant URLs / delete (`delete` is an **action**). |
+| `search(q, limit, page)` | `{ title, subtitle?, href }[]` | Files matching `q`, as the console search shows them. See [Searching every console](#searching-every-console). |
 | `topology()` | `Topology` | What's wired: `{ hasStore, hasUploads, disks, actions }`. |
 
 <Callout type="info" title="Library methods need the query SPI">
@@ -534,6 +535,47 @@ when its own `authorize` allows the viewer. That `authorize` then also runs once
 loads. With no other console, or none the viewer may open, the brand stays as it is. There is
 nothing to configure. The media console is listed in the other consoles' menus while its routes are
 mounted.
+
+### Searching every console
+
+Press <kbd>Ctrl</kbd>/<kbd>⌘</kbd>+<kbd>K</kbd>, use the **Search** button, or pick **Search all
+consoles** in the brand menu. One query searches:
+
+- this console's files:
+  - a library record by its exact id;
+  - library records whose name or file name contains the text, ignoring case;
+  - disk objects whose key starts with the text (`invoices/2026/`), on every disk.
+- every other Aviary console the viewer may open, for what each one searches (durable runs,
+  Telescope entries, agent threads and runs).
+
+Each console answers with up to 5 hits, grouped under its name, and gets 300 ms. A console that
+doesn't answer in time is left out, and the palette says some results are missing.
+
+Hits respect tenancy like the rest of the console. Library records are those of the viewer's
+tenant. Disk objects carry no tenant, so they're searched only for a request that sees every
+tenant (tenancy off, or a system/all scope). With
+[`pathPrefix`](/docs/concepts/tenancy#tenant-folders-pathprefix), a viewer of one tenant also
+finds the objects under their own `t/<tenantId>/`, and browses only that folder on the disks. Where a tenant is required and the viewer has
+none, the search finds nothing.
+
+A hit opens the record or the file preview directly. The same links work by hand:
+`/media#/library/<id>` and `/media#/disks/<disk>?prefix=<folder>&preview=<key>`.
+
+The endpoint is `GET <apiBasePath>/consoles/search?q=`, behind the console's own `authorize`.
+
+### Telling a probe from a visit
+
+To list or search the other consoles, the switcher runs their `authorize` on the viewer's request.
+While it does, the request carries `aviaryProbe = true`. An `authorize` that writes an audit line
+for every visit can skip those:
+
+```ts
+authorize: (ctx) => {
+  const req = ctx.switchToHttp().getRequest();
+  if (req.aviaryProbe !== true) audit.log('console.open', req.user?.id);
+  return req.user?.isAdmin === true;
+},
+```
 
 ## The typed browser client (`/client` subpath)
 

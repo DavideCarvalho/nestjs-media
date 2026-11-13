@@ -135,6 +135,41 @@ export function runMediaStoreConformance(
       expect(everything.cursor).toBeUndefined();
     });
 
+    it('list filters by nameContains: name or file name, ignoring case, wildcards literal', async () => {
+      const store = await makeStore();
+      if (typeof store.list !== 'function') return;
+      await store.save(
+        makeRecord({ id: 'a', name: 'Report Q3', fileName: 'q3.pdf', createdAt: new Date(1000) }),
+      );
+      await store.save(
+        makeRecord({ id: 'b', name: 'cat', fileName: 'Cat_100%.png', createdAt: new Date(2000) }),
+      );
+      await store.save(
+        makeRecord({ id: 'c', name: 'dog', fileName: 'dog.png', createdAt: new Date(3000) }),
+      );
+      await store.save(
+        makeRecord({ id: 'd', name: 'cab', fileName: 'cab1x00.png', createdAt: new Date(4000) }),
+      );
+      const ids = async (nameContains: string, limit = 50) =>
+        (await store.list?.({ nameContains }, { limit }))?.records.map((r) => r.id);
+
+      expect(await ids('report')).toEqual(['a']);
+      expect(await ids('CAT')).toEqual(['b']);
+      expect(await ids('Q3.PDF')).toEqual(['a']);
+      // `%` and `_` match themselves, never any character.
+      expect(await ids('_100%')).toEqual(['b']);
+      expect(await ids('%')).toEqual(['b']);
+      expect(await ids('a_')).toEqual([]);
+      expect(await ids('o')).toEqual(['a', 'c']);
+
+      const page1 = await store.list({ nameContains: '.png' }, { limit: 2 });
+      expect(page1.records.map((r) => r.id)).toEqual(['b', 'c']);
+      if (page1.cursor === undefined) throw new Error('expected a cursor after the first page');
+      const page2 = await store.list({ nameContains: '.png' }, { limit: 2, cursor: page1.cursor });
+      expect(page2.records.map((r) => r.id)).toEqual(['d']);
+      expect(page2.cursor).toBeUndefined();
+    });
+
     it('list ignores a malformed cursor instead of throwing', async () => {
       const store = await makeStore();
       if (typeof store.list !== 'function') return;

@@ -34,6 +34,11 @@ export interface MediaListFilter {
   ownerType?: string;
   collection?: string;
   disk?: string;
+  /**
+   * Keep only records whose `name` or `fileName` contains this text, ignoring case (`%` and `_`
+   * match themselves). What the consoles' search uses; see {@link matchesNameContains}.
+   */
+  nameContains?: string;
   /** Tenancy only (see {@link MediaStore.enableTenancy}): keep only rows of this tenant. */
   tenant?: MediaTenantMatch;
 }
@@ -88,4 +93,27 @@ export interface MediaStore {
    * A store without it can't run with tenancy on.
    */
   enableTenancy?(): Promise<void>;
+}
+
+/**
+ * Whether `record`'s `name` or `fileName` contains `text`, ignoring case: the
+ * {@link MediaListFilter.nameContains} rule, for stores that filter in memory. `undefined` matches.
+ */
+export function matchesNameContains(
+  record: Pick<MediaRecord, 'name' | 'fileName'>,
+  text: string | undefined,
+): boolean {
+  if (text === undefined) return true;
+  const needle = text.toLowerCase();
+  return (
+    record.name.toLowerCase().includes(needle) || record.fileName.toLowerCase().includes(needle)
+  );
+}
+
+/**
+ * The SQL `LIKE` pattern for {@link MediaListFilter.nameContains}: lower-cased, wrapped in `%`, with
+ * `!` escaping `%`, `_` and `!`. Compare it with `lower(column) like ? escape '!'`.
+ */
+export function nameContainsPattern(text: string): string {
+  return `%${text.toLowerCase().replace(/[!%_]/g, (c) => `!${c}`)}%`;
 }

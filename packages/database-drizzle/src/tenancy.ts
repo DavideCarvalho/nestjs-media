@@ -1,5 +1,5 @@
 import { MediaTenancyUnavailableError, type MediaTenantMatch } from '@dudousxd/nestjs-media-core';
-import { type Column, type SQL, eq, isNull, or } from 'drizzle-orm';
+import { type Column, type SQL, eq, isNull, or, sql } from 'drizzle-orm';
 
 /** The matching rule as a `WHERE` condition on a `tenant_id` column. */
 export function tenantCondition(column: Column, match: MediaTenantMatch): SQL | undefined {
@@ -31,4 +31,20 @@ export async function assertTenantColumn(
       { cause: error },
     );
   }
+}
+
+/**
+ * `MediaListFilter.nameContains` as a `WHERE` condition: `name` or `file_name` contains `text`,
+ * ignoring case, with `%`, `_` and `!` matched literally (escaped with `!`).
+ */
+export function nameContainsCondition(
+  name: Column,
+  fileName: Column,
+  text: string,
+): SQL | undefined {
+  const pattern = `%${text.toLowerCase().replace(/[!%_]/g, (c) => `!${c}`)}%`;
+  return or(
+    sql`lower(${name}) like ${pattern} escape '!'`,
+    sql`lower(${fileName}) like ${pattern} escape '!'`,
+  );
 }

@@ -18,11 +18,13 @@ import { deleteKeys, fileUrl } from './storage-helpers';
 import {
   type MediaTenancy,
   type MediaTenancyOption,
+  type ReadTenancyOverrides,
   canSeeRow,
   matchesTenant,
   readTenancy,
   rowTenantId,
   tenantMatch,
+  tenantPathPrefix,
 } from './tenancy';
 import type { MediaDisks } from './types';
 
@@ -111,12 +113,13 @@ export class MediaLibrary {
    * Resolves to whether tenancy is on.
    */
   async prepareTenancy(): Promise<boolean> {
-    return (await this.tenancy()).enabled;
+    // Boot serves no request: never a "tenant required" error here.
+    return (await this.tenancy({ required: false })).enabled;
   }
 
   /** The tenancy of this operation; with tenancy on, the store is switched to it first. */
-  private async tenancy(): Promise<MediaTenancy> {
-    const tenancy = readTenancy(this.tenancyOption, this.contextAccessor);
+  private async tenancy(overrides?: ReadTenancyOverrides): Promise<MediaTenancy> {
+    const tenancy = readTenancy(this.tenancyOption, this.contextAccessor, overrides);
     if (!tenancy.enabled) return tenancy;
     this.tenancyReady ??= this.enableStoreTenancy();
     await this.tenancyReady;
@@ -185,9 +188,19 @@ export class MediaLibrary {
     const id = this.newId();
     // Every segment goes through keySegment(): the file name (and owner ids) come from users,
     // and @nestjs/storage refuses `..`, empty segments, backslashes and control characters.
-    const path = [input.ownerType, input.ownerId, input.collection, id, input.fileName]
+    const tenantId = tenancy.enabled
+      ? input.tenantId !== undefined
+        ? input.tenantId
+        : rowTenantId(tenancy)
+      : undefined;
+    // With `tenancy.pathPrefix`, a tenant's new files live under `t/<tenantId>/`.
+    const prefix =
+      tenancy.enabled && tenancy.pathPrefix && tenantId !== undefined && tenantId !== null
+        ? tenantPathPrefix(tenantId)
+        : '';
+    const path = `${prefix}${[input.ownerType, input.ownerId, input.collection, id, input.fileName]
       .map(keySegment)
-      .join('/');
+      .join('/')}`;
 
     const written = await this.storage.disk(disk).put(path, input.contents, {
       contentType: input.mimeType,
@@ -213,9 +226,7 @@ export class MediaLibrary {
       conversions: {},
       createdAt: timestamp,
       updatedAt: timestamp,
-      ...(tenancy.enabled
-        ? { tenantId: input.tenantId !== undefined ? input.tenantId : rowTenantId(tenancy) }
-        : {}),
+      ...(tenancy.enabled ? { tenantId: tenantId ?? null } : {}),
     });
 
     this.emit('attach', {

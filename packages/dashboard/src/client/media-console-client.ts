@@ -27,6 +27,11 @@ export function apiBase(): string {
   return '/media/api';
 }
 
+/** `GET <api>/consoles/search`: the global search across the Aviary consoles. */
+export function consoleSearchEndpoint(): string {
+  return `${apiBase()}/consoles/search`;
+}
+
 function withQuery(path: string, params: Record<string, string | number | undefined>): string {
   const search = new URLSearchParams();
   for (const [key, value] of Object.entries(params)) {

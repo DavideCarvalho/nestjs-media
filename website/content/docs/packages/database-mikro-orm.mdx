@@ -29,6 +29,34 @@ The entity also declares a nullable, lazy `tenant_id` (with the `idx_media_tenan
 Verified by an integration suite running the store against real Postgres (testcontainers), in addition to the in-memory and sqlite unit runs.
 </Callout>
 
+## Database schema
+
+The store can keep the `media` table in a schema of its own (`"media"."media"` on Postgres), or on MySQL in a database of its own (`` `media`.`media` ``), while your app stays where it is. Register the matching entity, and pass the same `schema` to the store and the heal:
+
+```ts
+import {
+  MikroOrmMediaStore,
+  ensureMediaSchema,
+  mediaEntity,
+} from '@dudousxd/nestjs-media-database-mikro-orm';
+
+const orm = await MikroORM.init({ /* … */ entities: [mediaEntity({ schema: 'media' })] });
+await ensureMediaSchema(orm, { schema: 'media' });
+MediaModule.forRoot({ store: new MikroOrmMediaStore(orm.em, { schema: 'media' }) });
+```
+
+With `schema`, `ensureMediaSchema` creates the schema (or the MySQL database) when it is missing, then applies the safe, additive update of the `media` table only. Without `schema` it stays `orm.schema.update({ safe: true })`.
+
+- **Names:** a letter or `_`, then letters, digits, `_` or `$`; at most 63 characters.
+- **Permissions:** a role that may not create the schema fails with the grant it needs. Create it yourself, or manage the table with MikroORM migrations (`mediaEntity({ schema })` declares the qualified table).
+- **MySQL:** the schema is a database on the same server. With `schema`, the heal gives the tenant index 191-character column prefixes, so it fits InnoDB's key limit in `utf8mb4`.
+- **SQLite** has no schemas: `schema` on the store or the heal throws.
+- Without `schema`, nothing changes: `MediaEntity` and the table are unqualified, as before.
+
+<Callout type="warn" title="Don't use search_path">
+Don't point the connection at the schema with `search_path` (or a connection option that sets it). Behind PgBouncer in transaction mode, `SET search_path` leaks to other clients' connections. With `schema`, every statement the store issues names the schema itself.
+</Callout>
+
 ## Attachment column
 
 For the [attachment column model](/docs/concepts/attachments) — a single file as a JSON value object on your entity — register the `AttachmentType` custom type on a property:

@@ -10,6 +10,15 @@ import type {
 } from '@dudousxd/nestjs-media-core';
 import { matchesTenant } from '@dudousxd/nestjs-media-core';
 
+/** `MediaListFilter.nameContains`: `name` or `fileName` contains `text`, ignoring case. */
+function matchesName(record: MediaRecord, text: string | undefined): boolean {
+  if (text === undefined) return true;
+  const needle = text.toLowerCase();
+  return (
+    record.name.toLowerCase().includes(needle) || record.fileName.toLowerCase().includes(needle)
+  );
+}
+
 /** Opaque keyset cursor over `(createdAt, id)`. */
 function encodeCursor(record: MediaRecord): string {
   return Buffer.from(`${record.createdAt.toISOString()}|${record.id}`, 'utf8').toString('base64');
@@ -94,6 +103,7 @@ export class InMemoryMediaStore implements MediaStore {
           (filter.ownerType === undefined || r.ownerType === filter.ownerType) &&
           (filter.collection === undefined || r.collection === filter.collection) &&
           (filter.disk === undefined || r.disk === filter.disk) &&
+          matchesName(r, filter.nameContains) &&
           matchesTenant(filter.tenant, r.tenantId),
       )
       .sort((a, b) => {
