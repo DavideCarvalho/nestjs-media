@@ -60,6 +60,12 @@ export interface ObjectDetailResponse {
   url: string;
 }
 
+/** A row's tenant, as the console shows it. */
+export interface ConsoleTenant {
+  id: string;
+  label: string;
+}
+
 export interface UploadInfo {
   id: string;
   disk: string;
@@ -70,6 +76,11 @@ export interface UploadInfo {
   parts: number;
   multipart: boolean;
   createdAt?: string;
+  /**
+   * The row's tenant, with tenancy on: its id and display label (the app's `tenancy.label`, else
+   * the id). `null` for a row with no tenant; absent with tenancy off.
+   */
+  tenant?: ConsoleTenant | null;
 }
 
 export interface UploadListResponse {
@@ -108,6 +119,11 @@ export interface LibraryRecord {
   disk: string;
   path: string;
   createdAt: string;
+  /**
+   * The row's tenant, with tenancy on: its id and display label (the app's `tenancy.label`, else
+   * the id). `null` for a row with no tenant; absent with tenancy off.
+   */
+  tenant?: ConsoleTenant | null;
 }
 
 export interface LibraryListResponse {

@@ -15,7 +15,9 @@ import {
   canSeeRow,
   readTenancy,
   rowTenantId,
+  tenantLabels,
   tenantMatch,
+  tenantPathPrefix,
 } from './tenancy';
 
 /**
@@ -385,5 +387,146 @@ describe('ResumableUploadManager tenancy', () => {
     ctx.tenant('t1');
     await manager.writeChunk(session.id, 0, Buffer.from('a'));
     expect(await manager.complete(session.id)).toMatchObject({ key: 'k/a.bin', size: 1 });
+  });
+});
+
+/**
+ * A structural stand-in for context >= 2.1 (nestjs-context #112): a tenant with a `chain`, the
+ * level-aware `kinds` rule, `family`, `required`, and `tenantLabels`.
+ */
+function chainContext(
+  options: { required?: boolean; labels?: (ids: string[]) => Record<string, string> } = {},
+) {
+  type Level = { id: string; kind: string; slug?: string };
+  const state: { tenants: Array<Level & { family?: string; chain?: Level[] }> } = { tenants: [] };
+  const calls: Array<Record<string, unknown> | undefined> = [];
+  const accessor = {
+    tenancy: () => ({ enabled: true, required: options.required === true }),
+    tenantFilter: (filter?: { kinds?: string[]; family?: string; required?: boolean }) => {
+      calls.push(filter);
+      const candidates = state.tenants.filter((t) =>
+        filter?.family !== undefined ? t.family === filter.family : t.family === undefined,
+      );
+      for (const t of candidates) {
+        const chain = t.chain ?? [t];
+        for (let i = chain.length - 1; i >= 0; i--) {
+          const level = chain[i] as Level;
+          if (filter?.kinds && !filter.kinds.includes(level.kind)) continue;
+          return {
+            mode: 'tenant' as const,
+            tenant: { ...level, source: 'app' },
+            chain: chain.slice(0, i + 1),
+          };
+        }
+      }
+      if (filter?.required ?? options.required) {
+        throw Object.assign(new Error('tenant required'), { code: 'E_TENANT_REQUIRED' });
+      }
+      return { mode: 'tenantless' as const };
+    },
+    ...(options.labels
+      ? {
+          tenantLabels: async (tenants: Level[]) =>
+            options.labels?.(tenants.map((t) => t.id)) ?? {},
+        }
+      : {}),
+  };
+  return { accessor, state, calls };
+}
+
+const unitOfClinic = {
+  id: 'U1',
+  kind: 'unit',
+  chain: [
+    { id: 'C1', kind: 'clinic' },
+    { id: 'U1', kind: 'unit' },
+  ],
+};
+
+describe('tenancy: the full contract (context >= 2.1)', () => {
+  it('scopes by the configured level of the chain: kinds ["clinic"] stamps and reads the clinic', async () => {
+    const ctx = chainContext();
+    ctx.state.tenants = [unitOfClinic];
+    const byClinic = makeLibrary(ctx.accessor, { kinds: ['clinic'] });
+    const byUnit = makeLibrary(ctx.accessor, { kinds: ['unit'] });
+    const saved = await byClinic.attach(file());
+    expect(saved.tenantId).toBe('C1');
+    const unitFile = await byUnit.attach(file({ fileName: 'b.txt' }));
+    expect(unitFile.tenantId).toBe('U1');
+    // The clinic level sees the clinic's file, not the unit's (rows hold one level).
+    expect((await byClinic.list('Post', '1')).map((r) => r.id)).toEqual([saved.id]);
+    expect((await byUnit.list('Post', '1')).map((r) => r.id)).toEqual([unitFile.id]);
+  });
+
+  it('passes `family` and `required` to the context', () => {
+    const ctx = chainContext();
+    ctx.state.tenants = [{ id: 'A1', kind: 'account', family: 'patient' }];
+    const tenancy = readTenancy({ family: 'patient', required: true }, ctx.accessor);
+    expect(tenancy.enabled && tenancy.filter()).toMatchObject({
+      mode: 'tenant',
+      tenant: { id: 'A1' },
+    });
+    expect(ctx.calls.at(-1)).toEqual({ family: 'patient', required: true });
+  });
+
+  it('`required`: a read or write with no tenant throws; boot (prepareTenancy) never does', async () => {
+    const ctx = chainContext({ required: true });
+    const lib = makeLibrary(ctx.accessor);
+    await expect(lib.prepareTenancy()).resolves.toBe(true);
+    expect(ctx.calls.every((c) => c === undefined || c.required === false)).toBe(true);
+    await expect(lib.attach(file())).rejects.toMatchObject({ code: 'E_TENANT_REQUIRED' });
+    await expect(lib.list('Post', '1')).rejects.toMatchObject({ code: 'E_TENANT_REQUIRED' });
+    // An explicit `required: false` in media's option runs tenantless instead.
+    const lenient = makeLibrary(ctx.accessor, { required: false });
+    await expect(lenient.attach(file())).resolves.toMatchObject({ tenantId: null });
+    // The override wins over the configured option.
+    const strict = readTenancy({ required: true }, ctx.accessor, { required: false });
+    expect(strict.enabled && strict.filter()).toEqual({ mode: 'tenantless' });
+  });
+
+  it('`pathPrefix`: new files of a tenant go under t/<tenantId>/, others stay as before', async () => {
+    const ctx = chainContext();
+    ctx.state.tenants = [{ id: 'org/1', kind: 'organization' }];
+    const prefixed = makeLibrary(ctx.accessor, { pathPrefix: true });
+    const saved = await prefixed.attach(file());
+    expect(saved.path).toBe('t/org_1/Post/1/gallery/id-1/a.txt');
+    expect((await storage.disk('local').getBuffer(saved.path)).toString()).toBe('a');
+    // An explicit tenantId gets its own prefix; a tenantless file none.
+    const explicit = await prefixed.attach(file({ tenantId: 't9' }));
+    expect(explicit.path.startsWith('t/t9/')).toBe(true);
+    ctx.state.tenants = [];
+    expect((await prefixed.attach(file())).path).toBe('Post/1/gallery/id-3/a.txt');
+    // Off by default.
+    ctx.state.tenants = [{ id: 'org1', kind: 'organization' }];
+    expect((await makeLibrary(ctx.accessor).attach(file())).path).toBe('Post/1/gallery/id-1/a.txt');
+  });
+
+  it('`pathPrefix` does nothing while tenancy is off', async () => {
+    const saved = await makeLibrary(undefined, { pathPrefix: true }).attach(file());
+    expect(saved.path).toBe('Post/1/gallery/id-1/a.txt');
+  });
+
+  it('tenantLabels: the context labeler, else slug, else id; a failing labeler falls back', async () => {
+    const tenants = [
+      { id: 'a', kind: 'organization', slug: 'acme' },
+      { id: 'b', kind: 'organization' },
+    ];
+    expect(await tenantLabels(tenants, chainContext().accessor)).toEqual({ a: 'acme', b: 'b' });
+    const labelled = chainContext({
+      labels: (ids) => Object.fromEntries(ids.map((id) => [id, `Org ${id}`])),
+    });
+    expect(await tenantLabels(tenants, labelled.accessor)).toEqual({ a: 'Org a', b: 'Org b' });
+    const failing = {
+      ...chainContext().accessor,
+      tenantLabels: async () => {
+        throw new Error('down');
+      },
+    };
+    expect(await tenantLabels(tenants, failing)).toEqual({ a: 'acme', b: 'b' });
+  });
+
+  it('tenantPathPrefix keeps the id one key segment', () => {
+    expect(tenantPathPrefix('org_1')).toBe('t/org_1/');
+    expect(tenantPathPrefix('a/b')).toBe('t/a_b/');
   });
 });

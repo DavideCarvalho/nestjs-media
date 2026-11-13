@@ -77,6 +77,9 @@ function RecordGrid({
         >
           <div className="truncate font-medium text-zinc-200">{record.fileName}</div>
           <div className="mono mt-1 text-[10px] text-zinc-500">{record.mimeType}</div>
+          {record.tenant != null && (
+            <div className="mt-1 truncate text-[11px] text-zinc-400">{record.tenant.label}</div>
+          )}
           <div className="mono tnum mt-2 flex justify-between text-[10px] text-zinc-600">
             <span>{formatBytes(record.size)}</span>
             <span>{formatDate(record.createdAt)}</span>
@@ -154,6 +157,11 @@ function RecordDetail({ route }: { route: Route }): JSX.Element {
               <DetailRow label="Owner">
                 {detail.record.ownerType} · {detail.record.ownerId}
               </DetailRow>
+              {detail.record.tenant !== undefined && (
+                <DetailRow label="Organization">
+                  {detail.record.tenant === null ? '—' : detail.record.tenant.label}
+                </DetailRow>
+              )}
               <DetailRow label="Created">{formatDate(detail.record.createdAt)}</DetailRow>
             </dl>
             <div className="mt-4 flex flex-wrap gap-1.5">

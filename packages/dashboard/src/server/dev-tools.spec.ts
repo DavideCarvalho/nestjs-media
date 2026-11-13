@@ -37,9 +37,14 @@ function record(id: string, tenantId: string | null): MediaRecord {
   };
 }
 
-async function setup(options: { actions?: boolean; tenant?: MediaTenantMatch } = {}) {
+async function setup(
+  options: { actions?: boolean; tenant?: MediaTenantMatch; diskPrefixes?: string[] } = {},
+) {
   const disk = new InMemoryDisk();
-  for (const key of ['a.txt', 'docs/b.txt', 'docs/c.txt']) await disk.put(key, `body of ${key}`);
+  const tenantKeys = options.diskPrefixes ? ['t/t1/own.txt', 't/t2/other.txt'] : [];
+  for (const key of ['a.txt', 'docs/b.txt', 'docs/c.txt', ...tenantKeys]) {
+    await disk.put(key, `body of ${key}`);
+  }
   const store = new InMemoryMediaStore();
   const uploads = new InMemoryUploadSessionStore();
   for (const [id, tenant] of [
@@ -63,6 +68,7 @@ async function setup(options: { actions?: boolean; tenant?: MediaTenantMatch } =
     ? {
         match: async () => match,
         canSee: async (tenantId: string | null | undefined) => (tenantId ?? null) === match.id,
+        diskPrefixes: async () => options.diskPrefixes,
       }
     : null;
   const service = new MediaConsoleService(
@@ -237,6 +243,31 @@ describe('mediaDevTools', () => {
     await expect(tool('media_get_media').run({ id: 'm2' })).rejects.toThrow('not found');
     await expect(tool('media_abort_upload').run({ id: 'm2' })).rejects.toThrow('not found');
     expect(await uploads.get('m2')).not.toBeNull();
+  });
+
+  it("with pathPrefix, a tenant's disk tools stay inside its t/<tenantId>/", async () => {
+    const { tool, disk } = await setup({
+      actions: true,
+      tenant: { id: 't1' },
+      diskPrefixes: ['t/t1/'],
+    });
+    const listed = (await tool('media_list_objects').run({ disk: 'local', prefix: 't/t1/' })) as {
+      items: Array<{ key?: string }>;
+    };
+    expect(JSON.stringify(listed)).toContain('t/t1/own.txt');
+    await expect(
+      tool('media_list_objects').run({ disk: 'local', prefix: 't/t2/' }),
+    ).rejects.toThrow('not found');
+    for (const key of ['t/t2/other.txt', 'a.txt', 't/t1/../t2/other.txt', '/t/t2/other.txt']) {
+      await expect(tool('media_get_object').run({ disk: 'local', key })).rejects.toThrow(
+        'not found',
+      );
+      await expect(
+        tool('media_delete_objects').run({ disk: 'local', keys: [key] }),
+      ).rejects.toThrow('not found');
+    }
+    expect(await disk.exists('t/t2/other.txt')).toBe(true);
+    expect(await disk.exists('a.txt')).toBe(true);
   });
 
   it('media_abort_upload removes the session', async () => {

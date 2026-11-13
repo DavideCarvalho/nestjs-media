@@ -14,6 +14,7 @@ import {
   type MediaTenancy,
   type MediaTenancyOption,
   type MediaTenantMatch,
+  type ReadTenancyOverrides,
   canSeeRow,
   readTenancy,
   rowTenantId,
@@ -152,11 +153,12 @@ export class ResumableUploadManager {
    * it at boot; every operation also checks. Resolves to whether tenancy is on.
    */
   async prepareTenancy(): Promise<boolean> {
-    return (await this.tenancy()).enabled;
+    // Boot serves no request: never a "tenant required" error here.
+    return (await this.tenancy({ required: false })).enabled;
   }
 
-  private async tenancy(): Promise<MediaTenancy> {
-    const tenancy = readTenancy(this.tenancyOption, this.contextAccessor);
+  private async tenancy(overrides?: ReadTenancyOverrides): Promise<MediaTenancy> {
+    const tenancy = readTenancy(this.tenancyOption, this.contextAccessor, overrides);
     if (!tenancy.enabled) return tenancy;
     this.tenancyReady ??= this.enableStoreTenancy();
     await this.tenancyReady;
