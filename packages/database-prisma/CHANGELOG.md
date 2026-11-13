@@ -1,5 +1,15 @@
 # @dudousxd/nestjs-media-database-prisma
 
+## 0.8.0
+
+### Minor Changes
+
+- [#212](https://github.com/DavideCarvalho/nestjs-media/pull/212) [`126491c`](https://github.com/DavideCarvalho/nestjs-media/commit/126491c43d607a5f535eb07d32d9a9015c375d6c) Thanks [@DavideCarvalho](https://github.com/DavideCarvalho)! - Global search across the Aviary consoles. A console entry may expose `search(context, q, limit)`; `GET <api>/consoles/search?q=` fans out to this console and every other console the viewer may open (300 ms and 5 hits each, `partial: true` when one did not answer). The media console searches files: a library record by exact id, library records whose name or file name contains the text (by the request's tenant), and disk objects whose key starts with it (only when no tenant scope applies). The console gets a Ctrl/Cmd-K search palette, a Search button and a "Search all consoles" item in the switcher menu; hits open the record (`#/library/<id>`) or the file preview. While the switcher runs another console's `authorize`, the request carries `aviaryProbe = true`, so an auditing authorizer can skip it.
+
+  `MediaListFilter` gains `nameContains` (name or file name contains the text, ignoring case), implemented by every bundled store and checked by `runMediaStoreConformance`; core exports `matchesNameContains` and `nameContainsPattern` for custom stores.
+
+- [#212](https://github.com/DavideCarvalho/nestjs-media/pull/212) [`126491c`](https://github.com/DavideCarvalho/nestjs-media/commit/126491c43d607a5f535eb07d32d9a9015c375d6c) Thanks [@DavideCarvalho](https://github.com/DavideCarvalho)! - A `schema` option keeps the media tables in a database schema of their own (on MySQL, a database), and every statement names it: `search_path` is never used. Drizzle Postgres: `new DrizzlePgMediaStore(db, { schema })`, the same on `DrizzlePgUploadSessionStore` and the `/nest` factories, `mediaPgTables(schema)` for drizzle-kit, and `createMediaPgTables(db, { schema })` / `mediaPgDdl(schema)` (they create the schema). TypeORM and MikroORM: register `mediaEntity({ schema })` and pass `{ schema }` to the store (and to `ensureMediaSchema`, which creates the schema or MySQL database and heals only the media table). A role that may not create the schema gets the grant it needs; SQLite with `schema` throws. Prisma: documented `@@schema` setup (the store issues no SQL of its own). On MySQL, TypeORM's `ensureMediaSchema` (and MikroORM's with `schema`) now creates `idx_media_tenant` with 191-character prefixes, so it fits InnoDB's key limit. Without `schema`, nothing changes.
+
 ## 0.7.0
 
 ### Minor Changes

@@ -1,5 +1,13 @@
 # @dudousxd/nestjs-media-testing
 
+## 0.10.0
+
+### Minor Changes
+
+- [#212](https://github.com/DavideCarvalho/nestjs-media/pull/212) [`126491c`](https://github.com/DavideCarvalho/nestjs-media/commit/126491c43d607a5f535eb07d32d9a9015c375d6c) Thanks [@DavideCarvalho](https://github.com/DavideCarvalho)! - Global search across the Aviary consoles. A console entry may expose `search(context, q, limit)`; `GET <api>/consoles/search?q=` fans out to this console and every other console the viewer may open (300 ms and 5 hits each, `partial: true` when one did not answer). The media console searches files: a library record by exact id, library records whose name or file name contains the text (by the request's tenant), and disk objects whose key starts with it (only when no tenant scope applies). The console gets a Ctrl/Cmd-K search palette, a Search button and a "Search all consoles" item in the switcher menu; hits open the record (`#/library/<id>`) or the file preview. While the switcher runs another console's `authorize`, the request carries `aviaryProbe = true`, so an auditing authorizer can skip it.
+
+  `MediaListFilter` gains `nameContains` (name or file name contains the text, ignoring case), implemented by every bundled store and checked by `runMediaStoreConformance`; core exports `matchesNameContains` and `nameContainsPattern` for custom stores.
+
 ## 0.9.0
 
 ### Minor Changes
