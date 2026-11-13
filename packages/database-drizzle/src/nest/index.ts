@@ -5,16 +5,30 @@ import { DrizzleMediaStore } from '../drizzle-media-store';
 import type { DrizzlePgDatabase } from '../pg/db';
 import { DrizzlePgMediaStore } from '../pg/drizzle-pg-media-store';
 import { DrizzlePgUploadSessionStore } from '../pg/drizzle-pg-upload-session-store';
+import { mediaPgTables } from '../pg/schema';
+import { rejectSqliteSchema } from '../schema-name';
 
 export interface DrizzleConnectionOptions {
   /** The `@nestjs/drizzle` connection (`DrizzleModule.forRoot({ name })`). Default: the default one. */
   connectionName?: string;
+  /**
+   * The Postgres schema of the media tables; every statement names it (`search_path` is never
+   * used). Default: unqualified. On SQLite it throws: SQLite has no schemas.
+   */
+  schema?: string;
 }
 
 /** What `MediaModule.forRoot({ store, uploadSessions })` accepts as a factory. */
 export interface DrizzleStoreFactory<T> {
   inject: string[];
   useFactory: (db: any) => T;
+}
+
+/** The store options of a factory; the name is checked when the module is declared. */
+function storeOptions(options: DrizzleConnectionOptions): { schema?: string } {
+  if (options.schema === undefined) return {};
+  mediaPgTables(options.schema);
+  return { schema: options.schema };
 }
 
 function factory<T>(
@@ -28,6 +42,7 @@ function factory<T>(
 export function drizzleMediaStore(
   options: DrizzleConnectionOptions = {},
 ): DrizzleStoreFactory<DrizzleMediaStore> {
+  rejectSqliteSchema(options.schema);
   return factory(options, (db) => new DrizzleMediaStore(db));
 }
 
@@ -44,12 +59,14 @@ export function drizzleMediaStore(
 export function drizzlePgMediaStore(
   options: DrizzleConnectionOptions = {},
 ): DrizzleStoreFactory<DrizzlePgMediaStore> {
-  return factory(options, (db: DrizzlePgDatabase) => new DrizzlePgMediaStore(db));
+  const store = storeOptions(options);
+  return factory(options, (db: DrizzlePgDatabase) => new DrizzlePgMediaStore(db, store));
 }
 
 /** The PostgreSQL upload session store on a `@nestjs/drizzle` connection. */
 export function drizzlePgUploadSessions(
   options: DrizzleConnectionOptions = {},
 ): DrizzleStoreFactory<DrizzlePgUploadSessionStore> {
-  return factory(options, (db: DrizzlePgDatabase) => new DrizzlePgUploadSessionStore(db));
+  const store = storeOptions(options);
+  return factory(options, (db: DrizzlePgDatabase) => new DrizzlePgUploadSessionStore(db, store));
 }

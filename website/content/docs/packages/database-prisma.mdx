@@ -47,6 +47,32 @@ model Media {
 
 Then `prisma migrate` as usual — the adapter does no schema management.
 
+## Database schema
+
+Your Prisma client decides where the table lives, so the schema goes in your `schema.prisma`. List it in the datasource and put the model in it with `@@schema` (Prisma's multi-schema support):
+
+```prisma
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+  schemas  = ["public", "media"]
+}
+
+model Media {
+  // …the fields above
+  @@map("media")
+  @@schema("media")
+}
+```
+
+Once a datasource lists `schemas`, every model needs an `@@schema`: add `@@schema("public")` to yours. Then `prisma migrate` as usual. The store issues no SQL of its own, so it needs no option. Every query goes through your client, which names the schema.
+
+On MySQL, `schemas` lists databases on the same server. SQLite has no schemas.
+
+<Callout type="warn" title="Don't use search_path">
+Don't point the connection at the schema with `search_path` (or a connection option that sets it). Behind PgBouncer in transaction mode, `SET search_path` leaks to other clients' connections. With `schema`, every statement the store issues names the schema itself.
+</Callout>
+
 ## Structural typing
 
 The store depends on a structural `PrismaClientLike` interface (just the `media` delegate methods it calls), not the concrete generated client.

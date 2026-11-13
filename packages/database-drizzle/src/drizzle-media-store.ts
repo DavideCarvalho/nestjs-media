@@ -13,6 +13,7 @@ import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
 import { decodeListCursor, encodeListCursor } from './list-cursor';
 import { mediaTableWithoutTenant } from './media-columns';
 import { mediaTable } from './media.schema';
+import { rejectSqliteSchema } from './schema-name';
 import { assertTenantColumn, nameContainsCondition, selectable, tenantCondition } from './tenancy';
 
 type DB = BetterSQLite3Database<Record<string, never>>;
@@ -21,7 +22,8 @@ type DB = BetterSQLite3Database<Record<string, never>>;
  * Migration-first (§3.10): Drizzle has no auto-ensure. Run migrations with
  * drizzle-kit in production; this helper creates the table for tests/dev.
  */
-export function createMediaTable(db: DB): void {
+export function createMediaTable(db: DB, options: { schema?: string } = {}): void {
+  rejectSqliteSchema(options.schema);
   db.run(sql`
     CREATE TABLE IF NOT EXISTS media (
       id text PRIMARY KEY NOT NULL,
@@ -69,7 +71,13 @@ function toRow(record: MediaRecord, tenancy: boolean) {
 export class DrizzleMediaStore implements MediaStore {
   private tenancy = false;
 
-  constructor(private readonly db: DB) {}
+  /** `schema` is for Postgres only: SQLite has no schemas, so setting it throws. */
+  constructor(
+    private readonly db: DB,
+    options: { schema?: string } = {},
+  ) {
+    rejectSqliteSchema(options.schema);
+  }
 
   /** The columns to read: `tenant_id` only once tenancy is on. */
   private get columns() {

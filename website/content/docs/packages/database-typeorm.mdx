@@ -41,6 +41,31 @@ The entity also declares a nullable `tenant_id` (and the `idx_media_tenant` inde
 Timestamps are stored as ISO strings (`varchar`) rather than a dialect-specific date type — so the same schema works on **sqlite, mysql, and postgres** alike. This is verified by an integration suite running the store against real Postgres (testcontainers).
 </Callout>
 
+## Database schema
+
+The store can keep the `media` table in a schema of its own (`"media"."media"` on Postgres), or on MySQL in a database of its own (`` `media`.`media` ``), while your app stays where it is. Register the matching entity, and pass the same `schema` to the store:
+
+```ts
+import { mediaEntity } from '@dudousxd/nestjs-media-database-typeorm';
+import { typeOrmMediaStore } from '@dudousxd/nestjs-media-database-typeorm/nest';
+
+TypeOrmModule.forRoot({ /* … */ entities: [mediaEntity({ schema: 'media' })] });
+MediaModule.forRoot({ store: typeOrmMediaStore({ schema: 'media' }) });
+// or: new TypeOrmMediaStore(dataSource, { schema: 'media' })
+```
+
+Auto-schema (and `ensureMediaSchema(ds, { schema: 'media' })`) creates the schema, or the MySQL database, when it is missing, then the table and its indexes in it.
+
+- **Names:** a letter or `_`, then letters, digits, `_` or `$`; at most 63 characters.
+- **Permissions:** a role that may not create the schema (Postgres: `CREATE` on the database; MySQL: `CREATE` on the database) fails with the grant it needs. Create it yourself, or turn `autoCreateSchema` off and migrate.
+- **MySQL:** the schema is a database on the same server. The tenant index uses 191-character column prefixes there, so it fits InnoDB's key limit in `utf8mb4`.
+- **SQLite** has no schemas: `schema` on a SQLite `DataSource` throws.
+- Without `schema`, nothing changes: `MediaEntity` and the table are unqualified, as before.
+
+<Callout type="warn" title="Don't use search_path">
+Don't point the connection at the schema with `search_path` (or a connection option that sets it). Behind PgBouncer in transaction mode, `SET search_path` leaks to other clients' connections. With `schema`, every statement the store issues names the schema itself.
+</Callout>
+
 ## Named connections
 
 `typeOrmMediaStore({ connectionName: 'media' })` above; or pass any `DataSource` to `new TypeOrmMediaStore(ds)`.
