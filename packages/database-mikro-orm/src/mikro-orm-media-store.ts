@@ -139,10 +139,33 @@ export async function ensureMediaSchema(
     }
   }
   if (schema === undefined) {
-    await orm.schema.update({ safe: true });
+    if (dialectOf(orm.em) === 'mysql') await updateOnMysql(orm.em);
+    else await orm.schema.update({ safe: true });
     return;
   }
   await healInSchema(orm.em, schema);
+}
+
+/**
+ * `orm.schema.update({ safe: true })` on MySQL, with `idx_media_tenant` created with column
+ * prefixes (see {@link withTenantIndexPrefixes}): MikroORM's own update would create it whole,
+ * and MySQL rejects the key. Every other statement runs as MikroORM generated it.
+ */
+async function updateOnMysql(em: EntityManager): Promise<void> {
+  const generator = em.getPlatform().getSchemaGenerator(em.getDriver()) as unknown as {
+    getUpdateSchemaSQL(options: { safe: boolean; wrap: boolean }): Promise<string>;
+  };
+  const sql = await generator.getUpdateSchemaSQL({ safe: true, wrap: false });
+  for (const statement of splitStatements(sql)) {
+    await em.getConnection().execute(withTenantIndexPrefixes(statement));
+  }
+}
+
+function splitStatements(sql: string): string[] {
+  return sql
+    .split(/;\s*\n/)
+    .map((statement) => statement.trim().replace(/;$/, ''))
+    .filter((statement) => statement !== '');
 }
 
 /**
@@ -156,10 +179,7 @@ async function healInSchema(em: EntityManager, schema: string): Promise<void> {
   };
   const sql = await generator.getUpdateSchemaSQL({ safe: true, wrap: false });
   const table = `${platform.quoteIdentifier(schema)}.${platform.quoteIdentifier('media')}`;
-  const statements = sql
-    .split(/;\s*\n/)
-    .map((statement) => statement.trim().replace(/;$/, ''))
-    .filter((statement) => statement !== '' && statement.includes(table));
+  const statements = splitStatements(sql).filter((statement) => statement.includes(table));
   const mysql = dialectOf(em) === 'mysql';
   for (const statement of statements) {
     await em.getConnection().execute(mysql ? withTenantIndexPrefixes(statement) : statement);

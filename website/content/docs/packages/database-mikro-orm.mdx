@@ -25,6 +25,8 @@ The entity is an `EntitySchema` with `order` mapped to a `position` column. JSON
 
 The entity also declares a nullable, lazy `tenant_id` (with the `idx_media_tenant` index), used only for [tenancy](/docs/concepts/tenancy). The store never reads or writes it while tenancy is off.
 
+On MySQL, `ensureMediaSchema(orm)` creates `idx_media_tenant` with 191-character column prefixes, so its four `varchar(255)` columns fit InnoDB's key limit in `utf8mb4`. A MikroORM migration generates that index without prefixes, so write it by hand there: `create index idx_media_tenant on media (tenant_id(191), owner_type(191), owner_id(191), collection(191))`.
+
 <Callout type="info">
 Verified by an integration suite running the store against real Postgres (testcontainers), in addition to the in-memory and sqlite unit runs.
 </Callout>
@@ -49,7 +51,7 @@ With `schema`, `ensureMediaSchema` creates the schema (or the MySQL database) wh
 
 - **Names:** a letter or `_`, then letters, digits, `_` or `$`; at most 63 characters.
 - **Permissions:** a role that may not create the schema fails with the grant it needs. Create it yourself, or manage the table with MikroORM migrations (`mediaEntity({ schema })` declares the qualified table).
-- **MySQL:** the schema is a database on the same server. With `schema`, the heal gives the tenant index 191-character column prefixes, so it fits InnoDB's key limit in `utf8mb4`.
+- **MySQL:** the schema is a database on the same server. The heal gives the tenant index 191-character column prefixes, as without `schema`.
 - **SQLite** has no schemas: `schema` on the store or the heal throws.
 - Without `schema`, nothing changes: `MediaEntity` and the table are unqualified, as before.
 

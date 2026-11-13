@@ -170,6 +170,8 @@ Plain SQL, if you write migrations by hand:
 ```sql
 ALTER TABLE media ADD COLUMN tenant_id varchar(255) NULL;
 CREATE INDEX idx_media_tenant ON media (tenant_id, owner_type, owner_id, collection);
+-- MySQL (utf8mb4): prefixes keep the key under InnoDB's 3072 bytes
+-- CREATE INDEX idx_media_tenant ON media (tenant_id(191), owner_type(191), owner_id(191), collection(191));
 
 -- Drizzle Postgres upload sessions
 ALTER TABLE media_upload_sessions ADD COLUMN tenant_id text NULL;
