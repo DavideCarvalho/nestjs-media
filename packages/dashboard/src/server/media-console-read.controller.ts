@@ -22,7 +22,12 @@ import type {
 } from '../client/types.js';
 import { downloadFilename } from './content-disposition.js';
 import { OpenToAuthorization } from './controller-decorators.js';
-import { ListQueryError, parseCursorParams, parseFilterParams } from './list-api.js';
+import {
+  ListQueryError,
+  parseCursorParams,
+  parseFilterParams,
+  rejectUnknownParams,
+} from './list-api.js';
 import { MediaConsoleService } from './media-console.service.js';
 import type { ObjectInsightsResponse } from './object-insights.js';
 
@@ -32,6 +37,9 @@ type ListQuery = Record<string, unknown>;
 const DEFAULT_PAGE_SIZE = 50;
 /** Largest `first` on `library`; bigger values are clamped. */
 const MAX_LIBRARY_PAGE_SIZE = 200;
+
+/** The cursor paging params of a forward-only list (`before` / `last` are read only to 400 them). */
+const CURSOR_PARAMS = ['after', 'before', 'first', 'last'] as const;
 
 /**
  * `after` + `first` for a forward-only list (object-store continuation tokens, the store's keyset):
@@ -69,6 +77,7 @@ export class MediaConsoleReadController {
    */
   @Get('disks/:disk/objects')
   objects(@Param('disk') disk: string, @Query() query: ListQuery): Promise<ObjectListResponse> {
+    rejectUnknownParams(query, ['prefix', ...CURSOR_PARAMS]);
     const prefix = query.prefix;
     if (prefix !== undefined && typeof prefix !== 'string') {
       throw new ListQueryError('Invalid "prefix": expected a single folder path.');
@@ -130,9 +139,16 @@ export class MediaConsoleReadController {
     });
   }
 
-  /** Upload sessions in progress, unpaged. Filters: `filter[disk]`, `filter[key][startsWith]`. */
+  /**
+   * Upload sessions in progress, unpaged. Filters: `filter[disk]`, `filter[key][startsWith]`. Any
+   * other param (paging, the old bare `disk` / `prefix`) is a 400.
+   */
   @Get('uploads')
   uploads(@Query() query: ListQuery): Promise<UploadListResponse> {
+    if (query.prefix !== undefined) {
+      throw new ListQueryError('"prefix" was removed; use "filter[key][startsWith]" instead.');
+    }
+    rejectUnknownParams(query, ['filter']);
     let disk: string | undefined;
     let prefix: string | undefined;
     for (const { field, value } of parseFilterParams(query, {
@@ -159,10 +175,12 @@ export class MediaConsoleReadController {
 
   /**
    * Media records in the store's one order, `(createdAt, id)` ascending, cursor-paged (`after` +
-   * `first`, at most 200). Filters: `filter[collection]`, `filter[disk]`.
+   * `first`, at most 200). Filters: `filter[collection]`, `filter[disk]`. A cursor the store
+   * reports as not its own (`MediaStore.isListCursor`) is a 400, like on `objects`.
    */
   @Get('library')
   library(@Query() query: ListQuery): Promise<LibraryListResponse> {
+    rejectUnknownParams(query, ['filter', ...CURSOR_PARAMS]);
     const filter: { collection?: string; disk?: string } = {};
     for (const { field, value } of parseFilterParams(query, {
       fields: { collection: ['eq'], disk: ['eq'] },

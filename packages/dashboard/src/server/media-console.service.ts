@@ -45,7 +45,7 @@ import type {
   UploadInfo,
   UploadListResponse,
 } from '../client/types.js';
-import { cursorPage } from './list-api.js';
+import { ListQueryError, cursorPage } from './list-api.js';
 import type {
   ObjectInsight,
   ObjectInsightProvider,
@@ -682,6 +682,12 @@ export class MediaConsoleService {
     limit?: number;
   }): Promise<LibraryListResponse> {
     if (!this.store || typeof this.store.list !== 'function') return cursorPage([]);
+    // `list()` reads a cursor it cannot decode as "no cursor" and restarts from the first page. A
+    // store that can tell its own cursors apart (`isListCursor`) makes a forged one a 400 here,
+    // like `disks/:disk/objects`; a store without the hook keeps the restart.
+    if (filter.cursor && this.store.isListCursor?.(filter.cursor) === false) {
+      throw new ListQueryError('Malformed cursor in "after".');
+    }
     const tenant = await this.tenantMatch();
     const page = await this.store.list(
       {

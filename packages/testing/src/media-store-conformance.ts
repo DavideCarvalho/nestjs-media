@@ -180,6 +180,19 @@ export function runMediaStoreConformance(
       expect(result.records.map((r) => r.id)).toEqual(['a']);
     });
 
+    it('isListCursor (when implemented) accepts the cursors list returns and rejects others', async () => {
+      const store = await makeStore();
+      if (typeof store.list !== 'function' || typeof store.isListCursor !== 'function') return;
+      await store.save(makeRecord({ id: 'a', createdAt: new Date(1000) }));
+      await store.save(makeRecord({ id: 'b', createdAt: new Date(2000) }));
+      const page = await store.list({}, { limit: 1 });
+      if (page.cursor === undefined) throw new Error('expected a cursor after the first page');
+      expect(store.isListCursor(page.cursor)).toBe(true);
+      for (const forged of ['not-a-valid-cursor', '', 'Zm9v', `${page.cursor}x`]) {
+        expect(store.isListCursor(forged)).toBe(false);
+      }
+    });
+
     it("save returns the tenantId that was persisted, never one it didn't store", async () => {
       const store = await makeStore();
       // Off: a store that doesn't keep `tenantId` must not echo it back.

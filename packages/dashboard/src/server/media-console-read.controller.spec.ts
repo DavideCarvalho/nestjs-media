@@ -401,6 +401,33 @@ describe('list endpoints — the Aviary list wire (mounted)', () => {
     expect((await fetch(`${api}/library?before=x`)).status).toBe(400);
   });
 
+  it('library: a forged cursor is a 400, not a silent restart from the first page', async () => {
+    for (const after of ['forged', 'Zm9v', 'bm90fGEgY3Vyc29y']) {
+      const res = await json(`/library?after=${encodeURIComponent(after)}`);
+      expect([after, res.status, res.body.message]).toEqual([
+        after,
+        400,
+        'Malformed cursor in "after".',
+      ]);
+    }
+  });
+
+  it.each([
+    ['/library?cursor=x', /"after"/],
+    ['/library?limit=10', /"first"/],
+    ['/library?collection=gallery', /filter\[collection\]/],
+    ['/library?page=2', /"page"/],
+    ['/disks/primary/objects?limit=10', /"first"/],
+    ['/disks/primary/objects?cursor=x', /"after"/],
+    ['/uploads?disk=primary', /filter\[disk\]/],
+    ['/uploads?prefix=in/', /filter\[key\]\[startsWith\]/],
+    ['/uploads?first=10', /"first"/],
+  ])('%s answers 400 naming the replacement, instead of being ignored', async (path, message) => {
+    const res = await json(path);
+    expect(res.status).toBe(400);
+    expect(res.body.message).toMatch(message);
+  });
+
   it('uploads and library/collections answer { data }', async () => {
     const all = await json('/uploads');
     expect(all.body.data.map((u: { id: string }) => u.id).sort()).toEqual(['u1', 'u2']);

@@ -9,7 +9,7 @@ import type {
   MediaStore,
 } from '@dudousxd/nestjs-media-core';
 import { and, asc, count, eq, getTableColumns, gt, max, or, sum } from 'drizzle-orm';
-import { decodeListCursor, encodeListCursor } from '../list-cursor';
+import { decodeListCursor, encodeListCursor, isEncodedListCursor } from '../list-cursor';
 import { assertTenantColumn, nameContainsCondition, selectable, tenantCondition } from '../tenancy';
 import type { DrizzlePgDatabase } from './db';
 import { type MediaPgTables, mediaPgTable, mediaPgTables } from './schema';
@@ -160,6 +160,11 @@ export class DrizzlePgMediaStore implements MediaStore {
       // `sum(bigint)` is `numeric` in Postgres — drivers hand it back as a string.
       sumSize: query.sum === 'size' ? Number(row.sumSize ?? 0) : 0,
     }));
+  }
+
+  /** {@inheritDoc MediaStore.isListCursor} */
+  isListCursor(cursor: string): boolean {
+    return isEncodedListCursor(cursor);
   }
 
   async list(filter: MediaListFilter = {}, page: MediaListPage = {}): Promise<MediaListResult> {
