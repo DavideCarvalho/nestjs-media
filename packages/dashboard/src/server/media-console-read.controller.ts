@@ -43,7 +43,8 @@ const CURSOR_PARAMS = ['after', 'before', 'first', 'last'] as const;
 
 /**
  * `after` + `first` for a forward-only list (object-store continuation tokens, the store's keyset):
- * `before`/`last` paging backward is a 400, since no store here can serve it.
+ * `before`/`last` paging backward is a 400, since no store here can serve it (`last` alone, which
+ * the shared parser would read as the page size, too).
  */
 function forwardPage(query: ListQuery, maxSize: number): { cursor?: string; limit: number } {
   const { after, size, backward } = parseCursorParams(query, {
@@ -52,6 +53,8 @@ function forwardPage(query: ListQuery, maxSize: number): { cursor?: string; limi
   });
   if (backward)
     throw new ListQueryError('This list pages forward only: use "after", not "before".');
+  if (query.last !== undefined && query.last !== '')
+    throw new ListQueryError('This list pages forward only: use "first", not "last".');
   return { ...(after !== undefined ? { cursor: after } : {}), limit: size };
 }
 

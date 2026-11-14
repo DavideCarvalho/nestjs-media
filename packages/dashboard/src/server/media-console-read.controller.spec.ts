@@ -377,12 +377,33 @@ describe('list endpoints — the Aviary list wire (mounted)', () => {
   });
 
   it('disks/:disk/objects: 400 for a forged cursor, a bad size, or paging backward', async () => {
-    for (const query of ['after=forged', 'first=0', 'first=abc', 'before=x', 'after=a&before=b']) {
+    for (const query of [
+      'after=forged',
+      'prefix=smoke/&first=1&after=zzz',
+      'first=0',
+      'first=abc',
+      'before=x',
+      'after=a&before=b',
+      'last=1',
+      'first=1&last=1',
+    ]) {
       expect([query, (await fetch(`${api}/disks/primary/objects?${query}`)).status]).toEqual([
         query,
         400,
       ]);
     }
+    const last = await json('/disks/primary/objects?last=1');
+    expect(last.body.message).toBe('This list pages forward only: use "first", not "last".');
+    expect((await fetch(`${api}/library?last=1`)).status).toBe(400);
+  });
+
+  it('disks/:disk/objects: a cursor only pages the folder that issued it', async () => {
+    const first = await json('/disks/primary/objects?first=1');
+    const cursor = encodeURIComponent(first.body.meta.nextCursor);
+    expect((await fetch(`${api}/disks/primary/objects?first=1&after=${cursor}`)).status).toBe(200);
+    expect(
+      (await fetch(`${api}/disks/primary/objects?prefix=docs/&first=1&after=${cursor}`)).status,
+    ).toBe(400);
   });
 
   it('library: filter[collection] / filter[disk], cursor envelope, unknown filter is a 400', async () => {

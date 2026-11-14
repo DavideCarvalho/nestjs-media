@@ -45,6 +45,12 @@ import type {
   UploadInfo,
   UploadListResponse,
 } from '../client/types.js';
+import {
+  MALFORMED_DISK_CURSOR,
+  decodeDiskCursor,
+  encodeDiskCursor,
+  isRejectedDriverCursor,
+} from './disk-cursor.js';
 import { ListQueryError, cursorPage } from './list-api.js';
 import type {
   ObjectInsight,
@@ -372,17 +378,20 @@ export class MediaConsoleService {
         meta: cursorPage([]).meta,
       };
     }
-    const level = await http(() =>
-      listFolderLevel(
-        store,
-        prefix,
-        {
-          limit: options.limit ?? DEFAULT_PAGE_LIMIT,
-          ...(options.cursor ? { cursor: options.cursor } : {}),
-        },
-        multipartFor(this.multipart ?? undefined, disk),
-      ),
-    );
+    const token = options.cursor ? decodeDiskCursor(options.cursor, disk, prefix) : undefined;
+    const level = await http(async () => {
+      try {
+        return await listFolderLevel(
+          store,
+          prefix,
+          { limit: options.limit ?? DEFAULT_PAGE_LIMIT, ...(token ? { cursor: token } : {}) },
+          multipartFor(this.multipart ?? undefined, disk),
+        );
+      } catch (error) {
+        if (token && isRejectedDriverCursor(error)) throw new ListQueryError(MALFORMED_DISK_CURSOR);
+        throw error;
+      }
+    });
     const files = level.files
       .map((entry) => ({ entry, name: entry.key.slice(prefix.length) }))
       .filter(({ name }) => name !== '' && name !== FOLDER_KEEP_FILE)
@@ -393,7 +402,9 @@ export class MediaConsoleService {
         lastModified: entry.lastModified.toISOString(),
       }));
     // Forward-only: object-store continuation tokens can't page backward.
-    const { data, meta } = cursorPage(files, { nextCursor: level.cursor ?? null });
+    const { data, meta } = cursorPage(files, {
+      nextCursor: level.cursor ? encodeDiskCursor(disk, prefix, level.cursor) : null,
+    });
     return {
       data,
       folders: level.folders
