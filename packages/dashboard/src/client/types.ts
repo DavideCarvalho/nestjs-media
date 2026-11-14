@@ -1,6 +1,17 @@
 // The JSON API contract for the /media console. Owned by the client entry so that both the
 // server (which produces these shapes) and any host app (which may want the types) import them
 // from `@dudousxd/nestjs-media-dashboard/client`. Pure types — no runtime.
+//
+// Lists follow the Aviary list API: rows under `data`, a cursor-paged list adds `meta`
+// (`CursorPageMeta`), filters go in `filter[field]=value`, cursor paging in `after` + `first`.
+
+/** The `meta` of a cursor-paged list. A cursor is `null` when there is no page that way. */
+export interface CursorPageMeta {
+  nextCursor: string | null;
+  prevCursor: string | null;
+  hasNext: boolean;
+  hasPrev: boolean;
+}
 
 /**
  * What a disk can do, computed by the server from the `@nestjs/storage` disk and its multipart
@@ -28,8 +39,9 @@ export interface DiskInfo {
   capabilities: DiskCapabilities;
 }
 
+/** `GET disks`: every registered disk (a small, unpaged list). */
 export interface DiskListResponse {
-  disks: DiskInfo[];
+  data: DiskInfo[];
 }
 
 /** A folder prefix (no trailing slash) inside a disk. */
@@ -46,10 +58,15 @@ export interface ObjectEntry {
   lastModified: string | null;
 }
 
+/**
+ * `GET disks/:disk/objects`: one folder level, cursor-paged. `data` holds the level's files; the
+ * page's folders ride next to it as `folders` (side data of the same page, not a second list). Pass
+ * `meta.nextCursor` back as `after` for the next page.
+ */
 export interface ObjectListResponse {
+  data: ObjectEntry[];
   folders: ObjectFolder[];
-  files: ObjectEntry[];
-  cursor?: string;
+  meta: CursorPageMeta;
 }
 
 export interface ObjectDetailResponse {
@@ -83,8 +100,9 @@ export interface UploadInfo {
   tenant?: ConsoleTenant | null;
 }
 
+/** `GET uploads`: the upload sessions in progress (unpaged). */
 export interface UploadListResponse {
-  uploads: UploadInfo[];
+  data: UploadInfo[];
 }
 
 export interface UploadPart {
@@ -103,8 +121,9 @@ export interface CollectionInfo {
   sumSize: number;
 }
 
+/** `GET library/collections`: every collection with its record count and total bytes (unpaged). */
 export interface CollectionsResponse {
-  collections: CollectionInfo[];
+  data: CollectionInfo[];
 }
 
 export interface LibraryRecord {
@@ -126,9 +145,10 @@ export interface LibraryRecord {
   tenant?: ConsoleTenant | null;
 }
 
+/** `GET library`: media records, oldest first, cursor-paged. Pass `meta.nextCursor` back as `after`. */
 export interface LibraryListResponse {
-  records: LibraryRecord[];
-  cursor?: string;
+  data: LibraryRecord[];
+  meta: CursorPageMeta;
 }
 
 export interface LibraryVariant {

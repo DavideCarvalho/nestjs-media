@@ -13,7 +13,7 @@ import { UploadIcon } from '../icons.js';
 import { Button, Dot, Notice, Panel, relativeAge } from '../ui.js';
 import type { Route } from '../useHashRoute.js';
 
-type UploadRow = UploadListResponse['uploads'][number];
+type UploadRow = UploadListResponse['data'][number];
 
 const UPLOADS_QUERY_KEY = ['uploads'];
 
@@ -147,7 +147,7 @@ function UploadsListView({ actions }: { actions: boolean }): JSX.Element {
         query={uploadsQuery}
         skeleton={<UploadsTable uploads={undefined} actions={actions} />}
       >
-        {(data) => <UploadsTable uploads={data.uploads} actions={actions} />}
+        {(data) => <UploadsTable uploads={data.data} actions={actions} />}
       </QueryBoundary>
     </PageBody>
   );

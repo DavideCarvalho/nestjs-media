@@ -1,3 +1,4 @@
+import { InMemoryMediaStore, InMemoryUploadSessionStore } from '@dudousxd/nestjs-media-testing';
 import { Global, Module } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { InMemoryDisk, StorageModule } from '@nestjs/storage';
@@ -270,5 +271,148 @@ describe('disk routes of a tenant under pathPrefix (mounted)', () => {
     const listing = await fetch(`${base}/objects?prefix=t%2Ft1%2F..%2Ft2%2F`);
     expect(listing.status).toBeGreaterThanOrEqual(400);
     expect(await listing.text()).not.toContain('other.txt');
+  });
+});
+
+describe('list endpoints — the Aviary list wire (mounted)', () => {
+  const listDisk = new InMemoryDisk();
+  const store = new InMemoryMediaStore();
+  const uploads = new InMemoryUploadSessionStore();
+
+  @Global()
+  @Module({
+    providers: [
+      { provide: STORE, useValue: store },
+      { provide: UPLOADS, useValue: uploads },
+    ],
+    exports: [STORE, UPLOADS],
+  })
+  class ListMediaModule {}
+
+  @Module({
+    imports: [
+      StorageModule.forRoot({ disks: { primary: listDisk } }),
+      ListMediaModule,
+      MediaDashboardModule.forRoot({
+        basePath: '/media',
+        apiBasePath: '/api/media',
+        actions: false,
+      }),
+    ],
+  })
+  class ListAppModule {}
+
+  let api: string;
+  let app: Awaited<ReturnType<typeof NestFactory.create>>;
+
+  beforeAll(async () => {
+    for (const key of ['docs/a.txt', 'b.txt', 'c.txt', 'd.txt']) await listDisk.put(key, CONTENT);
+    for (const [i, collection] of ['gallery', 'gallery', 'avatars'].entries()) {
+      await store.save({
+        id: `r${i}`,
+        ownerType: 'Post',
+        ownerId: '1',
+        collection,
+        name: `r${i}`,
+        fileName: `r${i}.png`,
+        mimeType: 'image/png',
+        size: 1,
+        disk: 'primary',
+        path: `p/r${i}`,
+        order: 0,
+        customProperties: {},
+        conversions: {},
+        createdAt: new Date(i * 1000),
+        updatedAt: new Date(i * 1000),
+      });
+    }
+    for (const [id, key] of [
+      ['u1', 'in/a.bin'],
+      ['u2', 'out/b.bin'],
+    ] as const) {
+      await uploads.create({
+        id,
+        disk: 'primary',
+        key,
+        contentType: undefined,
+        size: 4,
+        offset: 1,
+        parts: 0,
+      });
+    }
+    app = await NestFactory.create(ListAppModule, { logger: false });
+    await app.listen(0);
+    api = `${await app.getUrl()}/api/media`;
+  });
+
+  afterAll(async () => {
+    await app.close();
+  });
+
+  const json = async (path: string): Promise<{ status: number; body: any }> => {
+    const response = await fetch(`${api}${path}`);
+    return { status: response.status, body: await response.json() };
+  };
+
+  it('disks/:disk/objects: files under data, folders beside it, paged by after/first', async () => {
+    const first = await json('/disks/primary/objects?first=2');
+    expect(first.status).toBe(200);
+    // Byte order: b.txt, c.txt, d.txt, then the docs/ folder.
+    expect(first.body.folders).toEqual([]);
+    expect(first.body.data.map((f: { key: string }) => f.key)).toEqual(['b.txt', 'c.txt']);
+    expect(first.body.meta).toMatchObject({ hasNext: true, prevCursor: null, hasPrev: false });
+    const next = await json(
+      `/disks/primary/objects?first=2&after=${encodeURIComponent(first.body.meta.nextCursor)}`,
+    );
+    expect(next.body.data.map((f: { key: string }) => f.key)).toEqual(['d.txt']);
+    expect(next.body.folders).toEqual([{ name: 'docs', prefix: 'docs/' }]);
+    expect(next.body.meta).toEqual({
+      nextCursor: null,
+      prevCursor: null,
+      hasNext: false,
+      hasPrev: false,
+    });
+    const docs = await json('/disks/primary/objects?prefix=docs');
+    expect(docs.body.data.map((f: { key: string }) => f.key)).toEqual(['docs/a.txt']);
+  });
+
+  it('disks/:disk/objects: 400 for a forged cursor, a bad size, or paging backward', async () => {
+    for (const query of ['after=forged', 'first=0', 'first=abc', 'before=x', 'after=a&before=b']) {
+      expect([query, (await fetch(`${api}/disks/primary/objects?${query}`)).status]).toEqual([
+        query,
+        400,
+      ]);
+    }
+  });
+
+  it('library: filter[collection] / filter[disk], cursor envelope, unknown filter is a 400', async () => {
+    const all = await json('/library?first=2');
+    expect(all.body.data.map((r: { id: string }) => r.id)).toEqual(['r0', 'r1']);
+    expect(all.body.meta.hasNext).toBe(true);
+    const rest = await json(
+      `/library?first=2&after=${encodeURIComponent(all.body.meta.nextCursor)}`,
+    );
+    expect(rest.body.data.map((r: { id: string }) => r.id)).toEqual(['r2']);
+    expect(rest.body.meta.nextCursor).toBeNull();
+    const gallery = await json('/library?filter[collection]=gallery&filter[disk]=primary');
+    expect(gallery.body.data.map((r: { id: string }) => r.id)).toEqual(['r0', 'r1']);
+    expect((await fetch(`${api}/library?filter[owner]=x`)).status).toBe(400);
+    expect((await fetch(`${api}/library?filter[collection][gt]=a`)).status).toBe(400);
+    expect((await fetch(`${api}/library?before=x`)).status).toBe(400);
+  });
+
+  it('uploads and library/collections answer { data }', async () => {
+    const all = await json('/uploads');
+    expect(all.body.data.map((u: { id: string }) => u.id).sort()).toEqual(['u1', 'u2']);
+    const filtered = await json('/uploads?filter[disk]=primary&filter[key][startsWith]=in/');
+    expect(filtered.body.data.map((u: { id: string }) => u.id)).toEqual(['u1']);
+    expect((await fetch(`${api}/uploads?filter[prefix]=in/`)).status).toBe(400);
+    const collections = await json('/library/collections');
+    expect(collections.body).toEqual({
+      data: expect.arrayContaining([expect.objectContaining({ key: 'gallery', count: 2 })]),
+    });
+    expect((await json('/disks')).body.data.map((d: { name: string }) => d.name)).toEqual([
+      'primary',
+    ]);
   });
 });

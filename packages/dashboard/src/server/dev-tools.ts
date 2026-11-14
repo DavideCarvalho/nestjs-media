@@ -176,7 +176,7 @@ export function mediaDevTools(
         'The configured storage disks: name, whether it is the default, and capabilities (presign, multipart, public URLs). Returns { items, next }.',
       input: { type: 'object', properties: {} },
       async run() {
-        const { disks } = await service.listDisks();
+        const { data: disks } = await service.listDisks();
         return { items: disks, next: null };
       },
     },
@@ -209,7 +209,7 @@ export function mediaDevTools(
               }),
             ),
         );
-        return { folders: level.folders, items: level.files, next: level.cursor ?? null };
+        return { folders: level.folders, items: level.data, next: level.meta.nextCursor };
       },
     },
     {
@@ -246,7 +246,7 @@ export function mediaDevTools(
         },
       },
       async run(input) {
-        const { uploads } = await service.listUploads(
+        const { data: uploads } = await service.listUploads(
           given({ disk: str(input.disk), prefix: str(input.prefix) }),
         );
         const cursor = str(input.cursor);
@@ -296,7 +296,7 @@ export function mediaDevTools(
       async run(input) {
         const collection = str(input.collection);
         if (collection === undefined && str(input.disk) === undefined) {
-          const { collections } = await service.listCollections();
+          const { data: collections } = await service.listCollections();
           return { items: collections, next: null };
         }
         const page = await service.listLibrary(
@@ -307,7 +307,7 @@ export function mediaDevTools(
             limit: limitOf(input),
           }),
         );
-        return { items: page.records, next: page.cursor ?? null };
+        return { items: page.data, next: page.meta.nextCursor };
       },
     },
     {

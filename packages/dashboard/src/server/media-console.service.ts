@@ -45,6 +45,7 @@ import type {
   UploadInfo,
   UploadListResponse,
 } from '../client/types.js';
+import { cursorPage } from './list-api.js';
 import type {
   ObjectInsight,
   ObjectInsightProvider,
@@ -324,9 +325,9 @@ export class MediaConsoleService {
 
   async listDisks(): Promise<DiskListResponse> {
     const storage = this.storage;
-    if (!storage) return { disks: [] };
+    if (!storage) return { data: [] };
     return {
-      disks: await Promise.all(
+      data: await Promise.all(
         storage.names().map(async (name) => ({
           name,
           default: name === storage.defaultDisk,
@@ -366,8 +367,9 @@ export class MediaConsoleService {
         ...new Set(below.map((p) => `${prefix}${p.slice(prefix.length).split('/')[0]}/`)),
       ];
       return {
+        data: [],
         folders: folders.map((folder) => ({ name: lastSegment(folder), prefix: folder })),
-        files: [],
+        meta: cursorPage([]).meta,
       };
     }
     const level = await http(() =>
@@ -381,20 +383,23 @@ export class MediaConsoleService {
         multipartFor(this.multipart ?? undefined, disk),
       ),
     );
+    const files = level.files
+      .map((entry) => ({ entry, name: entry.key.slice(prefix.length) }))
+      .filter(({ name }) => name !== '' && name !== FOLDER_KEEP_FILE)
+      .map(({ entry, name }) => ({
+        key: entry.key,
+        name,
+        sizeBytes: entry.size,
+        lastModified: entry.lastModified.toISOString(),
+      }));
+    // Forward-only: object-store continuation tokens can't page backward.
+    const { data, meta } = cursorPage(files, { nextCursor: level.cursor ?? null });
     return {
+      data,
       folders: level.folders
         .map((folder) => ({ name: lastSegment(folder), prefix: folder }))
         .filter((folder) => folder.name !== ''),
-      files: level.files
-        .map((entry) => ({ entry, name: entry.key.slice(prefix.length) }))
-        .filter(({ name }) => name !== '' && name !== FOLDER_KEEP_FILE)
-        .map(({ entry, name }) => ({
-          key: entry.key,
-          name,
-          sizeBytes: entry.size,
-          lastModified: entry.lastModified.toISOString(),
-        })),
-      ...(level.cursor ? { cursor: level.cursor } : {}),
+      meta,
     };
   }
 
@@ -619,7 +624,7 @@ export class MediaConsoleService {
   }
 
   async listUploads(filter: { disk?: string; prefix?: string }): Promise<UploadListResponse> {
-    if (!this.uploads || typeof this.uploads.list !== 'function') return { uploads: [] };
+    if (!this.uploads || typeof this.uploads.list !== 'function') return { data: [] };
     const tenant = await this.tenantMatch();
     const sessions = await this.uploads.list({
       ...(filter.disk ? { disk: filter.disk } : {}),
@@ -627,7 +632,7 @@ export class MediaConsoleService {
       ...(tenant ? { tenant } : {}),
     });
     const labels = await this.labelsFor(sessions);
-    return { uploads: sessions.map((session) => mapUpload(session, labels)) };
+    return { data: sessions.map((session) => mapUpload(session, labels)) };
   }
 
   async uploadDetail(id: string): Promise<UploadDetailResponse> {
@@ -660,14 +665,14 @@ export class MediaConsoleService {
   }
 
   async listCollections(): Promise<CollectionsResponse> {
-    if (!this.store || typeof this.store.aggregate !== 'function') return { collections: [] };
+    if (!this.store || typeof this.store.aggregate !== 'function') return { data: [] };
     const tenant = await this.tenantMatch();
     const buckets = await this.store.aggregate({
       groupBy: 'collection',
       sum: 'size',
       ...(tenant ? { tenant } : {}),
     });
-    return { collections: buckets };
+    return { data: buckets };
   }
 
   async listLibrary(filter: {
@@ -676,7 +681,7 @@ export class MediaConsoleService {
     cursor?: string;
     limit?: number;
   }): Promise<LibraryListResponse> {
-    if (!this.store || typeof this.store.list !== 'function') return { records: [] };
+    if (!this.store || typeof this.store.list !== 'function') return cursorPage([]);
     const tenant = await this.tenantMatch();
     const page = await this.store.list(
       {
@@ -690,10 +695,11 @@ export class MediaConsoleService {
       },
     );
     const labels = await this.labelsFor(page.records);
-    return {
-      records: page.records.map((record) => mapRecord(record, labels)),
-      ...(page.cursor ? { cursor: page.cursor } : {}),
-    };
+    // Keyset over (createdAt, id), forward-only.
+    return cursorPage(
+      page.records.map((record) => mapRecord(record, labels)),
+      { nextCursor: page.cursor ?? null },
+    );
   }
 
   async libraryDetail(id: string): Promise<LibraryDetailResponse> {

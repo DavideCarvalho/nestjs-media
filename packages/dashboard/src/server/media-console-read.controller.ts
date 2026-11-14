@@ -1,3 +1,4 @@
+import { MAX_FOLDER_LISTING_LIMIT } from '@dudousxd/nestjs-media-core';
 import {
   Controller,
   Get,
@@ -21,14 +22,29 @@ import type {
 } from '../client/types.js';
 import { downloadFilename } from './content-disposition.js';
 import { OpenToAuthorization } from './controller-decorators.js';
+import { ListQueryError, parseCursorParams, parseFilterParams } from './list-api.js';
 import { MediaConsoleService } from './media-console.service.js';
 import type { ObjectInsightsResponse } from './object-insights.js';
 
-/** Parse an optional numeric query param; undefined when absent or not a finite number. */
-function toLimit(value: string | undefined): number | undefined {
-  if (value === undefined) return undefined;
-  const parsed = Number(value);
-  return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : undefined;
+type ListQuery = Record<string, unknown>;
+
+/** Page size of the cursor-paged lists when the request sends no `first`. */
+const DEFAULT_PAGE_SIZE = 50;
+/** Largest `first` on `library`; bigger values are clamped. */
+const MAX_LIBRARY_PAGE_SIZE = 200;
+
+/**
+ * `after` + `first` for a forward-only list (object-store continuation tokens, the store's keyset):
+ * `before`/`last` paging backward is a 400, since no store here can serve it.
+ */
+function forwardPage(query: ListQuery, maxSize: number): { cursor?: string; limit: number } {
+  const { after, size, backward } = parseCursorParams(query, {
+    defaultSize: DEFAULT_PAGE_SIZE,
+    maxSize,
+  });
+  if (backward)
+    throw new ListQueryError('This list pages forward only: use "after", not "before".');
+  return { ...(after !== undefined ? { cursor: after } : {}), limit: size };
 }
 
 /**
@@ -46,18 +62,20 @@ export class MediaConsoleReadController {
     return this.service.listDisks();
   }
 
+  /**
+   * One folder level, cursor-paged (`after` + `first`, at most 1000). `prefix` is the folder being
+   * listed — part of the resource, like the disk, not a filter: it decides which `folders` come
+   * back. A cursor no previous page returned is a 400.
+   */
   @Get('disks/:disk/objects')
-  objects(
-    @Param('disk') disk: string,
-    @Query('prefix') prefix?: string,
-    @Query('cursor') cursor?: string,
-    @Query('limit') limit?: string,
-  ): Promise<ObjectListResponse> {
-    const limitValue = toLimit(limit);
+  objects(@Param('disk') disk: string, @Query() query: ListQuery): Promise<ObjectListResponse> {
+    const prefix = query.prefix;
+    if (prefix !== undefined && typeof prefix !== 'string') {
+      throw new ListQueryError('Invalid "prefix": expected a single folder path.');
+    }
     return this.service.listObjects(disk, {
       ...(prefix ? { prefix } : {}),
-      ...(cursor ? { cursor } : {}),
-      ...(limitValue !== undefined ? { limit: limitValue } : {}),
+      ...forwardPage(query, MAX_FOLDER_LISTING_LIMIT),
     });
   }
 
@@ -112,11 +130,17 @@ export class MediaConsoleReadController {
     });
   }
 
+  /** Upload sessions in progress, unpaged. Filters: `filter[disk]`, `filter[key][startsWith]`. */
   @Get('uploads')
-  uploads(
-    @Query('disk') disk?: string,
-    @Query('prefix') prefix?: string,
-  ): Promise<UploadListResponse> {
+  uploads(@Query() query: ListQuery): Promise<UploadListResponse> {
+    let disk: string | undefined;
+    let prefix: string | undefined;
+    for (const { field, value } of parseFilterParams(query, {
+      fields: { disk: ['eq'], key: ['startsWith'] },
+    })) {
+      if (field === 'disk') disk = value as string;
+      else prefix = value as string;
+    }
     return this.service.listUploads({
       ...(disk ? { disk } : {}),
       ...(prefix ? { prefix } : {}),
@@ -133,20 +157,19 @@ export class MediaConsoleReadController {
     return this.service.listCollections();
   }
 
+  /**
+   * Media records in the store's one order, `(createdAt, id)` ascending, cursor-paged (`after` +
+   * `first`, at most 200). Filters: `filter[collection]`, `filter[disk]`.
+   */
   @Get('library')
-  library(
-    @Query('collection') collection?: string,
-    @Query('disk') disk?: string,
-    @Query('cursor') cursor?: string,
-    @Query('limit') limit?: string,
-  ): Promise<LibraryListResponse> {
-    const limitValue = toLimit(limit);
-    return this.service.listLibrary({
-      ...(collection ? { collection } : {}),
-      ...(disk ? { disk } : {}),
-      ...(cursor ? { cursor } : {}),
-      ...(limitValue !== undefined ? { limit: limitValue } : {}),
-    });
+  library(@Query() query: ListQuery): Promise<LibraryListResponse> {
+    const filter: { collection?: string; disk?: string } = {};
+    for (const { field, value } of parseFilterParams(query, {
+      fields: { collection: ['eq'], disk: ['eq'] },
+    })) {
+      filter[field] = value as string;
+    }
+    return this.service.listLibrary({ ...filter, ...forwardPage(query, MAX_LIBRARY_PAGE_SIZE) });
   }
 
   @Get('library/:id')

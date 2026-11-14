@@ -56,7 +56,7 @@ describe('MediaDashboardModule mount (bootstrap smoke)', () => {
       const disks = await fetch(`${url}/api/media/console/disks`);
       expect(disks.status).toBe(200);
       const disksBody = await disks.json();
-      expect(disksBody.disks).toHaveLength(2);
+      expect(disksBody.data).toHaveLength(2);
 
       const gated = await fetch(`${url}/api/media/console/disks/primary/object?key=x`, {
         method: 'DELETE',

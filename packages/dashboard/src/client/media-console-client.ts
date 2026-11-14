@@ -122,9 +122,11 @@ async function sendRaw(path: string, body: Blob): Promise<void> {
 export const mediaConsoleClient = {
   topology: (): Promise<Topology> => getJson('/topology'),
   disks: (): Promise<DiskListResponse> => getJson('/disks'),
+  /** One folder level of a disk. `prefix` is the folder; page with `after` (a previous page's
+   *  `meta.nextCursor`) and `first` (page size). */
   objects: (
     disk: string,
-    params: { prefix?: string; cursor?: string; limit?: number } = {},
+    params: { prefix?: string; after?: string; first?: number } = {},
   ): Promise<ObjectListResponse> =>
     getJson(withQuery(`/disks/${encodeURIComponent(disk)}/objects`, params)),
   object: (disk: string, key: string): Promise<ObjectDetailResponse> =>
@@ -218,14 +220,30 @@ export const mediaConsoleClient = {
     await ensureOk(response);
     return response.arrayBuffer();
   },
+  /** Upload sessions in progress; `disk` and `prefix` (key prefix) filter them. */
   uploads: (params: { disk?: string; prefix?: string } = {}): Promise<UploadListResponse> =>
-    getJson(withQuery('/uploads', params)),
+    getJson(
+      withQuery('/uploads', {
+        'filter[disk]': params.disk,
+        'filter[key][startsWith]': params.prefix,
+      }),
+    ),
   upload: (id: string): Promise<UploadDetailResponse> =>
     getJson(`/uploads/${encodeURIComponent(id)}`),
   collections: (): Promise<CollectionsResponse> => getJson('/library/collections'),
+  /** Media records; `collection` and `disk` filter them. Page with `after` (a previous page's
+   *  `meta.nextCursor`) and `first` (page size). */
   library: (
-    params: { collection?: string; disk?: string; cursor?: string; limit?: number } = {},
-  ): Promise<LibraryListResponse> => getJson(withQuery('/library', params)),
+    params: { collection?: string; disk?: string; after?: string; first?: number } = {},
+  ): Promise<LibraryListResponse> =>
+    getJson(
+      withQuery('/library', {
+        'filter[collection]': params.collection,
+        'filter[disk]': params.disk,
+        after: params.after,
+        first: params.first,
+      }),
+    ),
   libraryRecord: (id: string): Promise<LibraryDetailResponse> =>
     getJson(`/library/${encodeURIComponent(id)}`),
   deleteObject: (disk: string, key: string): Promise<void> =>

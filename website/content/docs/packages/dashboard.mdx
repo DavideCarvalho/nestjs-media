@@ -391,26 +391,26 @@ export class HousekeepingService {
   constructor(private readonly console: MediaConsoleService) {}
 
   async report() {
-    const { disks } = this.console.listDisks();
+    const { data: disks } = await this.console.listDisks();
     const topology = this.console.topology(); // { hasStore, hasUploads, disks, actions }
 
     for (const disk of disks) {
-      const { folders, files, cursor } = await this.console.listObjects(disk.name, { prefix: '' });
-      // …walk folders, page with `cursor`…
+      const { data: files, folders, meta } = await this.console.listObjects(disk.name, { prefix: '' });
+      // …walk folders, page with `{ cursor: meta.nextCursor }`…
     }
 
     // Library (needs a MediaStore that implements the query SPI — see Custom store)
-    const { records } = await this.console.listLibrary({ collection: 'gallery', limit: 100 });
+    const { data: records, meta } = await this.console.listLibrary({ collection: 'gallery', limit: 100 });
   }
 }
 ```
 
-It resolves `Storage` (from `StorageModule`), the multipart side-cars, the `MediaStore`, and the upload-session store as **optional** dependencies, so a host missing any of them still boots — each method degrades to an empty shape (`{ disks: [] }`, `{ records: [] }`, …) instead of throwing. The full surface:
+It resolves `Storage` (from `StorageModule`), the multipart side-cars, the `MediaStore`, and the upload-session store as **optional** dependencies, so a host missing any of them still boots — each method degrades to an empty shape (`{ data: [] }`, …) instead of throwing. The full surface:
 
 | Method | Returns | Notes |
 |---|---|---|
 | `listDisks()` | `Promise<DiskListResponse>` | Registered disks + each one's capabilities, computed by core's `diskCapabilities()` from the disk and its side-car. |
-| `listObjects(disk, { prefix, cursor, limit })` | `ObjectListResponse` | One level of a disk — `{ folders, files, cursor }`. See [Folders](/docs/concepts/folders). |
+| `listObjects(disk, { prefix, cursor, limit })` | `ObjectListResponse` | One level of a disk — `{ data: files, folders, meta }`. See [Folders](/docs/concepts/folders). |
 | `objectDetail(disk, key)` | `ObjectDetailResponse` | Size, content type, and a URL: the public one, else a signed one, else the console's `/raw` route. |
 | `serveObject(disk, key, { req, res, disposition?, filename? })` | `StreamableFile \| undefined` | The object as the response, through `serveFile()`: `Range` → 206, `If-None-Match` → 304, past the end → 416, missing → 404. |
 | `putObject(disk, key, body, contentType?, contentLength?)` | `void` | Streams an object onto the disk (no size cap, nothing buffered). **Action.** |
@@ -420,7 +420,7 @@ It resolves `Storage` (from `StorageModule`), the multipart side-cars, the `Medi
 | `listUploads({ disk?, prefix? })` | `UploadListResponse` | In-progress resumable sessions. |
 | `uploadDetail(id)` / `abortUpload(id)` | `UploadDetailResponse` / `void` | Inspect / cancel a session (`abort` is an **action**). |
 | `listCollections()` | `CollectionsResponse` | Per-collection counts + byte totals (uses `MediaStore.aggregate`). |
-| `listLibrary({ collection?, disk?, cursor?, limit? })` | `LibraryListResponse` | Paginated media records (uses `MediaStore.list`). |
+| `listLibrary({ collection?, disk?, cursor?, limit? })` | `LibraryListResponse` | Paginated media records, `{ data, meta }` (uses `MediaStore.list`). |
 | `libraryDetail(id)` / `deleteLibraryRecord(id)` | `LibraryDetailResponse` / `void` | One record + variant URLs / delete (`delete` is an **action**). |
 | `search(q, limit, page)` | `{ title, subtitle?, href }[]` | Files matching `q`, as the console search shows them. See [Searching every console](#searching-every-console). |
 | `topology()` | `Topology` | What's wired: `{ hasStore, hasUploads, disks, actions }`. |
@@ -435,25 +435,27 @@ The SPA talks to the service over a small JSON API mounted at `apiBasePath`. It'
 
 The response shapes are exported as types — see [the client subpath](#the-typed-browser-client-client-subpath).
 
+Lists follow the Aviary list API. Rows are always under `data`. A paged list adds the cursor envelope `meta: { nextCursor, prevCursor, hasNext, hasPrev }`: pass `meta.nextCursor` back as `after`, and set the page size with `first`. These lists page forward only, so `before`/`last` answer 400. Filters are `filter[field]=value` or `filter[field][op]=value`; an unknown field or operator answers 400.
+
 ### Read endpoints
 
 | Method + path | Query | Response |
 |---|---|---|
-| `GET disks` | — | `DiskListResponse` |
-| `GET disks/:disk/objects` | `prefix?`, `cursor?`, `limit?` | `ObjectListResponse` |
+| `GET disks` | — | `DiskListResponse` — `{ data }` |
+| `GET disks/:disk/objects` | `prefix?`, `after?`, `first?` (default 50, max 1000) | `ObjectListResponse` — `{ data: files, folders, meta }` |
 | `GET disks/:disk/object` | `key` | `ObjectDetailResponse` |
 | `GET disks/:disk/object/raw` | `key` | raw bytes; `inline` for types that can't run script (images, PDF, audio, video, plain text), else `attachment` |
 | `GET disks/:disk/object/download` | `key` | raw bytes, `Content-Disposition: attachment` |
 | `GET disks/:disk/object/insights` | `key` | `ObjectInsightsResponse` |
-| `GET uploads` | `disk?`, `prefix?` | `UploadListResponse` |
+| `GET uploads` | `filter[disk]?`, `filter[key][startsWith]?` | `UploadListResponse` — `{ data }` |
 | `GET uploads/:id` | — | `UploadDetailResponse` |
-| `GET library/collections` | — | `CollectionsResponse` |
-| `GET library` | `collection?`, `disk?`, `cursor?`, `limit?` | `LibraryListResponse` |
+| `GET library/collections` | — | `CollectionsResponse` — `{ data }` |
+| `GET library` | `filter[collection]?`, `filter[disk]?`, `after?`, `first?` (default 50, max 200) | `LibraryListResponse` — `{ data, meta }`, oldest first |
 | `GET library/:id` | — | `LibraryDetailResponse` |
 | `GET topology` | — | `Topology` |
 | `GET consoles` | — | the other Aviary consoles this viewer may open (see [Switching between consoles](#switching-between-consoles)) |
 
-A `cursor` on `disks/:disk/objects` that is not one a previous page returned answers 400 (`InvalidListingCursorError`), not 500.
+`prefix` on `disks/:disk/objects` is the folder being listed, part of the resource like the disk, not a filter: it decides which `folders` come back next to the files. An `after` on `disks/:disk/objects` that is not a cursor a previous page returned answers 400 (`InvalidListingCursorError`), not 500.
 
 ### Actions
 
@@ -623,8 +625,12 @@ import {
   type ObjectListResponse,
 } from '@dudousxd/nestjs-media-dashboard/client';
 
-const { disks } = await mediaConsoleClient.disks();
+const { data: disks } = await mediaConsoleClient.disks();
 const page: ObjectListResponse = await mediaConsoleClient.objects('s3', { prefix: 'photos/' });
+const more = await mediaConsoleClient.objects('s3', {
+  prefix: 'photos/',
+  after: page.meta.nextCursor ?? undefined,
+});
 const { record, variants } = await mediaConsoleClient.libraryRecord('abc123');
 
 // Actions (need `actions: true` on the server)
