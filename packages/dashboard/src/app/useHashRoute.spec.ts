@@ -27,6 +27,14 @@ describe('parseHash', () => {
     expect(route.preview).toBe(key);
   });
 
+  it('falls back to the tab on a malformed escape instead of throwing', () => {
+    expect(parseHash('#/disks/%E0%A4%A')).toEqual({ tab: 'disks' });
+    expect(parseHash('#/uploads/%')).toEqual({ tab: 'uploads' });
+    expect(parseHash('#/library/%zz')).toEqual({ tab: 'library' });
+    // A key with a literal `%` (already decoded by URLSearchParams) stays as it is.
+    expect(parseHash('#/disks/d?preview=50%25off.png').preview).toBe('50%off.png');
+  });
+
   it('ignores a preview param when no disk segment is present', () => {
     expect(parseHash('#/disks?preview=rag/a/b.md')).toEqual({ tab: 'disks' });
   });

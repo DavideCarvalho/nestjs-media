@@ -12,6 +12,7 @@ import {
   type AviaryConsoleEntry,
   type AviaryConsoleRegistry,
   consoleSwitcherConfig,
+  isSameOriginPath,
   listVisibleConsoles,
   readAviaryConsoles,
   registerAviaryConsole,
@@ -94,6 +95,24 @@ describe('registerAviaryConsole', () => {
   });
 });
 
+describe('isSameOriginPath', () => {
+  it('accepts a plain absolute path, rejects other origins, backslashes and control characters', () => {
+    expect(isSameOriginPath('/media#/library/r1')).toBe(true);
+    for (const bad of [
+      '//evil.test',
+      'https://evil.test',
+      '/\\evil.test',
+      '/a\u0007b',
+      '/a\nb',
+      '/a\u007fb',
+      'x',
+      1,
+    ]) {
+      expect(isSameOriginPath(bad)).toBe(false);
+    }
+  });
+});
+
 describe('consoleSwitcherConfig', () => {
   it('is absent when this console is alone or not registered, and counts the others', () => {
     expect(consoleSwitcherConfig('media', '/a/consoles')).toBeUndefined();
@@ -171,6 +190,8 @@ describe('listVisibleConsoles', () => {
       registry(
         entry({ id: 'odd', icon: 'rocket' as never }),
         entry({ id: 'evil', path: '//evil.test' }),
+        entry({ id: 'slash', path: '/\\evil.test' }),
+        entry({ id: 'ctl', path: '/ctl\u0007x' }),
       ),
       'media',
       context,
