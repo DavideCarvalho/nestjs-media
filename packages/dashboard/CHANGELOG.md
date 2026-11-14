@@ -1,5 +1,11 @@
 # @dudousxd/nestjs-media-dashboard
 
+## 0.22.1
+
+### Patch Changes
+
+- [#215](https://github.com/DavideCarvalho/nestjs-media/pull/215) [`26dfc1b`](https://github.com/DavideCarvalho/nestjs-media/commit/26dfc1bf97fd68c63798f1a6a031ed1149338f6b) Thanks [@DavideCarvalho](https://github.com/DavideCarvalho)! - `anyAuthorize` keeps a `redirectTo` from any form. Before, when an earlier form answered `unauthenticated` without one (a guest with no token, in `anyAuthorize(authorizeByToken(...), SessionAuthorizer)`), the console answered a bare 401 and ignored a later form's redirect to the sign-in page.
+
 ## 0.22.0
 
 ### Minor Changes
