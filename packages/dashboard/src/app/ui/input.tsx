@@ -10,11 +10,11 @@ import { cn } from '../lib/cn.js';
  * turn a table header into a wall of boxes.
  */
 export const inputVariants = cva(
-  'w-full bg-transparent text-zinc-300 placeholder:text-zinc-700 focus:border-accent/40 focus:outline-none disabled:opacity-50',
+  'w-full bg-transparent text-fg-2 placeholder:text-faint focus:border-brand-border focus:outline-none disabled:opacity-50',
   {
     variants: {
       variant: {
-        field: 'mono rounded-md border border-border bg-black/30 px-2 py-1.5 text-xs',
+        field: 'mono rounded-md border border-border bg-sunken/30 px-2 py-1.5 text-xs',
         inline:
           'mono rounded border border-border px-1 py-0.5 text-[10px] font-normal normal-case tracking-normal',
       },

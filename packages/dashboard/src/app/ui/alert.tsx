@@ -14,7 +14,7 @@ import { cn } from '../lib/cn.js';
 export const alertVariants = cva('', {
   variants: {
     variant: {
-      muted: 'px-1 py-6 text-sm text-zinc-600',
+      muted: 'px-1 py-6 text-sm text-faint',
       warn: 'mono rounded-md border border-warn/30 bg-warn/10 px-3 py-1.5 text-[11px] text-warn',
       error: 'mono rounded-md border border-bad/30 bg-bad/10 px-3 py-1.5 text-[11px] text-bad',
     },

@@ -11,7 +11,7 @@ import { cn } from '../lib/cn.js';
  * id, scroll lock, an inert background, and Esc / outside-press dismissal — with `initialFocus` as
  * a first-class prop rather than a `useEffect` race against the browser.
  *
- * Everything here is styling over Base UI parts; the tokens come from `tailwind.config.ts`.
+ * Everything here is styling over Base UI parts; the tokens come from `../../aviary-kit/tokens.css`.
  */
 
 export const DialogRoot = BaseDialog.Root;
@@ -50,7 +50,7 @@ export const DialogTitle = forwardRef<HTMLHeadingElement, BaseDialog.Title.Props
   ({ className, ...props }, ref) => (
     <BaseDialog.Title
       ref={ref}
-      className={cn('mono text-xs font-normal uppercase tracking-wider text-zinc-300', className)}
+      className={cn('mono text-xs font-normal uppercase tracking-wider text-fg-2', className)}
       {...props}
     />
   ),
@@ -59,11 +59,7 @@ DialogTitle.displayName = 'DialogTitle';
 
 export const DialogDescription = forwardRef<HTMLParagraphElement, BaseDialog.Description.Props>(
   ({ className, ...props }, ref) => (
-    <BaseDialog.Description
-      ref={ref}
-      className={cn('text-sm text-zinc-400', className)}
-      {...props}
-    />
+    <BaseDialog.Description ref={ref} className={cn('text-sm text-dim', className)} {...props} />
   ),
 );
 DialogDescription.displayName = 'DialogDescription';

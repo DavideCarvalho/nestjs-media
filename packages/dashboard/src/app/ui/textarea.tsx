@@ -12,7 +12,7 @@ import { cn } from '../lib/cn.js';
  * would let it push out of the preview's flex column.
  */
 export const textareaVariants = cva(
-  'w-full rounded-md border border-border bg-black/30 p-2 text-zinc-300 placeholder:text-zinc-700 focus:border-accent/40 focus:outline-none disabled:opacity-50',
+  'w-full rounded-md border border-border bg-sunken/30 p-2 text-fg-2 placeholder:text-faint focus:border-brand-border focus:outline-none disabled:opacity-50',
   {
     variants: {
       variant: {

@@ -1,7 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import DOMPurify from 'dompurify';
 import { marked } from 'marked';
-import { useMemo, useState } from 'react';
+import { type JSX, useMemo, useState } from 'react';
 import { mediaConsoleClient } from '../../client/media-console-client.js';
 import { Alert, Button, Notice, formatBytes } from '../ui.js';
 import { FallbackCard, SAMPLE_TEXT_BYTES, readErrorMessage } from './shared.js';
@@ -50,28 +50,28 @@ export function renderMarkdown(source: string): string {
  * Tailwind scans this file as text, so the classes are still found.
  */
 const PROSE_CLASSES = [
-  'min-h-0 flex-1 overflow-auto rounded-md border border-border bg-black/30 p-4 text-sm leading-relaxed text-zinc-300',
+  'min-h-0 flex-1 overflow-auto rounded-md border border-border bg-sunken/30 p-4 text-sm leading-relaxed text-fg-2',
   // The first and last block would otherwise push their own margin against the padding, which reads
   // as a lopsided box.
   '[&>*:first-child]:mt-0 [&>*:last-child]:mb-0',
-  '[&_h1]:mt-6 [&_h1]:mb-3 [&_h1]:border-border [&_h1]:border-b [&_h1]:pb-2 [&_h1]:font-semibold [&_h1]:text-xl [&_h1]:text-zinc-100',
-  '[&_h2]:mt-6 [&_h2]:mb-2 [&_h2]:border-border/60 [&_h2]:border-b [&_h2]:pb-1 [&_h2]:font-semibold [&_h2]:text-lg [&_h2]:text-zinc-100',
-  '[&_h3]:mt-5 [&_h3]:mb-2 [&_h3]:font-semibold [&_h3]:text-base [&_h3]:text-zinc-100',
-  '[&_h4]:mt-4 [&_h4]:mb-1 [&_h4]:font-semibold [&_h4]:text-sm [&_h4]:text-zinc-200',
-  '[&_h5]:mt-4 [&_h5]:mb-1 [&_h5]:font-semibold [&_h5]:text-xs [&_h5]:text-zinc-200 [&_h6]:mt-4 [&_h6]:mb-1 [&_h6]:font-semibold [&_h6]:text-xs [&_h6]:text-zinc-400',
+  '[&_h1]:mt-6 [&_h1]:mb-3 [&_h1]:border-border [&_h1]:border-b [&_h1]:pb-2 [&_h1]:font-semibold [&_h1]:text-xl [&_h1]:text-fg',
+  '[&_h2]:mt-6 [&_h2]:mb-2 [&_h2]:border-border/60 [&_h2]:border-b [&_h2]:pb-1 [&_h2]:font-semibold [&_h2]:text-lg [&_h2]:text-fg',
+  '[&_h3]:mt-5 [&_h3]:mb-2 [&_h3]:font-semibold [&_h3]:text-base [&_h3]:text-fg',
+  '[&_h4]:mt-4 [&_h4]:mb-1 [&_h4]:font-semibold [&_h4]:text-sm [&_h4]:text-fg',
+  '[&_h5]:mt-4 [&_h5]:mb-1 [&_h5]:font-semibold [&_h5]:text-xs [&_h5]:text-fg [&_h6]:mt-4 [&_h6]:mb-1 [&_h6]:font-semibold [&_h6]:text-xs [&_h6]:text-dim',
   '[&_p]:my-3',
   '[&_ul]:my-3 [&_ul]:list-disc [&_ul]:pl-6 [&_ol]:my-3 [&_ol]:list-decimal [&_ol]:pl-6 [&_li]:my-1',
   // Nested lists sit inside an <li> that already spaced itself; doubling it looks like a gap.
   '[&_li_ul]:my-1 [&_li_ol]:my-1',
-  '[&_a]:text-accent [&_a]:underline [&_a]:underline-offset-2 [&_a:hover]:text-accent/80',
-  '[&_strong]:font-semibold [&_strong]:text-zinc-100 [&_em]:italic [&_del]:text-zinc-500 [&_del]:line-through',
-  '[&_code]:rounded [&_code]:bg-zinc-800/70 [&_code]:px-1 [&_code]:py-0.5 [&_code]:font-mono [&_code]:text-[12px] [&_code]:text-zinc-200',
-  '[&_pre]:my-3 [&_pre]:overflow-x-auto [&_pre]:rounded-md [&_pre]:border [&_pre]:border-border [&_pre]:bg-black/40 [&_pre]:p-3 [&_pre]:font-mono [&_pre]:text-xs',
+  '[&_a]:text-brand [&_a]:underline [&_a]:underline-offset-2 [&_a:hover]:text-brand/80',
+  '[&_strong]:font-semibold [&_strong]:text-fg [&_em]:italic [&_del]:text-dim [&_del]:line-through',
+  '[&_code]:rounded [&_code]:bg-hover [&_code]:px-1 [&_code]:py-0.5 [&_code]:font-mono [&_code]:text-[12px] [&_code]:text-fg',
+  '[&_pre]:my-3 [&_pre]:overflow-x-auto [&_pre]:rounded-md [&_pre]:border [&_pre]:border-border [&_pre]:bg-sunken/40 [&_pre]:p-3 [&_pre]:font-mono [&_pre]:text-xs',
   // A fenced block is already a box; the inline-code chip inside it would draw a second one.
-  '[&_pre_code]:rounded-none [&_pre_code]:bg-transparent [&_pre_code]:p-0 [&_pre_code]:text-zinc-300',
-  '[&_blockquote]:my-3 [&_blockquote]:border-accent/40 [&_blockquote]:border-l-2 [&_blockquote]:pl-3 [&_blockquote]:text-zinc-400 [&_blockquote]:italic',
+  '[&_pre_code]:rounded-none [&_pre_code]:bg-transparent [&_pre_code]:p-0 [&_pre_code]:text-fg-2',
+  '[&_blockquote]:my-3 [&_blockquote]:border-brand-border [&_blockquote]:border-l-2 [&_blockquote]:pl-3 [&_blockquote]:text-dim [&_blockquote]:italic',
   '[&_table]:my-3 [&_table]:w-full [&_table]:border-collapse [&_table]:text-xs',
-  '[&_th]:border [&_th]:border-border [&_th]:bg-zinc-900 [&_th]:px-2 [&_th]:py-1 [&_th]:text-left [&_th]:font-semibold [&_th]:text-zinc-200',
+  '[&_th]:border [&_th]:border-border [&_th]:bg-panel-2 [&_th]:px-2 [&_th]:py-1 [&_th]:text-left [&_th]:font-semibold [&_th]:text-fg',
   '[&_td]:border [&_td]:border-border [&_td]:px-2 [&_td]:py-1 [&_td]:align-top',
   '[&_hr]:my-6 [&_hr]:border-border',
   // Relative image targets point nowhere from here, so most of these render as their alt text; cap
@@ -110,7 +110,7 @@ function MarkdownBody({ source }: { source: string }): JSX.Element {
         </Button>
       </div>
       {view === 'source' ? (
-        <pre className="mono min-h-0 flex-1 overflow-auto whitespace-pre-wrap break-words rounded-md border border-border bg-black/30 p-3 text-xs text-zinc-300">
+        <pre className="mono min-h-0 flex-1 overflow-auto whitespace-pre-wrap break-words rounded-md border border-border bg-sunken/30 p-3 text-xs text-fg-2">
           {source}
         </pre>
       ) : (

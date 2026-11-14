@@ -42,6 +42,8 @@ interface MediaDashboardOptions {
   objectInsights?: ObjectInsightProvider[];  // host context shown in the preview
   objectUrls?: 'auto' | 'proxy';             // presigned store URLs, or same-origin — default 'auto'
   devTools?: boolean;                         // MCP tools on /mcp/aviary — default: on when routes are mounted
+  viewer?: (req) => { label: string; email?: string; role?: string } | null | undefined; // sync or async
+  signOut?: string | { href: string } | { action: string; csrfToken?: (req) => string | undefined } | false;
 }
 ```
 
@@ -57,6 +59,8 @@ interface MediaDashboardOptions {
 | `objectInsights` | Annotate an object in the preview with what *your app* knows about it — see [Object insights](#object-insights). |
 | `objectUrls` | Whether an object's reported `url` is presigned straight to the store or routed through this server — see [Reaching an object's bytes](#reaching-an-objects-bytes). |
 | `devTools` | Serve the console's reads (and, with `actions`, two of its actions) as [MCP tools](#mcp-tools). Default: on when `routes` is not `false`. |
+| `viewer` | Who the sidebar footer says is signed in: `(request) => ({ label, email?, role? })`, sync or async. Default: `request.user`, read structurally. See [Signed-in user and sign-out](#signed-in-user-and-sign-out). |
+| `signOut` | The sidebar footer's sign-out: `'/logout'` \| `{ href }` \| `{ action, csrfToken? }` \| `false`. Default: the `account.signOut` an account console announced, else none. |
 
 `MediaDashboardModule.forRootAsync(options)` mirrors this, building `objectInsights` through an injected `useObjectInsights(...deps)` factory (`inject` lists the deps). `authorize`, `decorators`, `routes`, `actions` and the mount paths stay static fields on the async options object, since they shape the routes when the module is built.
 
@@ -538,8 +542,9 @@ mounted.
 
 ### Searching every console
 
-Press <kbd>Ctrl</kbd>/<kbd>⌘</kbd>+<kbd>K</kbd>, use the **Search** button, or pick **Search all
-consoles** in the brand menu. One query searches:
+Press <kbd>Ctrl</kbd>/<kbd>⌘</kbd>+<kbd>K</kbd>, use the **Search** button in the topbar, or pick
+**Search all consoles** in the brand menu. The console's own pages are listed first. One query
+searches:
 
 - this console's files:
   - a library record by its exact id;
@@ -562,6 +567,8 @@ A hit opens the record or the file preview directly. The same links work by hand
 `/media#/library/<id>` and `/media#/disks/<disk>?prefix=<folder>&preview=<key>`.
 
 The endpoint is `GET <apiBasePath>/consoles/search?q=`, behind the console's own `authorize`.
+`&console=<id>` answers for that one console only (still behind its own `authorize`): the palette
+asks this console and each console in the switcher on its own, and shows each group as it answers.
 
 ### Telling a probe from a visit
 
@@ -576,6 +583,34 @@ authorize: (ctx) => {
   return req.user?.isAdmin === true;
 },
 ```
+
+## Signed-in user and sign-out
+
+The console runs on the shared Aviary console kit: a sidebar with the console switcher, the pages
+under LIBRARY (Library, Collections) and TRANSFERS (Uploads, Disks), and a footer with who is
+signed in, a light/dark toggle and a sign-out. Below 768px the sidebar is a drawer. The footer's
+user row and sign-out come from the server, in the page's config block; neither is required.
+
+```ts
+MediaDashboardModule.forRoot({
+  authorize: ConsoleAccess,
+  decorators: [UseGuards(AuthenticationGuard)],
+  // Default: request.user, read structurally (fullName → name → email; role or the first of roles).
+  viewer: (req) => ({ label: req.user.displayName, email: req.user.email, role: 'admin' }),
+  // A POST form to /logout, with the token as `_csrf`:
+  signOut: { action: '/logout', csrfToken: (req) => req.csrfToken() },
+});
+```
+
+- **`viewer`**: `(request) => ({ label, email?, role? })`, sync or async. `null`, `undefined` or a
+  throw shows no user row. Omitted, `request.user` is read structurally: whatever your guards
+  (`decorators`) already put there. Reading it never triggers an authentication.
+- **`signOut`**: `'/logout'` (a POST form, with `_csrf` when the request has `req.csrfToken()`),
+  `{ href: '/logout' }` (a link), `{ action, csrfToken: (request) => token }` (a POST form with your
+  token), or `false` (none). Omitted, the console uses the sign-out an account console announced on
+  the Aviary consoles registry (`account.signOut`), else shows none.
+
+Only same-origin paths (`/x`) ever reach the page. Both options are also on `forRootAsync`.
 
 ## The typed browser client (`/client` subpath)
 

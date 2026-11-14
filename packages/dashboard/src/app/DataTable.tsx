@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { type JSX, useEffect, useMemo, useRef, useState } from 'react';
 import { Button } from './ui.js';
 
 /** Fixed body-row height (px). Windowing math and the spacer rows depend on every row being exactly
@@ -103,12 +103,12 @@ export function DataTable({ header, body }: { header: string[]; body: string[][]
     <div className="flex min-h-0 flex-1 flex-col gap-2">
       <div className="flex items-center gap-2">
         <div className="flex flex-1 items-center gap-1.5 rounded-md border border-border px-2">
-          <span className="text-zinc-600">⌕</span>
+          <span className="text-faint">⌕</span>
           <input
             value={globalFilter}
             onChange={(event) => setGlobalFilter(event.target.value)}
             placeholder="filter all columns…"
-            className="mono w-full bg-transparent py-1.5 text-xs text-zinc-200 placeholder:text-zinc-600 focus:outline-none"
+            className="mono w-full bg-transparent py-1.5 text-xs text-fg placeholder:text-faint focus:outline-none"
           />
         </div>
         {hasControls && (
@@ -116,7 +116,7 @@ export function DataTable({ header, body }: { header: string[]; body: string[][]
             reset
           </Button>
         )}
-        <span className="mono tnum shrink-0 text-[10px] text-zinc-600">
+        <span className="mono tnum shrink-0 text-[10px] text-faint">
           {total}
           {isFiltered ? ` / ${body.length}` : ''} {body.length === 1 ? 'row' : 'rows'}
         </span>
@@ -137,10 +137,10 @@ export function DataTable({ header, body }: { header: string[]; body: string[][]
                     <button
                       type="button"
                       onClick={() => toggleSort(index)}
-                      className="mono flex max-w-full items-center gap-1 whitespace-nowrap uppercase tracking-wider text-zinc-500 transition-colors hover:text-zinc-200"
+                      className="mono flex max-w-full items-center gap-1 whitespace-nowrap uppercase tracking-wider text-dim transition-colors hover:text-fg"
                     >
                       <span className="truncate">{cell}</span>
-                      <span className="shrink-0 text-[9px] text-zinc-600">
+                      <span className="shrink-0 text-[9px] text-faint">
                         {active ? (sort?.dir === 'asc' ? '▲' : '▼') : '↕'}
                       </span>
                     </button>
@@ -153,7 +153,7 @@ export function DataTable({ header, body }: { header: string[]; body: string[][]
                         }))
                       }
                       placeholder="filter"
-                      className="mono mt-1 w-full min-w-[5rem] rounded border border-border bg-transparent px-1 py-0.5 text-[10px] font-normal normal-case tracking-normal text-zinc-300 placeholder:text-zinc-700 focus:border-accent/40 focus:outline-none"
+                      className="mono mt-1 w-full min-w-[5rem] rounded border border-border bg-transparent px-1 py-0.5 text-[10px] font-normal normal-case tracking-normal text-fg-2 placeholder:text-faint focus:border-brand-border focus:outline-none"
                     />
                   </th>
                 );
@@ -171,11 +171,11 @@ export function DataTable({ header, body }: { header: string[]; body: string[][]
                 // biome-ignore lint/suspicious/noArrayIndexKey: rows have no stable id; the windowed index is unique per render
                 key={startIndex + rowIndex}
                 style={{ height: ROW_HEIGHT }}
-                className="hover:bg-zinc-900/40"
+                className="hover:bg-hover"
               >
                 {header.map((_, cellIndex) => (
                   // biome-ignore lint/suspicious/noArrayIndexKey: table cells have no stable id
-                  <td key={cellIndex} className="mono whitespace-nowrap px-3 text-zinc-300">
+                  <td key={cellIndex} className="mono whitespace-nowrap px-3 text-fg-2">
                     {cells[cellIndex] ?? ''}
                   </td>
                 ))}

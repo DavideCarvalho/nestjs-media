@@ -4,7 +4,7 @@ import { cn } from '../lib/cn.js';
 
 /**
  * The console's button, vendored shadcn-style: a `cva` recipe over Base UI's `useRender`, written
- * against the Aviary tokens (see `tailwind.config.ts`) rather than shadcn's default palette.
+ * against the Aviary tokens (see `aviary-kit/tokens.css`) rather than shadcn's default palette.
  *
  * The `render` prop is why this is worth having over the hand-rolled version it replaced — the
  * console has several links that are visually buttons ("Open ↗", "Open original ↗") and were each
@@ -13,7 +13,7 @@ import { cn } from '../lib/cn.js';
  * also how a Base UI part (`Dialog.Close`) borrows this button's styling without nesting two
  * `<button>` elements.
  *
- * Tone names are semantic, not hue names: `accent` follows `--accent` wherever the brand call
+ * Tone names are semantic, not hue names: `accent` follows `--aviary-accent` wherever the brand call
  * lands, and `destructive` follows `--bad`.
  */
 export const buttonVariants = cva(
@@ -24,15 +24,15 @@ export const buttonVariants = cva(
       // so an `enabled:` variant silently drops every hover state when `render` makes this an <a>.
       // A disabled button cannot be hovered anyway: the base sets `disabled:pointer-events-none`.
       tone: {
-        neutral: 'border-border bg-zinc-800/40 text-zinc-300 hover:bg-zinc-800',
-        accent: 'border-accent/30 bg-accent/10 text-accent hover:bg-accent/20',
+        neutral: 'border-border bg-panel-2 text-fg-2 hover:bg-panel-3',
+        accent: 'border-brand-border bg-brand-soft text-brand hover:bg-primary/20',
         destructive: 'border-bad/30 bg-bad/10 text-bad hover:bg-bad/20',
         /** Bordered but unfilled: secondary chrome (close, sign out, reset). */
-        ghost: 'border-border bg-transparent text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100',
+        ghost: 'border-border bg-transparent text-dim hover:bg-panel-3 hover:text-fg',
         /** Chromeless: text only until hovered. For tabs and chips that are not the current one. */
-        quiet: 'border-transparent text-zinc-500 hover:text-zinc-300',
+        quiet: 'border-transparent text-dim hover:text-fg-2',
         /** The `quiet` pair: the tab/chip you are currently on. */
-        selected: 'border-zinc-600 bg-zinc-900 text-zinc-100',
+        selected: 'border-line-strong bg-panel-2 text-fg',
       },
       size: {
         xs: 'px-2 py-1 text-[11px]',

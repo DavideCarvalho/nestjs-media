@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 
-export type Tab = 'disks' | 'uploads' | 'library';
+export type Tab = 'disks' | 'uploads' | 'library' | 'collections';
 
 export interface Route {
   tab: Tab;
@@ -18,10 +18,20 @@ export interface Route {
   collection?: string;
 }
 
-const TABS: readonly Tab[] = ['disks', 'uploads', 'library'];
+const TABS: readonly Tab[] = ['disks', 'uploads', 'library', 'collections'];
 
 function isTab(value: string): value is Tab {
   return (TABS as readonly string[]).includes(value);
+}
+
+/** `decodeURIComponent`, or undefined on a malformed escape (a bad pasted link must not blank the
+ *  console). */
+function decode(segment: string): string | undefined {
+  try {
+    return decodeURIComponent(segment);
+  } catch {
+    return undefined;
+  }
 }
 
 export function parseHash(hash: string): Route {
@@ -36,14 +46,16 @@ export function parseHash(hash: string): Route {
   const prefix = params.get('prefix');
   const preview = params.get('preview');
   const collection = params.get('collection');
-  if (tab === 'disks' && segments[1]) {
-    route.disk = decodeURIComponent(segments[1]);
+  // A malformed escape in a path segment drops that drill-in and falls back to the tab itself.
+  const id = segments[1] ? decode(segments[1]) : undefined;
+  if (tab === 'disks' && id) {
+    route.disk = id;
     if (prefix) route.prefix = prefix;
-    if (preview) route.preview = decodeURIComponent(preview);
+    if (preview) route.preview = decode(preview) ?? preview;
   }
-  if (tab === 'uploads' && segments[1]) route.uploadId = decodeURIComponent(segments[1]);
+  if (tab === 'uploads' && id) route.uploadId = id;
   if (tab === 'library') {
-    if (segments[1]) route.recordId = decodeURIComponent(segments[1]);
+    if (id) route.recordId = id;
     if (collection) route.collection = collection;
   }
   return route;

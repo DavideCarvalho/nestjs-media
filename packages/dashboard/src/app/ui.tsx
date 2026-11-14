@@ -1,4 +1,12 @@
-import { type ReactNode, type RefObject, useCallback, useEffect, useRef, useState } from 'react';
+import {
+  type JSX,
+  type ReactNode,
+  type RefObject,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+} from 'react';
 import { createPortal } from 'react-dom';
 import { Alert } from './ui/alert.js';
 import { Button } from './ui/button.js';
@@ -28,7 +36,7 @@ export function Dot({ tone, pulse }: { tone: Tone; pulse?: boolean }): JSX.Eleme
   return <span className={`dot s-${tone} ${pulse ? 'pulse' : ''}`} aria-hidden />;
 }
 
-/** The dark card container — a bordered panel over the blueprint backdrop. */
+/** The card container — a bordered panel on the kit's surface (both themes). */
 export function Panel({
   children,
   className = '',
@@ -36,7 +44,9 @@ export function Panel({
   children: ReactNode;
   className?: string;
 }): JSX.Element {
-  return <div className={`rounded-lg border border-border bg-panel ${className}`}>{children}</div>;
+  return (
+    <div className={`aviary-surface rounded-lg border border-border ${className}`}>{children}</div>
+  );
 }
 
 /** Centered muted message for empty / loading / error panes. */
@@ -149,7 +159,7 @@ function ToastRow({
       className={`rise mono flex items-start gap-2 rounded-md border px-3 py-2 text-[11px] shadow-2xl backdrop-blur-sm ${
         toast.tone === 'error'
           ? 'border-bad/40 bg-bad/15 text-bad'
-          : 'border-accent/40 bg-accent/15 text-accent'
+          : 'border-brand-border bg-primary/15 text-brand'
       }`}
     >
       <span className="mt-px shrink-0" aria-hidden>

@@ -6,7 +6,7 @@
 import 'reflect-metadata';
 import * as x509 from '@peculiar/x509';
 import { useQuery } from '@tanstack/react-query';
-import { useState } from 'react';
+import { type JSX, useState } from 'react';
 import { mediaConsoleClient } from '../../client/media-console-client.js';
 import { Alert, Button, Notice, formatBytes } from '../ui.js';
 import { FallbackCard, SAMPLE_TEXT_BYTES, readErrorMessage } from './shared.js';
@@ -372,14 +372,14 @@ function CertificateCard({
     <div className="shrink-0 rounded-md border border-border bg-panel px-3 py-2">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <div className="text-[10px] uppercase tracking-wide text-zinc-500">
+          <div className="text-[10px] uppercase tracking-wide text-dim">
             {position}. {label}
           </div>
-          <div className="mono mt-0.5 truncate text-sm text-zinc-100" title={facts.subject}>
+          <div className="mono mt-0.5 truncate text-sm text-fg" title={facts.subject}>
             {facts.commonName}
           </div>
           {facts.issuerCommonName !== null && (
-            <div className="mono truncate text-[11px] text-zinc-500" title={facts.issuer ?? ''}>
+            <div className="mono truncate text-[11px] text-dim" title={facts.issuer ?? ''}>
               issued by {facts.issuerCommonName}
             </div>
           )}
@@ -390,8 +390,8 @@ function CertificateCard({
       <div className="mt-2">
         {facts.rows.map((row) => (
           <div key={row.label} className="mt-1 flex items-baseline gap-2 text-xs">
-            <span className="w-24 shrink-0 text-zinc-500">{row.label}</span>
-            <span className="mono tnum truncate text-zinc-200" title={row.value}>
+            <span className="w-24 shrink-0 text-dim">{row.label}</span>
+            <span className="mono tnum truncate text-fg" title={row.value}>
               {row.value}
             </span>
           </div>
@@ -400,14 +400,14 @@ function CertificateCard({
 
       {facts.altNames.length > 0 && (
         <div className="mt-2">
-          <div className="text-[10px] uppercase tracking-wide text-zinc-500">
+          <div className="text-[10px] uppercase tracking-wide text-dim">
             Subject alternative names
           </div>
           <div className="mt-1 flex flex-wrap gap-1">
             {facts.altNames.map((name) => (
               <span
                 key={name}
-                className="mono rounded border border-border px-1 py-0.5 text-[10px] text-zinc-300"
+                className="mono rounded border border-border px-1 py-0.5 text-[10px] text-fg-2"
               >
                 {name}
               </span>
@@ -423,13 +423,13 @@ function CertificateCard({
         {showFullNames && (
           <div className="mt-1">
             <div className="mt-1 flex items-baseline gap-2 text-xs">
-              <span className="w-24 shrink-0 text-zinc-500">Subject</span>
-              <span className="mono break-all text-zinc-200">{facts.subject}</span>
+              <span className="w-24 shrink-0 text-dim">Subject</span>
+              <span className="mono break-all text-fg">{facts.subject}</span>
             </div>
             {facts.issuer !== null && (
               <div className="mt-1 flex items-baseline gap-2 text-xs">
-                <span className="w-24 shrink-0 text-zinc-500">Issuer</span>
-                <span className="mono break-all text-zinc-200">{facts.issuer}</span>
+                <span className="w-24 shrink-0 text-dim">Issuer</span>
+                <span className="mono break-all text-fg">{facts.issuer}</span>
               </div>
             )}
           </div>
@@ -516,7 +516,7 @@ export function CertificatePreview({ item }: { item: PreviewItem }): JSX.Element
         </Alert>
       )}
       {blocks.length > 1 && (
-        <div className="shrink-0 text-[10px] uppercase tracking-wide text-zinc-500">
+        <div className="shrink-0 text-[10px] uppercase tracking-wide text-dim">
           Chain — {blocks.length} blocks, in file order
         </div>
       )}

@@ -12,6 +12,7 @@ import {
 // Importing this evaluates a snappy WASM module at module scope, which is why this renderer is
 // behind the registry's `lazy()` boundary: nobody who never opens a Parquet file pays for it.
 import { compressors } from 'hyparquet-compressors';
+import type { JSX } from 'react';
 import { mediaConsoleClient } from '../../client/media-console-client.js';
 import { DataTable } from '../DataTable.js';
 import { Alert, Notice, formatBytes } from '../ui.js';
@@ -280,8 +281,8 @@ export async function readParquetPreview({
 function Stat({ label, value }: { label: string; value: string }): JSX.Element {
   return (
     <div className="flex min-w-0 flex-col">
-      <span className="text-[9px] uppercase tracking-wide text-zinc-600">{label}</span>
-      <span className="mono tnum truncate text-[11px] text-zinc-300" title={value}>
+      <span className="text-[9px] uppercase tracking-wide text-faint">{label}</span>
+      <span className="mono tnum truncate text-[11px] text-fg-2" title={value}>
         {value}
       </span>
     </div>
@@ -324,7 +325,7 @@ export function ParquetPreview({ item }: { item: PreviewItem }): JSX.Element {
 
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-2">
-      <div className="grid shrink-0 grid-cols-3 gap-x-4 gap-y-1.5 rounded-md border border-border bg-black/20 px-3 py-2 sm:grid-cols-5">
+      <div className="grid shrink-0 grid-cols-3 gap-x-4 gap-y-1.5 rounded-md border border-border bg-sunken/20 px-3 py-2 sm:grid-cols-5">
         <Stat label="Rows" value={totalRows.toLocaleString()} />
         <Stat label="Row groups" value={String(metadata.row_groups.length)} />
         <Stat label="File size" value={formatBytes(item.size)} />
@@ -333,26 +334,22 @@ export function ParquetPreview({ item }: { item: PreviewItem }): JSX.Element {
       </div>
 
       <div className="flex shrink-0 flex-col gap-1">
-        <div className="text-[10px] uppercase tracking-wide text-zinc-500">Schema</div>
+        <div className="text-[10px] uppercase tracking-wide text-dim">Schema</div>
         <div className="max-h-36 overflow-auto rounded-md border border-border">
           <table className="w-full text-left text-[11px]">
             <thead className="sticky top-0 z-10 bg-panel">
               <tr className="border-b border-border">
-                <th className="mono px-3 py-1 uppercase tracking-wider text-zinc-500">Column</th>
-                <th className="mono px-3 py-1 uppercase tracking-wider text-zinc-500">Type</th>
-                <th className="mono px-3 py-1 uppercase tracking-wider text-zinc-500">Null</th>
+                <th className="mono px-3 py-1 uppercase tracking-wider text-dim">Column</th>
+                <th className="mono px-3 py-1 uppercase tracking-wider text-dim">Type</th>
+                <th className="mono px-3 py-1 uppercase tracking-wider text-dim">Null</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-line-soft">
               {schema.map((column) => (
                 <tr key={column.path}>
-                  <td className="mono whitespace-nowrap px-3 py-0.5 text-zinc-300">
-                    {column.path}
-                  </td>
-                  <td className="mono whitespace-nowrap px-3 py-0.5 text-zinc-500">
-                    {column.type}
-                  </td>
-                  <td className="mono whitespace-nowrap px-3 py-0.5 text-zinc-500">
+                  <td className="mono whitespace-nowrap px-3 py-0.5 text-fg-2">{column.path}</td>
+                  <td className="mono whitespace-nowrap px-3 py-0.5 text-dim">{column.type}</td>
+                  <td className="mono whitespace-nowrap px-3 py-0.5 text-dim">
                     {column.nullability}
                   </td>
                 </tr>
@@ -373,7 +370,7 @@ export function ParquetPreview({ item }: { item: PreviewItem }): JSX.Element {
         <DataTable header={columns} body={rows} />
       )}
 
-      <div className="mono tnum shrink-0 text-[10px] text-zinc-600">
+      <div className="mono tnum shrink-0 text-[10px] text-faint">
         {rows.length} of {totalRows.toLocaleString()} row{totalRows === 1n ? '' : 's'}
         {BigInt(rows.length) < totalRows && ` (first ${PARQUET_ROW_LIMIT})`} · read{' '}
         {formatBytes(bytesFetched)} of {formatBytes(item.size)}

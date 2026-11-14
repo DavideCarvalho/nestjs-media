@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
-import { useRef } from 'react';
+import { type JSX, useRef } from 'react';
 import { mediaConsoleClient } from '../client/media-console-client.js';
 import type { ObjectInsight } from '../client/types.js';
 import { previewKind } from './preview/kinds.js';
@@ -53,14 +53,14 @@ function ObjectInsights({
           key={insight.title}
           className="min-w-56 flex-1 rounded-md border border-border bg-panel px-3 py-2"
         >
-          <div className="text-[10px] uppercase tracking-wide text-zinc-500">{insight.title}</div>
+          <div className="text-[10px] uppercase tracking-wide text-dim">{insight.title}</div>
           {insight.facts?.map((fact) => (
             <div key={fact.label} className="mt-1 flex items-baseline gap-2 text-xs">
-              <span className="text-zinc-500">{fact.label}</span>
-              <span className="mono tnum truncate text-zinc-200">{fact.value}</span>
+              <span className="text-dim">{fact.label}</span>
+              <span className="mono tnum truncate text-fg">{fact.value}</span>
             </div>
           ))}
-          {insight.note && <p className="mt-1.5 text-[11px] text-zinc-500">{insight.note}</p>}
+          {insight.note && <p className="mt-1.5 text-[11px] text-dim">{insight.note}</p>}
           {insight.links && insight.links.length > 0 && (
             <div className="mt-2 flex flex-wrap gap-2">
               {insight.links.map((link) => (
@@ -69,7 +69,7 @@ function ObjectInsights({
                   href={link.href}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="text-xs text-sky-400 underline underline-offset-2 hover:text-sky-300"
+                  className="text-xs text-info underline underline-offset-2 hover:text-info"
                 >
                   {link.label}
                 </a>
@@ -115,13 +115,13 @@ export function Lightbox({
         >
           <div className="flex items-center gap-3 border-b border-border px-4 py-2.5">
             <div className="min-w-0 flex-1">
-              <DialogTitle className="truncate normal-case tracking-normal text-sm text-zinc-200">
+              <DialogTitle className="truncate normal-case tracking-normal text-sm text-fg">
                 {item.name}
               </DialogTitle>
-              <div className="mono tnum mt-0.5 flex items-center gap-2 text-[10px] text-zinc-600">
+              <div className="mono tnum mt-0.5 flex items-center gap-2 text-[10px] text-faint">
                 <span>{formatBytes(item.size)}</span>
                 {item.contentType && (
-                  <span className="rounded border border-border px-1 text-zinc-500">
+                  <span className="rounded border border-border px-1 text-dim">
                     {item.contentType}
                   </span>
                 )}

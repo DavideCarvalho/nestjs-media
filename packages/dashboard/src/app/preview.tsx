@@ -12,7 +12,9 @@ import type {
   UploadDetailResponse,
   UploadListResponse,
 } from '../client/types.js';
-import { App } from './App.js';
+import '../aviary-kit/fonts';
+import { ThemeProvider } from '../aviary-kit/theme';
+import { App, CONFIG_ELEMENT_ID, MEDIA_ACCENT } from './App.js';
 import './styles.css';
 
 // Standalone visual-verification entry: no backend. A fetch stub answers the console's JSON API
@@ -46,7 +48,7 @@ const DISKS: DiskListResponse = {
 const SAMPLE_IMAGE = `data:image/svg+xml;utf8,${encodeURIComponent(
   `<svg xmlns="http://www.w3.org/2000/svg" width="640" height="360" viewBox="0 0 640 360">
      <rect width="640" height="360" fill="#101017"/>
-     <circle cx="320" cy="180" r="96" fill="none" stroke="#34d399" stroke-width="3"/>
+     <circle cx="320" cy="180" r="96" fill="none" stroke="#22d3ee" stroke-width="3"/>
      <text x="320" y="188" fill="#76767f" font-family="monospace" font-size="20"
            text-anchor="middle">poster.png</text>
    </svg>`,
@@ -220,6 +222,71 @@ const OBJECT_DETAIL: ObjectDetailResponse = {
   url: SAMPLE_IMAGE,
 };
 
+const API = '/media/api';
+
+const CONSOLES = {
+  version: 1,
+  current: 'media',
+  consoles: [
+    { id: 'durable', title: 'Workflows', icon: 'workflow', href: '/durable' },
+    { id: 'agent', title: 'Agents', icon: 'agent', href: '/ai-gateway' },
+    { id: 'telescope', title: 'Telescope', icon: 'telescope', href: '/telescope' },
+  ],
+};
+
+/** Per-console ⌘K answers, each after its own delay, so the streaming groups can be seen. */
+const SEARCH_DELAY_MS: Record<string, number> = {
+  media: 150,
+  durable: 700,
+  agent: 1400,
+  telescope: 2400,
+};
+
+function searchFixture(search: URLSearchParams): unknown {
+  const q = (search.get('q') ?? '').toLowerCase();
+  const only = search.get('console');
+  const groups = [
+    {
+      id: 'media',
+      title: 'Media',
+      icon: 'media',
+      hits: [
+        ...LIBRARY.records
+          .filter((r) => r.fileName.toLowerCase().includes(q))
+          .map((r) => ({
+            title: r.fileName,
+            subtitle: `Library · ${r.collection} · ${r.mimeType}`,
+            href: `/media#/library/${r.id}`,
+          })),
+        ...ROOT_OBJECTS.files
+          .filter((f) => f.name.toLowerCase().includes(q))
+          .map((f) => ({
+            title: f.name,
+            subtitle: `uploads · ${f.key}`,
+            href: `/media#/disks/uploads?preview=${encodeURIComponent(f.key)}`,
+          })),
+      ].slice(0, 5),
+    },
+    {
+      id: 'durable',
+      title: 'Workflows',
+      icon: 'workflow',
+      hits: [
+        { title: 'ingest-posture-9f2c', subtitle: 'run · ingest · running', href: '/durable#/' },
+        { title: 'ingest', subtitle: 'workflow · 3 versions', href: '/durable#/' },
+      ],
+    },
+    {
+      id: 'agent',
+      title: 'Agents',
+      icon: 'agent',
+      hits: [{ title: 'Posture report', subtitle: 'Thread · 12 messages', href: '/ai-gateway' }],
+    },
+    { id: 'telescope', title: 'Telescope', icon: 'telescope', hits: [] },
+  ].filter((group) => group.hits.length > 0 && (only === null || group.id === only));
+  return { version: 1, q, partial: false, results: groups };
+}
+
 function json(body: unknown): Response {
   return new Response(JSON.stringify(body), {
     status: 200,
@@ -230,6 +297,7 @@ function json(body: unknown): Response {
 /** Route a console API request to a fixture. `path` is everything after `/media/api`. */
 function fixtureFor(path: string, search: URLSearchParams): Response | undefined {
   if (path === '/topology') return json(TOPOLOGY);
+  if (path === '/consoles') return json(CONSOLES);
   if (path === '/disks') return json(DISKS);
   if (path.endsWith('/objects')) {
     return json(search.get('prefix') ? NESTED_OBJECTS : ROOT_OBJECTS);
@@ -250,11 +318,31 @@ window.fetch = async (input, init) => {
   const marker = '/api';
   const index = url.pathname.indexOf(marker);
   if (index !== -1) {
-    const response = fixtureFor(url.pathname.slice(index + marker.length), url.searchParams);
+    const path = url.pathname.slice(index + marker.length);
+    if (path === '/consoles/search') {
+      const only = url.searchParams.get('console');
+      if (only) await new Promise((resolve) => setTimeout(resolve, SEARCH_DELAY_MS[only] ?? 300));
+      return json(searchFixture(url.searchParams));
+    }
+    const response = fixtureFor(path, url.searchParams);
     if (response) return response;
   }
   return originalFetch(input, init);
 };
+
+// The shell fields the server would put in the page's data block (switcher, ⌘K, footer).
+const block = document.createElement('script');
+block.type = 'application/json';
+block.id = CONFIG_ELEMENT_ID;
+block.textContent = JSON.stringify({
+  apiBase: API,
+  switcher: { endpoint: `${API}/consoles`, others: 3 },
+  search: { endpoint: `${API}/consoles/search`, self: 'media' },
+  viewer: { label: 'Ann Lee', email: 'ann@acme.test', role: 'admin' },
+  signOut: { action: '/logout', csrfToken: 'preview' },
+});
+document.head.appendChild(block);
+window.__MEDIA_API__ = API;
 
 const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
 const container = document.getElementById('root');
@@ -262,8 +350,10 @@ if (!container) throw new Error('Missing #root');
 
 createRoot(container).render(
   <StrictMode>
-    <QueryClientProvider client={queryClient}>
-      <App />
-    </QueryClientProvider>
+    <ThemeProvider storageKey="aviary-media-theme" accent={MEDIA_ACCENT}>
+      <QueryClientProvider client={queryClient}>
+        <App />
+      </QueryClientProvider>
+    </ThemeProvider>
   </StrictMode>,
 );

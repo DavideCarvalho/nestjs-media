@@ -154,6 +154,40 @@ describe('searchConsoles', () => {
   });
 });
 
+describe('searchConsoles, one console (`only`)', () => {
+  it('answers for one console only when asked (`console=<id>`), still behind its gate', async () => {
+    const asked: string[] = [];
+    const reg = registry(
+      entry({
+        id: 'media',
+        search: async () => {
+          asked.push('media');
+          return [hit('a.png')];
+        },
+      }),
+      entry({
+        id: 'agent',
+        search: async () => {
+          asked.push('agent');
+          return [hit('thread')];
+        },
+      }),
+      entry({ id: 'durable', authorize: deny, search: async () => [hit('run')] }),
+    );
+    const agent = await searchConsoles(reg, 'media', contextOver({}), 'x', { only: 'agent' });
+    expect(agent.results.map((r) => r.id)).toEqual(['agent']);
+    expect(asked).toEqual(['agent']);
+    const self = await searchConsoles(reg, 'media', contextOver({}), 'x', { only: 'media' });
+    expect(self.results.map((r) => r.id)).toEqual(['media']);
+    expect(
+      (await searchConsoles(reg, 'media', contextOver({}), 'x', { only: 'durable' })).results,
+    ).toEqual([]);
+    expect(
+      (await searchConsoles(reg, 'media', contextOver({}), 'x', { only: 'nope' })).results,
+    ).toEqual([]);
+  });
+});
+
 describe('the probe marker', () => {
   it('is never set while a search runs, this console’s or another’s', async () => {
     const req: Record<string, unknown> = {};
@@ -208,6 +242,8 @@ describe('sanitizeSearchHits', () => {
           { title: 'a', subtitle: 's', href: '/a' },
           { title: '', href: '/b' },
           { title: 'c', href: 'javascript:alert(1)' },
+          { title: 'd', href: '/\\evil.test' },
+          { title: 'e', href: '/e\u0000x' },
           'junk',
         ],
         5,
@@ -432,5 +468,33 @@ describe('GET <api>/consoles/search', () => {
         href: '/admin/media#/disks/primary?prefix=reports%2F&preview=reports%2Fq3.pdf',
       },
     ]);
+  });
+
+  it('answers for one console with `console=<id>` (per-console streaming)', async () => {
+    registerAviaryConsole(
+      entry({
+        id: 'durable',
+        order: 10,
+        icon: 'workflow',
+        title: 'Workflows',
+        search: async (_ctx, q) => [{ title: `Run ${q}`, href: `/durable#/runs/${q}` }],
+      }),
+    );
+    const store = new InMemoryMediaStore();
+    await store.save(record('m1', 'Q3 report', 'q3-report.pdf', null));
+    const url = await boot(
+      MediaDashboardModule.forRoot({ authorize: authorizeByToken({ token: TOKEN }) }),
+      store,
+    );
+    const durable = await fetch(`${url}/media/api/consoles/search?q=q3&console=durable`, {
+      headers: bearer,
+    });
+    const d = (await durable.json()) as { results: { id: string }[] };
+    expect(d.results.map((g) => g.id)).toEqual(['durable']);
+    const media = await fetch(`${url}/media/api/consoles/search?q=q3&console=media`, {
+      headers: bearer,
+    });
+    const m = (await media.json()) as { results: { id: string }[] };
+    expect(m.results.map((g) => g.id)).toEqual(['media']);
   });
 });
