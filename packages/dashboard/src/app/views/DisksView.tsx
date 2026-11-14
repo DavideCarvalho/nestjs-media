@@ -1,5 +1,8 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { useEffect, useRef, useState } from 'react';
+import { type JSX, useEffect, useRef, useState } from 'react';
+import { PageHeader } from '../../aviary-kit/blocks/page-header';
+import { PageBody } from '../../aviary-kit/shell/app-shell';
+import { Skeleton } from '../../aviary-kit/ui/skeleton';
 import { mediaConsoleClient } from '../../client/media-console-client.js';
 import type {
   DiskInfo,
@@ -194,8 +197,8 @@ function UploadDialog({
         }}
         className={`mono cursor-pointer rounded-md border border-dashed px-3 py-6 text-center text-xs transition-colors ${
           dragOver
-            ? 'border-accent/50 bg-accent/5 text-accent'
-            : 'border-border text-zinc-500 hover:text-zinc-300'
+            ? 'border-primary/50 bg-primary/5 text-brand'
+            : 'border-border text-dim hover:text-fg-2'
         }`}
       >
         Drop files here, or click to choose
@@ -217,15 +220,15 @@ function UploadDialog({
               key={`${file.name}-${index}`}
               className="mono flex items-center justify-between gap-2 rounded border border-border px-2 py-1 text-[11px]"
             >
-              <span className="truncate text-zinc-300">{file.name}</span>
+              <span className="truncate text-fg-2">{file.name}</span>
               <span className="flex shrink-0 items-center gap-2">
-                <span className="tnum text-zinc-600">{formatBytes(file.size)}</span>
+                <span className="tnum text-faint">{formatBytes(file.size)}</span>
                 {!busy && (
                   <button
                     type="button"
                     aria-label={`Remove ${file.name}`}
                     onClick={() => setFiles((current) => current.filter((_, i) => i !== index))}
-                    className="text-zinc-600 hover:text-bad"
+                    className="text-faint hover:text-bad"
                   >
                     ✕
                   </button>
@@ -292,7 +295,7 @@ function FolderDialog({
         </>
       }
     >
-      <label className="mono flex flex-col gap-1 text-[10px] uppercase tracking-wider text-zinc-600">
+      <label className="mono flex flex-col gap-1 text-[10px] uppercase tracking-wider text-faint">
         Folder name
         <input
           ref={inputRef}
@@ -302,12 +305,12 @@ function FolderDialog({
             if (event.key === 'Enter') create();
           }}
           placeholder="reports"
-          className="mono rounded-md border border-border bg-black/30 px-3 py-2 text-sm normal-case tracking-normal text-zinc-100 focus:border-accent/40 focus:outline-none"
+          className="mono rounded-md border border-border bg-sunken/30 px-3 py-2 text-sm normal-case tracking-normal text-fg focus:border-brand-border focus:outline-none"
         />
       </label>
-      <p className="mono mt-2 text-[10px] text-zinc-600">
+      <p className="mono mt-2 text-[10px] text-faint">
         Creates {prefix ? `/${prefix}/` : ''}
-        <span className="text-zinc-400">{name.trim() || 'name'}</span>/
+        <span className="text-dim">{name.trim() || 'name'}</span>/
       </p>
       {error && (
         <Alert variant="error" className="mt-3">
@@ -413,17 +416,17 @@ function CopyMoveDialog({
         </>
       }
     >
-      <p className="mono mb-2 text-[11px] text-zinc-500">
+      <p className="mono mb-2 text-[11px] text-dim">
         From{' '}
-        <span className="text-zinc-300">
+        <span className="text-fg-2">
           {sourceDisk}/{source}
           {target.type === 'folder' ? '/' : ''}
         </span>
       </p>
-      <div className="mono mb-1 text-[10px] uppercase tracking-wider text-zinc-600">
+      <div className="mono mb-1 text-[10px] uppercase tracking-wider text-faint">
         Destination folder
       </div>
-      <div className="max-h-56 overflow-auto rounded-md border border-border bg-black/20 p-1">
+      <div className="max-h-56 overflow-auto rounded-md border border-border bg-sunken/20 p-1">
         <FolderTree
           disks={disks}
           selectedDisk={destDisk}
@@ -434,7 +437,7 @@ function CopyMoveDialog({
           }}
         />
       </div>
-      <label className="mono mt-3 flex flex-col gap-1 text-[10px] uppercase tracking-wider text-zinc-600">
+      <label className="mono mt-3 flex flex-col gap-1 text-[10px] uppercase tracking-wider text-faint">
         Name
         <input
           ref={inputRef}
@@ -443,12 +446,12 @@ function CopyMoveDialog({
           onKeyDown={(event) => {
             if (event.key === 'Enter') submit();
           }}
-          className="mono rounded-md border border-border bg-black/30 px-3 py-2 text-sm normal-case tracking-normal text-zinc-100 focus:border-accent/40 focus:outline-none"
+          className="mono rounded-md border border-border bg-sunken/30 px-3 py-2 text-sm normal-case tracking-normal text-fg focus:border-brand-border focus:outline-none"
         />
       </label>
-      <p className="mono mt-2 text-[10px] text-zinc-600">
+      <p className="mono mt-2 text-[10px] text-faint">
         To{' '}
-        <span className="text-zinc-400">
+        <span className="text-dim">
           {destDisk}/{destination || '—'}
         </span>
         {unchanged && ' (same as source — pick a different folder or name)'}
@@ -525,7 +528,7 @@ function RenameDialog({
         </>
       }
     >
-      <label className="mono flex flex-col gap-1 text-[10px] uppercase tracking-wider text-zinc-600">
+      <label className="mono flex flex-col gap-1 text-[10px] uppercase tracking-wider text-faint">
         New name
         <input
           ref={inputRef}
@@ -534,11 +537,11 @@ function RenameDialog({
           onKeyDown={(event) => {
             if (event.key === 'Enter') submit();
           }}
-          className="mono rounded-md border border-border bg-black/30 px-3 py-2 text-sm normal-case tracking-normal text-zinc-100 focus:border-accent/40 focus:outline-none"
+          className="mono rounded-md border border-border bg-sunken/30 px-3 py-2 text-sm normal-case tracking-normal text-fg focus:border-brand-border focus:outline-none"
         />
       </label>
-      <p className="mono mt-2 text-[10px] text-zinc-600">
-        To <span className="text-zinc-400">{destination || '—'}</span>
+      <p className="mono mt-2 text-[10px] text-faint">
+        To <span className="text-dim">{destination || '—'}</span>
         {target.type === 'folder' ? '/' : ''}
       </p>
       {error && (
@@ -722,13 +725,27 @@ export function DisksView({ route, actions }: { route: Route; actions: boolean }
     page.files.length === 0;
 
   return (
-    <section className="rise">
-      <div className="grid grid-cols-[220px_1fr] gap-4">
+    <PageBody>
+      <PageHeader
+        title="Disks"
+        description={
+          actions
+            ? 'Browse every configured disk: preview, upload, move and delete objects.'
+            : 'Browse every configured disk and preview its objects.'
+        }
+      />
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-[220px_minmax(0,1fr)]">
         <Panel className="h-fit p-2">
-          <h3 className="mono px-2 py-1 text-[10px] uppercase tracking-wider text-zinc-600">
+          <h3 className="mono px-2 py-1 text-[10px] uppercase tracking-wider text-faint">
             explorer
           </h3>
-          {disksQuery.isLoading && <Notice>Loading…</Notice>}
+          {disksQuery.isLoading && (
+            <div className="flex flex-col gap-2 px-2 py-1.5" aria-hidden>
+              <Skeleton className="h-3 w-28" />
+              <Skeleton className="h-3 w-20" />
+              <Skeleton className="h-3 w-24" />
+            </div>
+          )}
           {disksQuery.isError && (
             <p className="px-2 py-1 text-sm s-error">{describeError(disksQuery.error)}</p>
           )}
@@ -752,7 +769,7 @@ export function DisksView({ route, actions }: { route: Route; actions: boolean }
           {selectedDisk && !listSupported && (
             <Notice>
               Listing is not supported on disk{' '}
-              <span className="mono text-zinc-300">{selectedDisk}</span>.
+              <span className="mono text-fg-2">{selectedDisk}</span>.
             </Notice>
           )}
 
@@ -776,27 +793,25 @@ export function DisksView({ route, actions }: { route: Route; actions: boolean }
                     }
                   : undefined
               }
-              className={`rounded-md ${dragOver ? 'ring-2 ring-inset ring-accent/50' : ''}`}
+              className={`rounded-md ${dragOver ? 'ring-2 ring-inset ring-primary/50' : ''}`}
             >
               <div className="mb-3 flex items-center justify-between gap-2">
-                <nav className="mono flex flex-wrap items-center gap-1 text-xs text-zinc-500">
+                <nav className="mono flex flex-wrap items-center gap-1 text-xs text-dim">
                   <button
                     type="button"
                     onClick={() => navigateToPrefix(selectedDisk, '')}
-                    className={`rounded px-1.5 py-0.5 hover:bg-zinc-800/60 ${
-                      !prefix ? 'text-zinc-100' : ''
-                    }`}
+                    className={`rounded px-1.5 py-0.5 hover:bg-hover ${!prefix ? 'text-fg' : ''}`}
                   >
                     {selectedDisk}
                   </button>
                   {crumbs.map((crumb, index) => (
                     <span key={crumb.prefix} className="flex items-center gap-1">
-                      <span className="text-zinc-700">/</span>
+                      <span className="text-faint">/</span>
                       <button
                         type="button"
                         onClick={() => navigateToPrefix(selectedDisk, crumb.prefix)}
-                        className={`rounded px-1.5 py-0.5 hover:bg-zinc-800/60 ${
-                          index === crumbs.length - 1 ? 'text-zinc-100' : ''
+                        className={`rounded px-1.5 py-0.5 hover:bg-hover ${
+                          index === crumbs.length - 1 ? 'text-fg' : ''
                         }`}
                       >
                         {crumb.label}
@@ -814,172 +829,76 @@ export function DisksView({ route, actions }: { route: Route; actions: boolean }
                 )}
               </div>
 
-              {objectsQuery.isLoading && <Notice>Loading objects…</Notice>}
+              {objectsQuery.isLoading && (
+                <div className="flex flex-col gap-3 py-2" aria-hidden>
+                  {Array.from({ length: 6 }, (_, i) => (
+                    // biome-ignore lint/suspicious/noArrayIndexKey: static placeholder rows
+                    <div key={i} className="flex items-center gap-6">
+                      <Skeleton className="h-3 w-48" />
+                      <Skeleton className="h-3 w-14" />
+                      <Skeleton className="hidden h-3 w-32 sm:block" />
+                    </div>
+                  ))}
+                </div>
+              )}
               {objectsQuery.isError && (
                 <p className="text-sm s-error">{describeError(objectsQuery.error)}</p>
               )}
               {isEmpty && <Notice>This folder is empty.</Notice>}
 
               {(page.folders.length > 0 || page.files.length > 0) && (
-                <table className="w-full text-left text-sm">
-                  <thead>
-                    <tr className="mono border-b border-border text-[10px] uppercase tracking-wider text-zinc-600">
-                      <th className="py-2 pr-2 font-normal">Name</th>
-                      <th className="py-2 pr-2 font-normal">Size</th>
-                      <th className="py-2 pr-2 font-normal">Last modified</th>
-                      <th className="py-2 pr-2 font-normal">Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-line-soft">
-                    {page.folders.map((folder) => (
-                      <tr
-                        key={folder.prefix}
-                        draggable={actions}
-                        onDragStart={
-                          actions
-                            ? (event) =>
-                                startRowDrag(event, {
-                                  kind: 'folder',
-                                  disk: selectedDisk,
-                                  prefix: folder.prefix,
-                                  name: folder.name,
-                                })
-                            : undefined
-                        }
-                        className={`hover:bg-zinc-900/40 ${actions ? 'cursor-grab' : ''}`}
-                      >
-                        <td className="py-2 pr-2">
-                          <button
-                            type="button"
-                            onClick={() => navigateToPrefix(selectedDisk, folder.prefix)}
-                            className="flex items-center gap-2 text-zinc-200 hover:text-accent"
-                          >
-                            <span className="text-zinc-600">▸</span>
-                            {folder.name}
-                          </button>
-                        </td>
-                        <td className="py-2 pr-2 text-zinc-700">—</td>
-                        <td className="py-2 pr-2 text-zinc-700">—</td>
-                        <td className="py-2 pr-2">
-                          {actions && (
-                            <div className="flex flex-wrap gap-1.5">
-                              <Button
-                                onClick={() =>
-                                  setDialog({
-                                    kind: 'copy',
-                                    target: {
-                                      type: 'folder',
-                                      prefix: folder.prefix,
-                                      name: folder.name,
-                                    },
-                                  })
-                                }
-                              >
-                                Copy to…
-                              </Button>
-                              <Button
-                                onClick={() =>
-                                  setDialog({
-                                    kind: 'move',
-                                    target: {
-                                      type: 'folder',
-                                      prefix: folder.prefix,
-                                      name: folder.name,
-                                    },
-                                  })
-                                }
-                              >
-                                Move to…
-                              </Button>
-                              <Button
-                                onClick={() =>
-                                  setDialog({
-                                    kind: 'rename',
-                                    target: {
-                                      type: 'folder',
-                                      prefix: folder.prefix,
-                                      name: folder.name,
-                                    },
-                                  })
-                                }
-                              >
-                                Rename
-                              </Button>
-                              <Button
-                                tone="destructive"
-                                onClick={() =>
-                                  setDialog({
-                                    kind: 'delete-folder',
+                <div className="overflow-x-auto">
+                  <table className="w-full min-w-[560px] text-left text-sm">
+                    <thead>
+                      <tr className="mono border-b border-border text-[10px] uppercase tracking-wider text-faint">
+                        <th className="py-2 pr-2 font-normal">Name</th>
+                        <th className="py-2 pr-2 font-normal">Size</th>
+                        <th className="py-2 pr-2 font-normal">Last modified</th>
+                        <th className="py-2 pr-2 font-normal">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-line-soft">
+                      {page.folders.map((folder) => (
+                        <tr
+                          key={folder.prefix}
+                          draggable={actions}
+                          onDragStart={
+                            actions
+                              ? (event) =>
+                                  startRowDrag(event, {
+                                    kind: 'folder',
+                                    disk: selectedDisk,
                                     prefix: folder.prefix,
                                     name: folder.name,
                                   })
-                                }
-                              >
-                                Delete
-                              </Button>
-                            </div>
-                          )}
-                        </td>
-                      </tr>
-                    ))}
-                    {page.files.map((file) => (
-                      <tr
-                        key={file.key}
-                        draggable={actions}
-                        onDragStart={
-                          actions
-                            ? (event) =>
-                                startRowDrag(event, {
-                                  kind: 'file',
-                                  disk: selectedDisk,
-                                  key: file.key,
-                                  name: file.name,
-                                })
-                            : undefined
-                        }
-                        className={`hover:bg-zinc-900/40 ${actions ? 'cursor-grab' : ''}`}
-                      >
-                        <td className="mono py-2 pr-2 text-[13px] text-zinc-200">{file.name}</td>
-                        <td className="mono tnum py-2 pr-2 text-xs text-zinc-500">
-                          {formatBytes(file.sizeBytes)}
-                        </td>
-                        <td className="py-2 pr-2 text-xs text-zinc-500">
-                          {formatDate(file.lastModified)}
-                        </td>
-                        <td className="py-2 pr-2">
-                          <div className="flex flex-wrap gap-1.5">
-                            <Button
-                              disabled={busyKey === file.key}
-                              onClick={() => handlePreview(selectedDisk, file.key, file.name)}
+                              : undefined
+                          }
+                          className={`hover:bg-hover ${actions ? 'cursor-grab' : ''}`}
+                        >
+                          <td className="py-2 pr-2">
+                            <button
+                              type="button"
+                              onClick={() => navigateToPrefix(selectedDisk, folder.prefix)}
+                              className="flex items-center gap-2 text-fg hover:text-brand"
                             >
-                              Preview
-                            </Button>
-                            <Button
-                              // Not behind `actions`: saving a copy reads the object, and the read
-                              // API is always mounted. Rendered as a link, not an onClick — the
-                              // browser has to own the navigation for the save dialog and the
-                              // progress bar to be its own.
-                              render={
-                                // biome-ignore lint/a11y/useAnchorContent: Base UI's `render` prop clones this element with the Button's children; the link is not empty at runtime
-                                <a
-                                  href={mediaConsoleClient.objectDownloadUrl(
-                                    selectedDisk,
-                                    file.key,
-                                  )}
-                                  download={file.name}
-                                />
-                              }
-                            >
-                              Download
-                            </Button>
-                            <Button onClick={() => handleCopyKey(file.key)}>Copy key</Button>
+                              <span className="text-faint">▸</span>
+                              {folder.name}
+                            </button>
+                          </td>
+                          <td className="py-2 pr-2 text-faint">—</td>
+                          <td className="py-2 pr-2 text-faint">—</td>
+                          <td className="py-2 pr-2">
                             {actions && (
-                              <>
+                              <div className="flex flex-wrap gap-1.5">
                                 <Button
                                   onClick={() =>
                                     setDialog({
                                       kind: 'copy',
-                                      target: { type: 'file', key: file.key, name: file.name },
+                                      target: {
+                                        type: 'folder',
+                                        prefix: folder.prefix,
+                                        name: folder.name,
+                                      },
                                     })
                                   }
                                 >
@@ -989,7 +908,11 @@ export function DisksView({ route, actions }: { route: Route; actions: boolean }
                                   onClick={() =>
                                     setDialog({
                                       kind: 'move',
-                                      target: { type: 'file', key: file.key, name: file.name },
+                                      target: {
+                                        type: 'folder',
+                                        prefix: folder.prefix,
+                                        name: folder.name,
+                                      },
                                     })
                                   }
                                 >
@@ -999,7 +922,11 @@ export function DisksView({ route, actions }: { route: Route; actions: boolean }
                                   onClick={() =>
                                     setDialog({
                                       kind: 'rename',
-                                      target: { type: 'file', key: file.key, name: file.name },
+                                      target: {
+                                        type: 'folder',
+                                        prefix: folder.prefix,
+                                        name: folder.name,
+                                      },
                                     })
                                   }
                                 >
@@ -1009,22 +936,123 @@ export function DisksView({ route, actions }: { route: Route; actions: boolean }
                                   tone="destructive"
                                   onClick={() =>
                                     setDialog({
-                                      kind: 'delete-file',
-                                      key: file.key,
-                                      name: file.name,
+                                      kind: 'delete-folder',
+                                      prefix: folder.prefix,
+                                      name: folder.name,
                                     })
                                   }
                                 >
                                   Delete
                                 </Button>
-                              </>
+                              </div>
                             )}
-                          </div>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+                          </td>
+                        </tr>
+                      ))}
+                      {page.files.map((file) => (
+                        <tr
+                          key={file.key}
+                          draggable={actions}
+                          onDragStart={
+                            actions
+                              ? (event) =>
+                                  startRowDrag(event, {
+                                    kind: 'file',
+                                    disk: selectedDisk,
+                                    key: file.key,
+                                    name: file.name,
+                                  })
+                              : undefined
+                          }
+                          className={`hover:bg-hover ${actions ? 'cursor-grab' : ''}`}
+                        >
+                          <td className="mono py-2 pr-2 text-[13px] text-fg">{file.name}</td>
+                          <td className="mono tnum py-2 pr-2 text-xs text-dim">
+                            {formatBytes(file.sizeBytes)}
+                          </td>
+                          <td className="py-2 pr-2 text-xs text-dim">
+                            {formatDate(file.lastModified)}
+                          </td>
+                          <td className="py-2 pr-2">
+                            <div className="flex flex-wrap gap-1.5">
+                              <Button
+                                disabled={busyKey === file.key}
+                                onClick={() => handlePreview(selectedDisk, file.key, file.name)}
+                              >
+                                Preview
+                              </Button>
+                              <Button
+                                // Not behind `actions`: saving a copy reads the object, and the read
+                                // API is always mounted. Rendered as a link, not an onClick — the
+                                // browser has to own the navigation for the save dialog and the
+                                // progress bar to be its own.
+                                render={
+                                  // biome-ignore lint/a11y/useAnchorContent: Base UI's `render` prop clones this element with the Button's children; the link is not empty at runtime
+                                  <a
+                                    href={mediaConsoleClient.objectDownloadUrl(
+                                      selectedDisk,
+                                      file.key,
+                                    )}
+                                    download={file.name}
+                                  />
+                                }
+                              >
+                                Download
+                              </Button>
+                              <Button onClick={() => handleCopyKey(file.key)}>Copy key</Button>
+                              {actions && (
+                                <>
+                                  <Button
+                                    onClick={() =>
+                                      setDialog({
+                                        kind: 'copy',
+                                        target: { type: 'file', key: file.key, name: file.name },
+                                      })
+                                    }
+                                  >
+                                    Copy to…
+                                  </Button>
+                                  <Button
+                                    onClick={() =>
+                                      setDialog({
+                                        kind: 'move',
+                                        target: { type: 'file', key: file.key, name: file.name },
+                                      })
+                                    }
+                                  >
+                                    Move to…
+                                  </Button>
+                                  <Button
+                                    onClick={() =>
+                                      setDialog({
+                                        kind: 'rename',
+                                        target: { type: 'file', key: file.key, name: file.name },
+                                      })
+                                    }
+                                  >
+                                    Rename
+                                  </Button>
+                                  <Button
+                                    tone="destructive"
+                                    onClick={() =>
+                                      setDialog({
+                                        kind: 'delete-file',
+                                        key: file.key,
+                                        name: file.name,
+                                      })
+                                    }
+                                  >
+                                    Delete
+                                  </Button>
+                                </>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               )}
 
               {page.cursor !== undefined && (
@@ -1035,7 +1063,7 @@ export function DisksView({ route, actions }: { route: Route; actions: boolean }
                 </div>
               )}
               {actions && dragOver && (
-                <p className="mono mt-3 rounded-md border border-dashed border-accent/40 bg-accent/5 px-3 py-4 text-center text-xs text-accent/80">
+                <p className="mono mt-3 rounded-md border border-dashed border-brand-border bg-primary/5 px-3 py-4 text-center text-xs text-brand/80">
                   Drop files to upload to {prefix ? `/${prefix}` : selectedDisk}
                 </p>
               )}
@@ -1100,10 +1128,10 @@ export function DisksView({ route, actions }: { route: Route; actions: boolean }
             </>
           }
         >
-          <p className="text-sm text-zinc-300">
-            Delete <span className="mono text-zinc-100">{dialog.name}</span>?
+          <p className="text-sm text-fg-2">
+            Delete <span className="mono text-fg">{dialog.name}</span>?
           </p>
-          <p className="mono mt-2 text-[11px] text-zinc-600">
+          <p className="mono mt-2 text-[11px] text-faint">
             {dialog.kind === 'delete-folder'
               ? 'Every object inside this folder is removed. This cannot be undone.'
               : 'This cannot be undone.'}
@@ -1119,6 +1147,6 @@ export function DisksView({ route, actions }: { route: Route; actions: boolean }
         }}
       />
       <ToastStack toasts={toasts} onDismiss={dismissToast} />
-    </section>
+    </PageBody>
   );
 }

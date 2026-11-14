@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { Gunzip, inflateSync } from 'fflate';
-import { useState } from 'react';
+import { type JSX, useState } from 'react';
 import { mediaConsoleClient } from '../../client/media-console-client.js';
 import { DataTable } from '../DataTable.js';
 import { Alert, Button, Notice, formatBytes } from '../ui.js';
@@ -832,7 +832,7 @@ export function ArchivePreview({ item }: { item: PreviewItem }): JSX.Element {
         ) : (
           <DataTable header={table.header} body={table.body} />
         )}
-        <div className="mono tnum shrink-0 text-[10px] text-zinc-600">
+        <div className="mono tnum shrink-0 text-[10px] text-faint">
           {data.entries.length} {data.entries.length === 1 ? 'entry' : 'entries'} · read{' '}
           {formatBytes(data.bytesRead)} of {formatBytes(item.size)}
           {data.compression === 'gzip' && ' · gunzipped'}
@@ -852,7 +852,7 @@ export function ArchivePreview({ item }: { item: PreviewItem }): JSX.Element {
     <div className="flex min-h-0 flex-1 gap-3">
       {extractable.length > 0 && (
         <div className="flex w-56 shrink-0 flex-col gap-1 overflow-auto">
-          <div className="shrink-0 text-[10px] uppercase tracking-wide text-zinc-500">
+          <div className="shrink-0 text-[10px] uppercase tracking-wide text-dim">
             Readable entries
           </div>
           <Input
@@ -873,7 +873,7 @@ export function ArchivePreview({ item }: { item: PreviewItem }): JSX.Element {
             </Button>
           ))}
           {offered.length < extractable.length && (
-            <div className="mono shrink-0 px-2 text-[10px] text-zinc-600">
+            <div className="mono shrink-0 px-2 text-[10px] text-faint">
               {extractable.length - offered.length} more — narrow the filter
             </div>
           )}
@@ -899,7 +899,7 @@ export function ArchivePreview({ item }: { item: PreviewItem }): JSX.Element {
               <Button tone="ghost" onClick={() => setSelected(null)}>
                 ← Listing
               </Button>
-              <span className="mono truncate text-[11px] text-zinc-400">{selectedEntry.path}</span>
+              <span className="mono truncate text-[11px] text-dim">{selectedEntry.path}</span>
             </div>
             {extraction.isLoading && <Notice>Extracting…</Notice>}
             {extraction.isError && (
@@ -913,12 +913,12 @@ export function ArchivePreview({ item }: { item: PreviewItem }): JSX.Element {
                   This entry is binary despite its name — showing it as text would be noise.
                 </Alert>
               ) : (
-                <pre className="mono min-h-0 flex-1 overflow-auto whitespace-pre-wrap break-words rounded-md border border-border bg-black/30 p-3 text-xs text-zinc-300">
+                <pre className="mono min-h-0 flex-1 overflow-auto whitespace-pre-wrap break-words rounded-md border border-border bg-sunken/30 p-3 text-xs text-fg-2">
                   {extraction.data.text}
                 </pre>
               ))}
             {extraction.data && (
-              <div className="mono tnum shrink-0 text-[10px] text-zinc-600">
+              <div className="mono tnum shrink-0 text-[10px] text-faint">
                 read {formatBytes(extraction.data.bytesRead)} of {formatBytes(item.size)} ·{' '}
                 {zipMethodName(selectedEntry.method)} ·{' '}
                 {formatBytes(selectedEntry.uncompressedSize)} uncompressed
@@ -928,7 +928,7 @@ export function ArchivePreview({ item }: { item: PreviewItem }): JSX.Element {
         ) : (
           <>
             <DataTable header={table.header} body={table.body} />
-            <div className="mono tnum shrink-0 text-[10px] text-zinc-600">
+            <div className="mono tnum shrink-0 text-[10px] text-faint">
               {data.entries.length} {data.entries.length === 1 ? 'entry' : 'entries'} · read{' '}
               {formatBytes(data.bytesRead)} of {formatBytes(item.size)}
               {extractable.length > 0 && ' · pick an entry on the left to read it'}

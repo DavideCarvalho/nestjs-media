@@ -166,6 +166,12 @@ MediaDashboardModule.forRoot({
 });
 ```
 
+The console's sidebar footer shows who is signed in and a sign-out. `viewer: (req) => ({ label,
+email?, role? })` (sync or async) defaults to `request.user`, read structurally and never triggering
+an authentication. `signOut: '/logout' | { href } | { action, csrfToken? } | false` defaults to the
+`account.signOut` an account console announced on the Aviary consoles registry, else none. Only
+same-origin paths reach the page.
+
 Every controller this library mounts is marked `@Can.Anyone()`-open, so `@nestjs/authorization`'s
 deny-by-default global guard doesn't refuse it; a `@Can(...)` you add is still checked. `mount`
 (`{ tus?, multipart?, direct? }`) still turns single upload surfaces off.

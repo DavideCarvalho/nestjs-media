@@ -1,4 +1,4 @@
-import { Suspense, lazy } from 'react';
+import { type JSX, Suspense, lazy } from 'react';
 import { mediaConsoleClient } from '../../client/media-console-client.js';
 import { Notice } from '../ui.js';
 import { HexPreview } from './HexPreview.js';

@@ -1,5 +1,5 @@
 import { keepPreviousData, useQuery } from '@tanstack/react-query';
-import { useState } from 'react';
+import { type JSX, useState } from 'react';
 import { mediaConsoleClient } from '../../client/media-console-client.js';
 import { Alert, Button, Notice, formatBytes } from '../ui.js';
 import { Input } from '../ui/input.js';
@@ -225,20 +225,20 @@ export function HexPreview({ item }: { item: PreviewItem }): JSX.Element {
         </Button>
       </form>
       {jumpError && <Alert variant="error">{jumpError}</Alert>}
-      <div className="mono min-h-0 flex-1 overflow-auto rounded-md border border-border bg-black/30 p-3 text-xs">
+      <div className="mono min-h-0 flex-1 overflow-auto rounded-md border border-border bg-sunken/30 p-3 text-xs">
         {rows.length === 0 ? (
           <Notice>Reading…</Notice>
         ) : (
           rows.map((row) => (
             <div key={row.offset} className="flex gap-4 whitespace-pre leading-5">
-              <span className="tnum shrink-0 text-zinc-600">{formatOffset(row.offset)}</span>
-              <span className="shrink-0 text-zinc-300">{formatHexColumn(row.cells)}</span>
-              <span className="shrink-0 text-zinc-500">{row.ascii}</span>
+              <span className="tnum shrink-0 text-faint">{formatOffset(row.offset)}</span>
+              <span className="shrink-0 text-fg-2">{formatHexColumn(row.cells)}</span>
+              <span className="shrink-0 text-dim">{row.ascii}</span>
             </div>
           ))
         )}
       </div>
-      <div className="mono tnum shrink-0 text-[10px] text-zinc-600">
+      <div className="mono tnum shrink-0 text-[10px] text-faint">
         {describeWindow(start, length, item.size)} · {formatBytes(item.size)}
       </div>
     </div>

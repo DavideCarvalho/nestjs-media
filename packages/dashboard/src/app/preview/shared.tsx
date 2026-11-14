@@ -1,3 +1,4 @@
+import type { JSX } from 'react';
 import { Button } from '../ui.js';
 import type { PreviewItem } from './types.js';
 
@@ -14,10 +15,10 @@ export function FallbackCard({
   return (
     <div className="grid h-full min-h-[320px] place-items-center gap-4 px-6 text-center">
       <div className="flex flex-col items-center gap-4">
-        <div className="grid h-14 w-14 place-items-center rounded-lg border border-border bg-zinc-900 text-2xl text-zinc-600">
+        <div className="grid h-14 w-14 place-items-center rounded-lg border border-border bg-panel-2 text-2xl text-faint">
           ⬡
         </div>
-        <div className="mono max-w-md text-sm text-zinc-400">{message}</div>
+        <div className="mono max-w-md text-sm text-dim">{message}</div>
         <Button
           tone="accent"
           size="sm"

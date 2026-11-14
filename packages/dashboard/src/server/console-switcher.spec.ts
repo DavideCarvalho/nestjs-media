@@ -16,7 +16,10 @@ import {
   readAviaryConsoles,
   registerAviaryConsole,
 } from './console-switcher.js';
-import { MediaDashboardUiController } from './media-dashboard-ui.controller.js';
+import {
+  MediaDashboardUiController,
+  type MediaShellOptions,
+} from './media-dashboard-ui.controller.js';
 import { MediaDashboardModule } from './media-dashboard.module.js';
 
 const TOKEN = 'console-token-123';
@@ -350,11 +353,17 @@ describe('the shell’s config block', () => {
     rmSync(dir, { recursive: true, force: true });
   });
 
-  function shell(): { html: string; config: Record<string, unknown> } {
-    const controller = Object.assign(new MediaDashboardUiController('/files', '/api/files'), {
-      dir,
-    }) as unknown as MediaDashboardUiController;
-    const html = controller.index();
+  async function shell(
+    options: MediaShellOptions = {},
+    request: Record<string, unknown> = {},
+  ): Promise<{ html: string; config: Record<string, unknown> }> {
+    const controller = Object.assign(
+      new MediaDashboardUiController('/files', '/api/files', options),
+      {
+        dir,
+      },
+    ) as unknown as MediaDashboardUiController;
+    const html = await controller.index(request);
     const match = html.match(
       /<script type="application\/json" id="media-dashboard-config">([^<]*)<\/script>/,
     );
@@ -362,22 +371,72 @@ describe('the shell’s config block', () => {
     return { html, config: JSON.parse(match[1]) as Record<string, unknown> };
   }
 
-  it('has no switcher while the media console is alone', () => {
+  const search = { endpoint: '/api/files/consoles/search', self: 'media' };
+
+  it('has no switcher while the media console is alone, but still its own ⌘K search', async () => {
     registerAviaryConsole(entry({ id: 'media', path: '/files' }));
-    expect(shell().config).toEqual({ apiBase: '/api/files' });
+    expect((await shell()).config).toEqual({ apiBase: '/api/files', search });
   });
 
-  it('carries the endpoint and how many others are registered, as data (CSP-safe)', () => {
+  it('has neither switcher nor search when the console is not registered', async () => {
+    expect((await shell()).config).toEqual({ apiBase: '/api/files' });
+  });
+
+  it('carries the endpoint and how many others are registered, as data (CSP-safe)', async () => {
     registerAviaryConsole(entry({ id: 'media', path: '/files' }));
     registerAviaryConsole(entry({ id: 'durable' }));
     registerAviaryConsole(entry({ id: 'agent' }));
-    const { html, config } = shell();
+    const { html, config } = await shell();
     expect(config).toEqual({
       apiBase: '/api/files',
       switcher: { endpoint: '/api/files/consoles', others: 2 },
+      search,
     });
     // The block is JSON data, not script: a `script-src 'self' 'nonce-x'` page still parses it.
     expect(html).toContain('<script type="application/json" id="media-dashboard-config">');
     expect(html).toContain('src="/files/assets/app.js"');
+  });
+
+  it('reads the viewer from request.user, and signOut from the option, escaped like the rest', async () => {
+    const { html, config } = await shell(
+      { signOut: { action: '/logout', csrfToken: () => 'tok' } },
+      { user: { fullName: '</script><b>', email: 'ann@x.test', roles: [{ name: 'admin' }] } },
+    );
+    expect(html.split('</script>').length).toBe(4);
+    expect(config).toEqual({
+      apiBase: '/api/files',
+      viewer: { label: '</script><b>', email: 'ann@x.test', role: 'admin' },
+      signOut: { action: '/logout', csrfToken: 'tok' },
+    });
+  });
+
+  it('uses the viewer option over request.user, and an announced sign-out as a fallback', async () => {
+    holder[AVIARY_CONSOLES_SLOT] = {
+      version: 1,
+      entries: [],
+      account: { signOut: { href: '/account/logout' } },
+    };
+    const { config } = await shell(
+      { viewer: async () => ({ label: 'Ops', role: 'support' }) },
+      { user: { email: 'ignored@x.test' } },
+    );
+    expect(config).toEqual({
+      apiBase: '/api/files',
+      viewer: { label: 'Ops', role: 'support' },
+      signOut: { href: '/account/logout' },
+    });
+    expect((await shell({ signOut: false })).config).toEqual({ apiBase: '/api/files' });
+  });
+
+  it('reaches the page through MediaDashboardModule.forRoot({ viewer, signOut })', () => {
+    const mod = MediaDashboardModule.forRoot({ viewer: () => ({ label: 'x' }), signOut: '/out' });
+    const shellProvider = (mod.providers ?? []).find(
+      (p) =>
+        typeof p === 'object' &&
+        'provide' in p &&
+        p.provide === Symbol.for('@dudousxd/nestjs-media-dashboard:shell'),
+    ) as { useValue: MediaShellOptions } | undefined;
+    expect(shellProvider?.useValue.signOut).toBe('/out');
+    expect(typeof shellProvider?.useValue.viewer).toBe('function');
   });
 });

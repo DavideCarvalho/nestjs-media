@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 
-export type Tab = 'disks' | 'uploads' | 'library';
+export type Tab = 'disks' | 'uploads' | 'library' | 'collections';
 
 export interface Route {
   tab: Tab;
@@ -18,7 +18,7 @@ export interface Route {
   collection?: string;
 }
 
-const TABS: readonly Tab[] = ['disks', 'uploads', 'library'];
+const TABS: readonly Tab[] = ['disks', 'uploads', 'library', 'collections'];
 
 function isTab(value: string): value is Tab {
   return (TABS as readonly string[]).includes(value);

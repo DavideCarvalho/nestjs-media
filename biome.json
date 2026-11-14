@@ -32,6 +32,12 @@
       "enabled": false
     }
   },
+  "overrides": [
+    {
+      "include": ["**/aviary-kit/ui/**", "**/aviary-kit/hooks/**"],
+      "linter": { "enabled": false }
+    }
+  ],
   "linter": {
     "enabled": true,
     "rules": {

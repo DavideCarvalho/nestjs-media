@@ -1,7 +1,14 @@
 import { useInfiniteQuery, useQuery, useQueryClient } from '@tanstack/react-query';
-import { type ReactNode, useState } from 'react';
+import { type JSX, type ReactNode, useState } from 'react';
+import { EmptyState } from '../../aviary-kit/blocks/empty-state';
+import { PageHeader, Toolbar } from '../../aviary-kit/blocks/page-header';
+import { LoadMore } from '../../aviary-kit/blocks/pager';
+import { QueryBoundary } from '../../aviary-kit/blocks/query-boundary';
+import { PageBody } from '../../aviary-kit/shell/app-shell';
+import { Skeleton } from '../../aviary-kit/ui/skeleton';
 import { mediaConsoleClient } from '../../client/media-console-client.js';
 import type { CollectionInfo, LibraryRecord } from '../../client/types.js';
+import { ImageIcon } from '../icons.js';
 import { Button, Notice, Panel, formatBytes, formatDate } from '../ui.js';
 import type { Route } from '../useHashRoute.js';
 
@@ -30,7 +37,7 @@ function CollectionsBar({
   const chipTone = (active: boolean) => (active ? ('selected' as const) : ('quiet' as const));
 
   return (
-    <div className="mb-4 flex flex-wrap gap-1">
+    <Toolbar label="Collections">
       <Button
         tone={chipTone(selected === undefined)}
         className="px-2.5 py-1 text-xs"
@@ -44,12 +51,34 @@ function CollectionsBar({
           render={
             <a href={libraryHash(collection.key)}>
               {collection.key}
-              <span className="tnum text-zinc-600">
+              <span className="tnum text-faint">
                 {collection.count} · {formatBytes(collection.sumSize)}
               </span>
             </a>
           }
         />
+      ))}
+    </Toolbar>
+  );
+}
+
+/** Card placeholders shaped like the record grid. */
+export function RecordGridSkeleton(): JSX.Element {
+  return (
+    <div
+      className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4"
+      aria-hidden
+    >
+      {Array.from({ length: 8 }, (_, i) => (
+        // biome-ignore lint/suspicious/noArrayIndexKey: static placeholder cards, never reordered
+        <div key={i} className="aviary-surface rounded-lg border border-border p-3">
+          <Skeleton className="h-3.5 w-3/4" />
+          <Skeleton className="mt-2 h-2.5 w-1/3" />
+          <div className="mt-4 flex justify-between">
+            <Skeleton className="h-2.5 w-12" />
+            <Skeleton className="h-2.5 w-20" />
+          </div>
+        </div>
       ))}
     </div>
   );
@@ -63,7 +92,13 @@ function RecordGrid({
   collection: string | undefined;
 }): JSX.Element {
   if (records.length === 0) {
-    return <Notice>No records{collection ? ` in "${collection}"` : ''}.</Notice>;
+    return (
+      <EmptyState
+        icon={<ImageIcon />}
+        title={collection ? `No records in "${collection}"` : 'No records yet'}
+        description="Records appear here once your app attaches media to its models."
+      />
+    );
   }
   return (
     <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
@@ -73,14 +108,14 @@ function RecordGrid({
           href={`#/library/${encodeURIComponent(record.id)}${
             collection ? `?collection=${encodeURIComponent(collection)}` : ''
           }`}
-          className="rounded-lg border border-border bg-panel p-3 text-sm transition-colors hover:border-zinc-600"
+          className="aviary-surface aviary-rise rounded-lg border border-border p-3 text-sm transition-colors hover:border-line-strong hover:bg-hover"
         >
-          <div className="truncate font-medium text-zinc-200">{record.fileName}</div>
-          <div className="mono mt-1 text-[10px] text-zinc-500">{record.mimeType}</div>
+          <div className="truncate font-medium text-fg">{record.fileName}</div>
+          <div className="mono mt-1 text-[10px] text-dim">{record.mimeType}</div>
           {record.tenant != null && (
-            <div className="mt-1 truncate text-[11px] text-zinc-400">{record.tenant.label}</div>
+            <div className="mt-1 truncate text-[11px] text-dim">{record.tenant.label}</div>
           )}
-          <div className="mono tnum mt-2 flex justify-between text-[10px] text-zinc-600">
+          <div className="mono tnum mt-2 flex justify-between text-[10px] text-faint">
             <span>{formatBytes(record.size)}</span>
             <span>{formatDate(record.createdAt)}</span>
           </div>
@@ -93,8 +128,8 @@ function RecordGrid({
 function DetailRow({ label, children }: { label: string; children: ReactNode }): JSX.Element {
   return (
     <>
-      <dt className="mono text-[10px] uppercase tracking-wider text-zinc-600">{label}</dt>
-      <dd className="truncate text-zinc-200">{children}</dd>
+      <dt className="mono text-[10px] uppercase tracking-wider text-faint">{label}</dt>
+      <dd className="truncate text-fg">{children}</dd>
     </>
   );
 }
@@ -130,18 +165,23 @@ function RecordDetail({ route }: { route: Route }): JSX.Element {
 
   return (
     <div>
-      <a
-        href={libraryHash(route.collection)}
-        className="mono text-xs text-zinc-500 hover:text-zinc-300"
-      >
+      <a href={libraryHash(route.collection)} className="mono text-xs text-dim hover:text-fg">
         ← back to library
       </a>
-      {detailQuery.isLoading && <Notice>Loading record…</Notice>}
+      {detailQuery.isLoading && (
+        <div className="aviary-surface mt-3 rounded-lg border border-border p-4" aria-hidden>
+          <Skeleton className="h-4 w-1/3" />
+          {Array.from({ length: 6 }, (_, i) => (
+            // biome-ignore lint/suspicious/noArrayIndexKey: static placeholder rows
+            <Skeleton key={i} className="mt-3 h-3 w-1/2" />
+          ))}
+        </div>
+      )}
       {detailQuery.isError && <p className="mt-3 text-sm s-error">Failed to load record.</p>}
       {detail && (
         <div className="mt-3">
           <Panel className="p-4">
-            <h3 className="font-semibold text-zinc-100">{detail.record.fileName}</h3>
+            <h3 className="font-semibold text-fg">{detail.record.fileName}</h3>
             <dl className="mt-3 grid grid-cols-[110px_1fr] gap-x-4 gap-y-2 text-xs">
               <DetailRow label="Collection">{detail.record.collection}</DetailRow>
               <DetailRow label="Mime type">
@@ -188,7 +228,7 @@ function RecordDetail({ route }: { route: Route }): JSX.Element {
             {deleteError && <p className="mt-2 text-xs s-error">{deleteError}</p>}
           </Panel>
 
-          <h4 className="mono mb-2 mt-4 text-[10px] uppercase tracking-wider text-zinc-600">
+          <h4 className="mono mb-2 mt-4 text-[10px] uppercase tracking-wider text-faint">
             variants
           </h4>
           {detail.variants.length === 0 ? (
@@ -200,7 +240,7 @@ function RecordDetail({ route }: { route: Route }): JSX.Element {
                   key={variant.name}
                   className="rounded-lg border border-border bg-panel p-2 text-xs"
                 >
-                  <div className="mono mb-1.5 text-[10px] uppercase tracking-wider text-zinc-500">
+                  <div className="mono mb-1.5 text-[10px] uppercase tracking-wider text-dim">
                     {variant.name}
                   </div>
                   {isImage(detail.record.mimeType) && (
@@ -215,7 +255,7 @@ function RecordDetail({ route }: { route: Route }): JSX.Element {
                       <a
                         href={mediaConsoleClient.objectDownloadUrl(variant.disk, variant.path)}
                         download={lastSegment(variant.path)}
-                        className="text-accent hover:text-accent"
+                        className="text-brand hover:text-brand"
                       >
                         Download
                       </a>
@@ -224,7 +264,7 @@ function RecordDetail({ route }: { route: Route }): JSX.Element {
                       href={variant.url}
                       target="_blank"
                       rel="noreferrer"
-                      className="text-accent hover:text-accent"
+                      className="text-brand hover:text-brand"
                     >
                       Open ↗
                     </a>
@@ -270,54 +310,75 @@ function LibraryGrid({ route, hasStore }: { route: Route; hasStore: boolean }): 
     : [];
 
   return (
-    <div>
+    <>
       <CollectionsBar
         collections={collectionsQuery.data?.collections ?? []}
         selected={route.collection}
       />
-      {libraryQuery.isLoading && <Notice>Loading library…</Notice>}
-      {libraryQuery.isError && <p className="text-sm s-error">Failed to load library.</p>}
-      <RecordGrid records={records} collection={route.collection} />
-      {libraryQuery.hasNextPage && (
-        <div className="mt-4">
-          <Button
-            onClick={() => libraryQuery.fetchNextPage()}
-            disabled={libraryQuery.isFetchingNextPage}
-          >
-            {libraryQuery.isFetchingNextPage ? 'Loading…' : 'Load more'}
-          </Button>
-        </div>
-      )}
-    </div>
+      <QueryBoundary
+        label="Library"
+        query={{
+          data: libraryQuery.data ? records : undefined,
+          error: libraryQuery.error,
+          isPending: libraryQuery.isPending,
+          refetch: libraryQuery.refetch,
+        }}
+        skeleton={<RecordGridSkeleton />}
+      >
+        {(rows) => <RecordGrid records={rows} collection={route.collection} />}
+      </QueryBoundary>
+      <LoadMore
+        hasNext={libraryQuery.hasNextPage}
+        loading={libraryQuery.isFetchingNextPage}
+        onLoadMore={() => void libraryQuery.fetchNextPage()}
+      />
+    </>
   );
 }
 
-export function LibraryView({ route, hasStore }: { route: Route; hasStore: boolean }): JSX.Element {
-  if (!hasStore) {
-    return (
-      <section className="rise">
-        <div className="grid place-items-center py-16 text-center">
-          <div className="max-w-sm">
-            <div className="mono mb-2 text-[10px] uppercase tracking-[0.2em] text-zinc-600">
-              library
-            </div>
-            <p className="text-sm text-zinc-500">
-              No media store configured. Bind a{' '}
-              <code className="mono text-zinc-300">MediaStore</code> to browse collections and their
-              variants here.
-            </p>
-          </div>
-        </div>
-      </section>
-    );
-  }
+export function LibraryView({
+  route,
+  hasStore,
+  topologyPending = false,
+}: {
+  route: Route;
+  hasStore: boolean;
+  /** The topology is still loading: show the page's skeleton, not the "no store" state. */
+  topologyPending?: boolean;
+}): JSX.Element {
   return (
-    <section className="rise">
-      {route.recordId ? (
+    <PageBody>
+      {!route.recordId && (
+        <PageHeader
+          title="Library"
+          description="Media records your app attached to its models, with their variants."
+        />
+      )}
+      {topologyPending ? (
+        <RecordGridSkeleton />
+      ) : !hasStore ? (
+        <NoStore />
+      ) : route.recordId ? (
         <RecordDetail route={route} />
       ) : (
         <LibraryGrid route={route} hasStore={hasStore} />
       )}
-    </section>
+    </PageBody>
+  );
+}
+
+/** The library and the collections both need a `MediaStore`; this is what they show without one. */
+export function NoStore(): JSX.Element {
+  return (
+    <EmptyState
+      icon={<ImageIcon />}
+      title="No media store configured"
+      description={
+        <>
+          Bind a <code className="mono text-fg-2">MediaStore</code> to browse collections and their
+          variants here.
+        </>
+      }
+    />
   );
 }

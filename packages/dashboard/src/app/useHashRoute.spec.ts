@@ -30,4 +30,8 @@ describe('parseHash', () => {
   it('ignores a preview param when no disk segment is present', () => {
     expect(parseHash('#/disks?preview=rag/a/b.md')).toEqual({ tab: 'disks' });
   });
+
+  it('parses the collections page (the LIBRARY section of the sidebar)', () => {
+    expect(parseHash('#/collections')).toEqual({ tab: 'collections' });
+  });
 });

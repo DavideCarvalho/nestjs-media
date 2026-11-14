@@ -29,3 +29,6 @@ export const MEDIA_CONSOLE_OBJECT_URLS: symbol = Symbol('MEDIA_CONSOLE_OBJECT_UR
 
 /** Carries whether the media tools register into the dev-tools slot (`options.devTools`). */
 export const MEDIA_DASHBOARD_DEV_TOOLS: symbol = Symbol('MEDIA_DASHBOARD_DEV_TOOLS');
+
+/** Carries the console shell's `viewer` / `signOut` options (see `console-shell.ts`). */
+export const MEDIA_DASHBOARD_SHELL: symbol = Symbol.for('@dudousxd/nestjs-media-dashboard:shell');

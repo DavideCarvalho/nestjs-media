@@ -1,110 +1,163 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import type { ReactNode } from 'react';
+import type { JSX, ReactNode } from 'react';
+import { type Column, DataTable } from '../../aviary-kit/blocks/data-table';
+import { EmptyState } from '../../aviary-kit/blocks/empty-state';
+import { PageHeader } from '../../aviary-kit/blocks/page-header';
+import { Panel as KitPanel } from '../../aviary-kit/blocks/panel';
+import { QueryBoundary } from '../../aviary-kit/blocks/query-boundary';
+import { PageBody } from '../../aviary-kit/shell/app-shell';
+import { Skeleton } from '../../aviary-kit/ui/skeleton';
 import { mediaConsoleClient } from '../../client/media-console-client.js';
+import type { UploadListResponse } from '../../client/types.js';
+import { UploadIcon } from '../icons.js';
 import { Button, Dot, Notice, Panel, relativeAge } from '../ui.js';
 import type { Route } from '../useHashRoute.js';
+
+type UploadRow = UploadListResponse['uploads'][number];
 
 const UPLOADS_QUERY_KEY = ['uploads'];
 
 function ProgressBar({ percent }: { percent: number | null }): JSX.Element {
   if (percent === null) {
-    return <span className="mono text-[10px] text-zinc-600">unknown size</span>;
+    return <span className="mono text-[10px] whitespace-nowrap text-faint">unknown size</span>;
   }
   const clamped = Math.min(100, Math.max(0, percent));
   return (
     <div className="flex items-center gap-2">
-      <div className="h-1.5 w-28 overflow-hidden rounded-full bg-zinc-800">
+      <div className="h-1.5 w-20 overflow-hidden rounded-full bg-panel-3 sm:w-28">
         <div
-          className="h-full rounded-full bg-accent/80 transition-[width]"
+          className="h-full rounded-full bg-primary/80 transition-[width]"
           style={{ width: `${clamped}%` }}
         />
       </div>
-      <span className="mono tnum text-[10px] text-zinc-500">{clamped}%</span>
+      <span className="mono tnum text-[10px] text-dim">{clamped}%</span>
     </div>
   );
 }
 
+function uploadColumns(tenancy: boolean): Column<UploadRow>[] {
+  return [
+    {
+      id: 'key',
+      header: 'Key',
+      className: 'max-w-[150px] truncate sm:max-w-xs',
+      cell: (upload) => (
+        <a
+          href={`#/uploads/${encodeURIComponent(upload.id)}`}
+          className="mono text-xs text-fg hover:text-brand"
+          onClick={(event) => event.stopPropagation()}
+        >
+          {upload.key}
+        </a>
+      ),
+    },
+    {
+      id: 'disk',
+      header: 'Disk',
+      hideBelow: 'sm',
+      cell: (upload) => <span className="mono text-xs">{upload.disk}</span>,
+    },
+    ...(tenancy
+      ? [
+          {
+            id: 'tenant',
+            header: 'Organization',
+            hideBelow: 'md' as const,
+            className: 'max-w-[12rem] truncate',
+            cell: (upload: UploadRow) => upload.tenant?.label ?? '—',
+          },
+        ]
+      : []),
+    {
+      id: 'progress',
+      header: 'Progress',
+      cell: (upload) => <ProgressBar percent={upload.percent} />,
+    },
+    {
+      id: 'parts',
+      header: 'Parts',
+      align: 'right',
+      hideBelow: 'md',
+      cell: (upload) => <span className="mono tnum text-xs">{upload.parts}</span>,
+    },
+    {
+      id: 'age',
+      header: 'Age',
+      align: 'right',
+      hideBelow: 'sm',
+      cell: (upload) => <span className="text-xs">{relativeAge(upload.createdAt) ?? '—'}</span>,
+    },
+  ];
+}
+
+/** Presentational: the live resumable sessions. `uploads` undefined = still loading. */
+export function UploadsTable({
+  uploads,
+  actions,
+}: {
+  uploads: ReadonlyArray<UploadRow> | undefined;
+  actions: boolean;
+}): JSX.Element {
+  // With tenancy on, every session carries `tenant` (null when it has none).
+  const tenancy = uploads?.some((upload) => upload.tenant !== undefined) ?? false;
+  return (
+    <KitPanel
+      title="Resumable sessions"
+      description={
+        <span className="flex items-center gap-2">
+          <Dot tone="live" pulse />
+          refreshed every 2s{actions ? ' · cancel from a session' : ''}
+        </span>
+      }
+      flush
+    >
+      <DataTable
+        label="Uploads"
+        columns={uploadColumns(tenancy)}
+        rows={uploads ? [...uploads] : undefined}
+        rowKey={(upload) => upload.id}
+        onRowClick={(upload) => {
+          window.location.hash = `#/uploads/${encodeURIComponent(upload.id)}`;
+        }}
+        loading={!uploads}
+        empty={
+          <EmptyState
+            icon={<UploadIcon />}
+            title="No uploads in progress"
+            description="Resumable sessions show here while a client is sending a file."
+          />
+        }
+      />
+    </KitPanel>
+  );
+}
+
+/** Container: polls the sessions every 2 s. */
 function UploadsListView({ actions }: { actions: boolean }): JSX.Element {
   const uploadsQuery = useQuery({
     queryKey: UPLOADS_QUERY_KEY,
     queryFn: () => mediaConsoleClient.uploads({}),
     refetchInterval: 2000,
   });
-
-  if (uploadsQuery.isLoading) {
-    return <Notice>Loading uploads…</Notice>;
-  }
-  if (uploadsQuery.isError) {
-    return <Notice>Failed to load uploads.</Notice>;
-  }
-
-  const uploads = uploadsQuery.data?.uploads ?? [];
-  // With tenancy on, every session carries `tenant` (null when it has none).
-  const tenancy = uploads.some((upload) => upload.tenant !== undefined);
-
   return (
-    <section className="rise">
-      <div className="mb-3 flex items-center gap-2">
-        <Dot tone="live" pulse />
-        <span className="mono text-[11px] text-zinc-500">
-          Live resumable sessions · refreshed every 2s
-          {actions ? ' · cancel from a session detail' : ''}
-        </span>
-      </div>
-      {uploads.length === 0 ? (
-        <Notice>No uploads in progress.</Notice>
-      ) : (
-        <Panel className="overflow-hidden">
-          <table className="w-full text-left text-sm">
-            <thead>
-              <tr className="mono border-b border-border text-[10px] uppercase tracking-wider text-zinc-600">
-                <th className="px-4 py-2 font-normal">Key</th>
-                <th className="px-4 py-2 font-normal">Disk</th>
-                {tenancy && <th className="px-4 py-2 font-normal">Organization</th>}
-                <th className="px-4 py-2 font-normal">Progress</th>
-                <th className="px-4 py-2 font-normal">Parts</th>
-                <th className="px-4 py-2 font-normal">Age</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-line-soft">
-              {uploads.map((upload) => (
-                <tr key={upload.id} className="hover:bg-zinc-900/40">
-                  <td className="max-w-xs truncate px-4 py-2">
-                    <a
-                      href={`#/uploads/${encodeURIComponent(upload.id)}`}
-                      className="mono text-xs text-zinc-200 hover:text-accent"
-                    >
-                      {upload.key}
-                    </a>
-                  </td>
-                  <td className="mono px-4 py-2 text-xs text-zinc-400">{upload.disk}</td>
-                  {tenancy && (
-                    <td className="max-w-[12rem] truncate px-4 py-2 text-xs text-zinc-400">
-                      {upload.tenant?.label ?? '—'}
-                    </td>
-                  )}
-                  <td className="px-4 py-2">
-                    <ProgressBar percent={upload.percent} />
-                  </td>
-                  <td className="mono tnum px-4 py-2 text-xs text-zinc-400">{upload.parts}</td>
-                  <td className="px-4 py-2 text-xs text-zinc-500">
-                    {relativeAge(upload.createdAt) ?? '—'}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </Panel>
-      )}
-    </section>
+    <PageBody>
+      <PageHeader title="Uploads" description="Live resumable upload sessions across your disks." />
+      <QueryBoundary
+        label="Uploads"
+        query={uploadsQuery}
+        skeleton={<UploadsTable uploads={undefined} actions={actions} />}
+      >
+        {(data) => <UploadsTable uploads={data.uploads} actions={actions} />}
+      </QueryBoundary>
+    </PageBody>
   );
 }
 
 function DetailRow({ label, children }: { label: string; children: ReactNode }): JSX.Element {
   return (
     <>
-      <dt className="mono text-[10px] uppercase tracking-wider text-zinc-600">{label}</dt>
-      <dd className="text-zinc-200">{children}</dd>
+      <dt className="mono text-[10px] uppercase tracking-wider text-faint">{label}</dt>
+      <dd className="text-fg">{children}</dd>
     </>
   );
 }
@@ -130,14 +183,21 @@ function UploadDetailView({
   });
 
   return (
-    <section className="rise">
-      <a href="#/uploads" className="mono text-xs text-zinc-500 hover:text-zinc-300">
-        ← back
+    <PageBody>
+      <a href="#/uploads" className="mono text-xs text-dim hover:text-fg">
+        ← back to uploads
       </a>
-      {uploadQuery.isLoading && <Notice>Loading upload…</Notice>}
+      {uploadQuery.isLoading && (
+        <div className="aviary-surface rounded-lg border border-border p-4" aria-hidden>
+          {Array.from({ length: 7 }, (_, i) => (
+            // biome-ignore lint/suspicious/noArrayIndexKey: static placeholder rows
+            <Skeleton key={i} className="mt-3 h-3 w-1/2 first:mt-0" />
+          ))}
+        </div>
+      )}
       {uploadQuery.isError && <Notice>Failed to load upload.</Notice>}
       {uploadQuery.data && (
-        <div className="mt-2">
+        <div>
           <Panel className="p-4">
             <dl className="grid grid-cols-[120px_1fr] gap-x-4 gap-y-2 text-sm">
               <DetailRow label="Key">
@@ -187,27 +247,23 @@ function UploadDetailView({
             )}
           </Panel>
 
-          <h3 className="mono mb-1 mt-4 text-[10px] uppercase tracking-wider text-zinc-600">
-            parts
-          </h3>
+          <h3 className="mono mb-1 mt-4 text-[10px] uppercase tracking-wider text-faint">parts</h3>
           {uploadQuery.data.parts.length === 0 ? (
             <Notice>No parts uploaded yet.</Notice>
           ) : (
             <Panel className="overflow-hidden">
               <table className="w-full text-left text-sm">
                 <thead>
-                  <tr className="mono border-b border-border text-[10px] uppercase tracking-wider text-zinc-600">
+                  <tr className="mono border-b border-border text-[10px] uppercase tracking-wider text-faint">
                     <th className="px-4 py-2 font-normal">Part</th>
                     <th className="px-4 py-2 font-normal">ETag</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-line-soft">
                   {uploadQuery.data.parts.map((part) => (
-                    <tr key={part.partNumber} className="hover:bg-zinc-900/40">
-                      <td className="mono tnum px-4 py-2 text-xs text-zinc-300">
-                        {part.partNumber}
-                      </td>
-                      <td className="mono px-4 py-2 text-xs text-zinc-500">{part.etag}</td>
+                    <tr key={part.partNumber} className="hover:bg-hover">
+                      <td className="mono tnum px-4 py-2 text-xs text-fg-2">{part.partNumber}</td>
+                      <td className="mono px-4 py-2 text-xs text-dim">{part.etag}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -216,7 +272,7 @@ function UploadDetailView({
           )}
         </div>
       )}
-    </section>
+    </PageBody>
   );
 }
 

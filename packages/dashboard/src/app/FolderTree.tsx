@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
-import { useState } from 'react';
+import { type JSX, useState } from 'react';
 import { mediaConsoleClient } from '../client/media-console-client.js';
 import type { DiskInfo, ObjectFolder } from '../client/types.js';
 import { Dot } from './ui.js';
@@ -98,10 +98,10 @@ function TreeRow({
       onDrop={dropProps?.onDrop}
       className={`mono group flex items-center gap-1 rounded-md border pr-1.5 text-xs transition-colors ${
         dropProps?.isTarget
-          ? 'border-accent/60 bg-accent/10 text-accent'
+          ? 'border-primary/60 bg-brand-soft text-brand'
           : active
-            ? 'border-border bg-zinc-900 text-zinc-100'
-            : 'border-transparent text-zinc-400 hover:bg-zinc-900/50 hover:text-zinc-200'
+            ? 'border-border bg-panel-2 text-fg'
+            : 'border-transparent text-dim hover:bg-hover hover:text-fg'
       }`}
       style={{ paddingLeft: depth * INDENT_PER_DEPTH }}
     >
@@ -109,7 +109,7 @@ function TreeRow({
         type="button"
         aria-label={expanded ? 'Collapse' : 'Expand'}
         onClick={onToggle}
-        className="shrink-0 px-1 py-1 text-zinc-600 transition-colors hover:text-zinc-300"
+        className="shrink-0 px-1 py-1 text-faint transition-colors hover:text-fg-2"
       >
         <span className={`inline-block transition-transform ${expanded ? 'rotate-90' : ''}`}>
           ▸
@@ -120,7 +120,7 @@ function TreeRow({
         onClick={onOpen}
         className="flex min-w-0 flex-1 items-center gap-1.5 py-1.5 text-left"
       >
-        <span className="shrink-0 text-zinc-600">{icon}</span>
+        <span className="shrink-0 text-faint">{icon}</span>
         <span className="truncate">{label}</span>
       </button>
       {trailing}
@@ -183,7 +183,7 @@ function FolderChildren({
   if (query.isLoading) {
     return (
       <p
-        className="mono py-1 text-[10px] text-zinc-600"
+        className="mono py-1 text-[10px] text-faint"
         style={{ paddingLeft: depth * INDENT_PER_DEPTH + 24 }}
       >
         Loading…
@@ -208,7 +208,7 @@ function FolderChildren({
   if (folders.length === 0) {
     return (
       <p
-        className="mono py-1 text-[10px] text-zinc-700"
+        className="mono py-1 text-[10px] text-faint"
         style={{ paddingLeft: depth * INDENT_PER_DEPTH + 24 }}
       >
         No sub-folders
@@ -299,7 +299,7 @@ function DiskRoot({ disk, context }: { disk: DiskInfo; context: TreeContext }): 
         trailing={
           <span className="flex shrink-0 items-center gap-1.5">
             {disk.default && (
-              <span className="text-[9px] uppercase tracking-wider text-zinc-600">default</span>
+              <span className="text-[9px] uppercase tracking-wider text-faint">default</span>
             )}
             {!canList && (
               <span title="Listing unsupported on this disk">

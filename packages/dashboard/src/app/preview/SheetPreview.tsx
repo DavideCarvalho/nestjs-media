@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
-import { useMemo, useState } from 'react';
+import { type JSX, useMemo, useState } from 'react';
 import * as XLSX from 'xlsx';
 import { mediaConsoleClient } from '../../client/media-console-client.js';
 import { DataTable } from '../DataTable.js';

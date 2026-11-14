@@ -8,6 +8,6 @@
     "lib": ["ES2022", "DOM", "DOM.Iterable"],
     "types": ["vite/client"]
   },
-  "include": ["src/app/**/*.ts", "src/app/**/*.tsx", "src/client/**/*.ts"],
+  "include": ["src/app/**/*.ts", "src/app/**/*.tsx", "src/aviary-kit/**/*.ts", "src/aviary-kit/**/*.tsx", "src/client/**/*.ts"],
   "exclude": ["dist", "node_modules"]
 }

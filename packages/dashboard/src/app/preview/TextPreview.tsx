@@ -1,4 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
+import type { JSX } from 'react';
 import { mediaConsoleClient } from '../../client/media-console-client.js';
 import { DataTable } from '../DataTable.js';
 import { Alert, Notice, formatBytes } from '../ui.js';
@@ -89,7 +90,7 @@ export function TextPreview({ item }: { item: PreviewItem }): JSX.Element {
     ) : flavor === 'tsv' ? (
       <DelimitedTable text={source} delimiter={'\t'} />
     ) : (
-      <pre className="mono min-h-0 flex-1 overflow-auto whitespace-pre-wrap break-words rounded-md border border-border bg-black/30 p-3 text-xs text-zinc-300">
+      <pre className="mono min-h-0 flex-1 overflow-auto whitespace-pre-wrap break-words rounded-md border border-border bg-sunken/30 p-3 text-xs text-fg-2">
         {flavor === 'json' ? prettyJson(source) : source}
       </pre>
     );

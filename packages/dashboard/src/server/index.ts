@@ -31,6 +31,9 @@ export {
   ConsoleAccessDenied,
   UseConsoleAuthorize,
 } from './console-authorize.js';
+// The console shell's sidebar footer: who is signed in, and how to sign out.
+export * from './console-shell.js';
+export type { MediaShellOptions } from './media-dashboard-ui.controller.js';
 export type { ObjectUrlConfig, ObjectUrlStrategy } from './object-urls.js';
 export { MediaConsoleService } from './media-console.service.js';
 // Developer tools over MCP (the agent's dev endpoint) and the console switcher.

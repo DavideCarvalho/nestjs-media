@@ -1,4 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
+import type { JSX } from 'react';
 import { mediaConsoleClient } from '../../client/media-console-client.js';
 import { DataTable } from '../DataTable.js';
 import { Alert, Notice, formatBytes } from '../ui.js';

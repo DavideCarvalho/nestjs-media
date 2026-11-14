@@ -7,6 +7,7 @@ import {
 import type { InjectionToken } from '@nestjs/common';
 import { RouterModule } from '@nestjs/core';
 import type { ConsoleAuthorize } from './console-authorize.js';
+import type { ConsoleSignOutOption, ConsoleViewerResolver } from './console-shell.js';
 import { MediaConsoleRegistration } from './console-switcher.js';
 import { consoleController } from './controller-decorators.js';
 import { MediaConsoleApiModule } from './media-console-api.module.js';
@@ -17,6 +18,7 @@ import {
   MEDIA_CONSOLE_OBJECT_INSIGHTS,
   MEDIA_DASHBOARD_API_PATH,
   MEDIA_DASHBOARD_BASE_PATH,
+  MEDIA_DASHBOARD_SHELL,
 } from './tokens.js';
 
 export interface MediaDashboardOptions {
@@ -129,6 +131,28 @@ export interface MediaDashboardOptions {
    * `authorize`. Default: on when the console's routes are mounted, off with `routes: false`.
    */
   devTools?: boolean;
+  /**
+   * Who the console's sidebar footer says is signed in: `(request) => ({ label, email?, role? })`,
+   * sync or async. `null`/`undefined` or a throw shows no user row.
+   *
+   * Omitted: `request.user` is read structurally — whatever your guards (`decorators`) already put
+   * there: `fullName` → `name` → `email` for the label, and `role` or the first of `roles` (a
+   * string or `{ name }`). Reading it never triggers an authentication.
+   */
+  viewer?: ConsoleViewerResolver;
+  /**
+   * The sidebar footer's sign-out. One of:
+   *
+   * - `'/logout'`: a POST form to that path (with `_csrf` when the request exposes
+   *   `req.csrfToken()`);
+   * - `{ href: '/logout' }`: a plain link;
+   * - `{ action: '/logout', csrfToken: (request) => token }`: a POST form with your token as `_csrf`;
+   * - `false`: none, even when an account console announced one.
+   *
+   * Omitted: the sign-out an account console announced on the Aviary consoles registry
+   * (`account.signOut`), else none. Only same-origin paths (`/x`) are ever sent to the page.
+   */
+  signOut?: ConsoleSignOutOption;
 }
 
 /**
@@ -166,6 +190,10 @@ export interface MediaDashboardAsyncOptions {
   routes?: boolean;
   /** See {@link MediaDashboardOptions.devTools}. */
   devTools?: boolean;
+  /** See {@link MediaDashboardOptions.viewer}. */
+  viewer?: ConsoleViewerResolver;
+  /** See {@link MediaDashboardOptions.signOut}. */
+  signOut?: ConsoleSignOutOption;
 }
 
 /** Leading slash, no trailing slash. */
@@ -213,6 +241,8 @@ export class MediaDashboardModule {
       decorators?: ClassDecorator[];
       routes?: boolean;
       devTools?: boolean;
+      viewer?: ConsoleViewerResolver;
+      signOut?: ConsoleSignOutOption;
     },
     insightsProvider: Provider,
   ): DynamicModule {
@@ -249,13 +279,25 @@ export class MediaDashboardModule {
       providers: [
         { provide: MEDIA_DASHBOARD_BASE_PATH, useValue: basePath },
         { provide: MEDIA_DASHBOARD_API_PATH, useValue: apiBasePath },
+        {
+          provide: MEDIA_DASHBOARD_SHELL,
+          useValue: {
+            ...(options.viewer ? { viewer: options.viewer } : {}),
+            ...(options.signOut !== undefined ? { signOut: options.signOut } : {}),
+          },
+        },
         // The console switcher lists this console only where it serves its own page.
         ...(mount ? [MediaConsoleRegistration] : []),
       ],
       // Re-export the API module so its MediaConsoleService reaches importers if they want it; the
-      // resolved paths too, so a host mounting the controllers itself (`routes: false`) can extend
-      // `MediaDashboardUiController` in a module of its own.
-      exports: [MediaConsoleApiModule, MEDIA_DASHBOARD_BASE_PATH, MEDIA_DASHBOARD_API_PATH],
+      // resolved paths and shell options too, so a host mounting the controllers itself
+      // (`routes: false`) can extend `MediaDashboardUiController` in a module of its own.
+      exports: [
+        MediaConsoleApiModule,
+        MEDIA_DASHBOARD_BASE_PATH,
+        MEDIA_DASHBOARD_API_PATH,
+        MEDIA_DASHBOARD_SHELL,
+      ],
     };
   }
 }

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { type JSX, useEffect, useState } from 'react';
 import { mediaConsoleClient } from '../../client/media-console-client.js';
 import { DataTable } from '../DataTable.js';
 // Type-only: erased at compile time, so the SQLite engine stays out of this chunk. The implementation
@@ -111,7 +111,7 @@ export function SqlitePreview({ item }: { item: PreviewItem }): JSX.Element {
   return (
     <div className="flex min-h-0 flex-1 gap-3">
       <div className="flex w-44 shrink-0 flex-col gap-1 overflow-auto">
-        <div className="text-[10px] uppercase tracking-wide text-zinc-500">Tables</div>
+        <div className="text-[10px] uppercase tracking-wide text-dim">Tables</div>
         {tables.length === 0 && <Alert>No tables in this database.</Alert>}
         {tables.map((table) => (
           <Button
@@ -162,7 +162,7 @@ export function SqlitePreview({ item }: { item: PreviewItem }): JSX.Element {
         {result && (
           <>
             <DataTable header={result.columns} body={result.rows} />
-            <div className="mono tnum shrink-0 text-[10px] text-zinc-600">
+            <div className="mono tnum shrink-0 text-[10px] text-faint">
               {result.rows.length} row{result.rows.length === 1 ? '' : 's'}
               {result.truncated && ` (first ${SQLITE_ROW_LIMIT})`} · read{' '}
               {formatBytes(result.bytesFetched)} of {formatBytes(item.size)} · {result.elapsedMs} ms
