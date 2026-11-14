@@ -205,11 +205,71 @@ describe('MediaConsoleService — listing', () => {
 
   it('answers 400 for a forged cursor, not 500', async () => {
     const service = new MediaConsoleService(fakeStorage(), null, null, true);
-    for (const cursor of ['not-a-cursor', Buffer.from('{"o":-1}').toString('base64url')]) {
+    const wrap = (t: string, d = 'primary', p = '') =>
+      Buffer.from(JSON.stringify({ d, p, t })).toString('base64url');
+    for (const cursor of [
+      'not-a-cursor',
+      'zzz',
+      Buffer.from('{"o":-1}').toString('base64url'),
+      // A raw folded-listing token, not wrapped by the console.
+      Buffer.from('{"o":0}').toString('base64url'),
+      // Well-formed console cursors around a token no driver issued.
+      wrap('zzz'),
+      wrap(Buffer.from('{"o":-1}').toString('base64url')),
+      wrap(Buffer.from('{"c":"zzz","o":0}').toString('base64url')),
+      // Another disk's or folder's cursor.
+      wrap(Buffer.from('{"o":0}').toString('base64url'), 'secondary'),
+      wrap(Buffer.from('{"o":0}').toString('base64url'), 'primary', 'docs/'),
+    ]) {
       const error = await service.listObjects('primary', { cursor }).catch((e: unknown) => e);
       expect(error).toBeInstanceOf(HttpException);
-      expect(error).toMatchObject({ status: 400 });
+      expect([cursor, (error as HttpException).getStatus()]).toEqual([cursor, 400]);
     }
+  });
+
+  it('wraps the side-car continuation token, and answers 400 when the store rejects it', async () => {
+    const tokens: Array<string | undefined> = [];
+    const sidecar = {
+      listFolders: async (_prefix: string, options: { cursor?: string }) => {
+        tokens.push(options.cursor);
+        if (options.cursor === 'forged') {
+          throw Object.assign(
+            new Error(
+              'S3 ListObjectsV2 failed: InvalidArgument (The continuation token provided is incorrect)',
+            ),
+            { name: 'S3MultipartError', code: 'InvalidArgument' },
+          );
+        }
+        return options.cursor
+          ? { folders: [], files: [] }
+          : { folders: [], files: [], cursor: 'real-token' };
+      },
+    } as unknown as MultipartUploadDriver;
+    const service = new MediaConsoleService(
+      storageOf({ primary: new InMemoryDisk() }),
+      null,
+      null,
+      true,
+      null,
+      null,
+      { primary: sidecar },
+    );
+    const first = await service.listObjects('primary', { prefix: 'smoke/' });
+    const next = first.meta.nextCursor as string;
+    expect(next).not.toBe('real-token');
+    await service.listObjects('primary', { prefix: 'smoke/', cursor: next });
+    expect(tokens).toEqual([undefined, 'real-token']);
+    // The raw token is no console cursor: rejected before the store sees it.
+    await expect(
+      service.listObjects('primary', { prefix: 'smoke/', cursor: 'zzz' }),
+    ).rejects.toMatchObject({ status: 400 });
+    expect(tokens).toHaveLength(2);
+    const forged = Buffer.from(JSON.stringify({ d: 'primary', p: 'smoke/', t: 'forged' })).toString(
+      'base64url',
+    );
+    await expect(
+      service.listObjects('primary', { prefix: 'smoke/', cursor: forged }),
+    ).rejects.toMatchObject({ status: 400, message: 'Malformed cursor in "after".' });
   });
 });
 
