@@ -1,5 +1,11 @@
 # @dudousxd/nestjs-media-dashboard
 
+## 0.24.2
+
+### Patch Changes
+
+- [#220](https://github.com/DavideCarvalho/nestjs-media/pull/220) [`8fdb610`](https://github.com/DavideCarvalho/nestjs-media/commit/8fdb610783e5a7438f1305cef8cf7420fec8aace) Thanks [@DavideCarvalho](https://github.com/DavideCarvalho)! - ⌘K console search now degrades gracefully when the app doesn't serve the search endpoint (a console mounted with `routes: false` and the host's own controllers). A 404/405/501 from `/consoles/search` marks search as not enabled for the page's life: the dialog says "Search isn't enabled in this app." once (never "Nothing found" or a retry loop), the endpoint is not asked again, and the ⌘K trigger and shortcut are hidden (kept for console-local commands). A 404 from `/consoles` keeps the plain brand and is no longer re-requested on every search. Other failures (5xx, network) keep the quiet error line with Retry.
+
 ## 0.24.1
 
 ### Patch Changes
