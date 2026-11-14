@@ -1,5 +1,13 @@
 # @dudousxd/nestjs-media-dashboard
 
+## 0.23.0
+
+### Minor Changes
+
+- [#217](https://github.com/DavideCarvalho/nestjs-media/pull/217) [`4ca064c`](https://github.com/DavideCarvalho/nestjs-media/commit/4ca064cc016d60dc5ff6ebf35e1e314f99593184) Thanks [@DavideCarvalho](https://github.com/DavideCarvalho)! - The console moves onto the shared Aviary console kit: a sidebar shell (console switcher, LIBRARY · Library / Collections, TRANSFERS · Uploads / Disks, signed-in user, light/dark toggle, sign-out), a topbar with the disk and subsystem status, the live indicator and ⌘K, bundled Sora + JetBrains Mono (no Google Fonts), Tailwind 4 + React 19, shaped skeletons, error boundaries and empty states, light mode, and a phone-width drawer. A new Collections page (`#/collections`) lists every collection with its record count and size. Every other page, hash route, deep link, preview and the access-denied page are kept.
+
+  ⌘K lists the console's pages first and searches each console on its own, streaming the groups in as they answer (`GET <api>/consoles/search?q=&console=<id>` answers for one console). New `MediaDashboardModule.forRoot` / `forRootAsync` options feed the sidebar footer: `viewer: (request) => ({ label, email?, role? })` (default: `request.user` read structurally) and `signOut: '/path' | { href } | { action, csrfToken? } | false` (default: the `account.signOut` an account console announces on the Aviary consoles registry). `MediaDashboardUiController.index()` is now async and takes the request: a host subclass that overrides `index()` must make its override async too (`async index(req): Promise<string>`).
+
 ## 0.22.1
 
 ### Patch Changes
