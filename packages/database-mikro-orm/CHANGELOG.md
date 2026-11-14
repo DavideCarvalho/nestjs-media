@@ -1,5 +1,11 @@
 # @dudousxd/nestjs-media-database-mikro-orm
 
+## 0.9.1
+
+### Patch Changes
+
+- [#216](https://github.com/DavideCarvalho/nestjs-media/pull/216) [`9e65d7c`](https://github.com/DavideCarvalho/nestjs-media/commit/9e65d7cbea8981baba954bbd81ef93ad33b8ff67) Thanks [@DavideCarvalho](https://github.com/DavideCarvalho)! - `ensureMediaSchema(orm)` works on MySQL without `schema`. MikroORM's own update created `idx_media_tenant` (four `varchar(255)` columns) whole, which is over InnoDB's 3072-byte key limit in `utf8mb4`, so the `media` table could not be created. On MySQL it now runs the same safe update with that index's columns given 191-character prefixes, as the `schema` heal already did. Postgres and SQLite are unchanged.
+
 ## 0.9.0
 
 ### Minor Changes
