@@ -152,5 +152,41 @@ for (const dialect of dialects) {
         .execute<unknown[]>(`select id from ${table()} where id = 'tx1'`);
       expect(rows).toHaveLength(1);
     });
+
+    if (dialect.name === 'mysql') {
+      it('without `schema`: the update creates the tenant index with prefixes, twice in a row', async () => {
+        // MikroORM's own update creates idx_media_tenant whole, over InnoDB's 3072-byte key limit.
+        const plain = await MySqlORM.init({
+          host: container.getHost(),
+          port: container.getMappedPort(3306),
+          user: 'root',
+          password: 'test',
+          dbName: 'app',
+          entities: [mediaEntity()],
+          allowGlobalContext: true,
+        });
+        try {
+          await ensureMediaSchema(plain as unknown as CoreMikroORM);
+          await ensureMediaSchema(plain as unknown as CoreMikroORM);
+          const parts = await plain.em
+            .getConnection()
+            .execute<{ name: string; part: number | null }[]>(
+              `select column_name as name, sub_part as part from information_schema.statistics
+               where table_schema = 'app' and table_name = 'media' and index_name = 'idx_media_tenant'
+               order by seq_in_index`,
+            );
+          expect(parts.map((row) => Number(row.part))).toEqual([191, 191, 191, 191]);
+          const store = new MikroOrmMediaStore(plain.em);
+          await store.enableTenancy();
+          await store.save(record('p1', { tenantId: 't1' }));
+          expect((await store.list({ tenant: { id: 't1' } })).records.map((r) => r.id)).toEqual([
+            'p1',
+          ]);
+        } finally {
+          await plain.em.getConnection().execute('drop table if exists `app`.`media`');
+          await plain.close(true);
+        }
+      });
+    }
   });
 }
