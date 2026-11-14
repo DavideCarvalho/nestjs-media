@@ -1,5 +1,11 @@
 # @dudousxd/nestjs-media-telescope
 
+## 0.7.1
+
+### Patch Changes
+
+- [#218](https://github.com/DavideCarvalho/nestjs-media/pull/218) [`61ddb58`](https://github.com/DavideCarvalho/nestjs-media/commit/61ddb5854f618b4525e37d2c117d0b4b2455f890) Thanks [@DavideCarvalho](https://github.com/DavideCarvalho)! - Accept `@dudousxd/nestjs-telescope` 5.x as a peer. Telescope 5.0 changes its own HTTP list wire and drops its MCP endpoint; the extension SPI this package uses is unchanged.
+
 ## 0.7.0
 
 ### Minor Changes

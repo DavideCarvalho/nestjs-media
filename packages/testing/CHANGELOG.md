@@ -1,5 +1,11 @@
 # @dudousxd/nestjs-media-testing
 
+## 0.11.0
+
+### Minor Changes
+
+- [#218](https://github.com/DavideCarvalho/nestjs-media/pull/218) [`61ddb58`](https://github.com/DavideCarvalho/nestjs-media/commit/61ddb5854f618b4525e37d2c117d0b4b2455f890) Thanks [@DavideCarvalho](https://github.com/DavideCarvalho)! - `MediaStore` gains an optional `isListCursor(cursor)`: whether a cursor is one `list()` could have returned. `list()` itself still reads a cursor it cannot decode as "no cursor" and starts from the first page; a caller that must tell a forged cursor apart asks first. Every bundled store (in-memory, Drizzle SQLite/Postgres, MikroORM, Prisma, TypeORM) implements it, and the store conformance suite checks it when a store has it. Optional and additive: a third-party store without it keeps working as before.
+
 ## 0.10.0
 
 ### Minor Changes
