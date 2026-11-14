@@ -87,10 +87,10 @@ function navigateToPreview(disk: string, prefix: string | undefined, key: string
 function buildObjectsParams(
   prefix: string | undefined,
   cursor: string | undefined,
-): { prefix?: string; cursor?: string } {
-  const params: { prefix?: string; cursor?: string } = {};
+): { prefix?: string; after?: string } {
+  const params: { prefix?: string; after?: string } = {};
   if (prefix !== undefined) params.prefix = prefix;
-  if (cursor !== undefined) params.cursor = cursor;
+  if (cursor !== undefined) params.after = cursor;
   return params;
 }
 
@@ -556,7 +556,7 @@ function RenameDialog({
 export function DisksView({ route, actions }: { route: Route; actions: boolean }): JSX.Element {
   const queryClient = useQueryClient();
   const disksQuery = useQuery({ queryKey: ['disks'], queryFn: () => mediaConsoleClient.disks() });
-  const disks = disksQuery.data?.disks ?? [];
+  const disks = disksQuery.data?.data ?? [];
   const selectedDisk = route.disk ?? disks[0]?.name;
   const prefix = route.prefix;
   const pageKey = `${selectedDisk ?? ''}::${prefix ?? ''}`;
@@ -598,16 +598,16 @@ export function DisksView({ route, actions }: { route: Route; actions: boolean }
       setPage({
         key: pageKey,
         folders: data.folders,
-        files: data.files,
-        cursor: data.cursor,
+        files: data.data,
+        cursor: data.meta.nextCursor ?? undefined,
         lastData: data,
       });
     } else {
       setPage({
         key: pageKey,
         folders: [...page.folders, ...data.folders],
-        files: [...page.files, ...data.files],
-        cursor: data.cursor,
+        files: [...page.files, ...data.data],
+        cursor: data.meta.nextCursor ?? undefined,
         lastData: data,
       });
     }

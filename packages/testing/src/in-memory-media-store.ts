@@ -31,6 +31,20 @@ function decodeCursor(cursor: string): { createdAt: string; id: string } | null 
   return { createdAt: decoded.slice(0, separator), id: decoded.slice(separator + 1) };
 }
 
+/**
+ * Whether `cursor` is exactly what {@link encodeCursor} produces for some record: base64 of
+ * `<ISO createdAt>|<id>`, canonical (it re-encodes to itself), with a real timestamp and an id.
+ */
+function isEncodedListCursor(cursor: string): boolean {
+  const decoded = Buffer.from(cursor, 'base64').toString('utf8');
+  if (Buffer.from(decoded, 'utf8').toString('base64') !== cursor) return false;
+  const separator = decoded.indexOf('|');
+  if (separator === -1 || separator === decoded.length - 1) return false;
+  const createdAt = decoded.slice(0, separator);
+  const date = new Date(createdAt);
+  return !Number.isNaN(date.getTime()) && date.toISOString() === createdAt;
+}
+
 /** In-memory MediaStore for tests and the reference store-conformance suite. */
 export class InMemoryMediaStore implements MediaStore {
   private readonly records = new Map<string, MediaRecord>();
@@ -92,6 +106,11 @@ export class InMemoryMediaStore implements MediaStore {
       buckets.set(key, bucket);
     }
     return [...buckets.values()];
+  }
+
+  /** {@inheritDoc MediaStore.isListCursor} */
+  isListCursor(cursor: string): boolean {
+    return isEncodedListCursor(cursor);
   }
 
   async list(filter: MediaListFilter = {}, page: MediaListPage = {}): Promise<MediaListResult> {

@@ -10,7 +10,7 @@ import type {
 } from '@dudousxd/nestjs-media-core';
 import { and, asc, count, eq, getTableColumns, gt, max, or, sql, sum } from 'drizzle-orm';
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
-import { decodeListCursor, encodeListCursor } from './list-cursor';
+import { decodeListCursor, encodeListCursor, isEncodedListCursor } from './list-cursor';
 import { mediaTableWithoutTenant } from './media-columns';
 import { mediaTable } from './media.schema';
 import { rejectSqliteSchema } from './schema-name';
@@ -183,6 +183,11 @@ export class DrizzleMediaStore implements MediaStore {
       count: Number(row.count),
       sumSize: query.sum === 'size' ? Number(row.sumSize ?? 0) : 0,
     }));
+  }
+
+  /** {@inheritDoc MediaStore.isListCursor} */
+  isListCursor(cursor: string): boolean {
+    return isEncodedListCursor(cursor);
   }
 
   async list(filter: MediaListFilter = {}, page: MediaListPage = {}): Promise<MediaListResult> {

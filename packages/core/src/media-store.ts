@@ -85,6 +85,14 @@ export interface MediaStore {
    */
   list?(filter?: MediaListFilter, page?: MediaListPage): Promise<MediaListResult>;
   /**
+   * Whether `cursor` is one {@link MediaStore.list} could have returned: well-formed for this
+   * store's own (opaque) encoding. Optional and additive: `list()` itself treats a cursor it cannot
+   * decode as absent and starts from the first page, so a caller that must tell a forged or
+   * corrupted cursor apart (the media console's library list answers it with a 400) asks here
+   * first. Without it, such a cursor keeps restarting the listing.
+   */
+  isListCursor?(cursor: string): boolean;
+  /**
    * Switch the store to tenancy: called once, at boot and before the first operation, only when
    * tenancy is on. Verify (or, for a store that repairs its own schema, add) the nullable
    * `tenant_id` column and throw `MediaTenancyUnavailableError` with the fix when it is missing.

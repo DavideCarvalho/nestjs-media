@@ -282,10 +282,10 @@ function RecordDetail({ route }: { route: Route }): JSX.Element {
 function buildLibraryParams(
   collection: string | undefined,
   cursor: string | undefined,
-): { collection?: string; cursor?: string } {
-  const params: { collection?: string; cursor?: string } = {};
+): { collection?: string; after?: string } {
+  const params: { collection?: string; after?: string } = {};
   if (collection !== undefined) params.collection = collection;
-  if (cursor !== undefined) params.cursor = cursor;
+  if (cursor !== undefined) params.after = cursor;
   return params;
 }
 
@@ -301,20 +301,17 @@ function LibraryGrid({ route, hasStore }: { route: Route; hasStore: boolean }): 
     queryFn: ({ pageParam }: { pageParam: string }) =>
       mediaConsoleClient.library(buildLibraryParams(route.collection, pageParam)),
     initialPageParam: '',
-    getNextPageParam: (lastPage) => lastPage.cursor,
+    getNextPageParam: (lastPage) => lastPage.meta.nextCursor ?? undefined,
     enabled: hasStore,
   });
 
   const records: ReadonlyArray<LibraryRecord> = libraryQuery.data
-    ? libraryQuery.data.pages.flatMap((page) => page.records)
+    ? libraryQuery.data.pages.flatMap((page) => page.data)
     : [];
 
   return (
     <>
-      <CollectionsBar
-        collections={collectionsQuery.data?.collections ?? []}
-        selected={route.collection}
-      />
+      <CollectionsBar collections={collectionsQuery.data?.data ?? []} selected={route.collection} />
       <QueryBoundary
         label="Library"
         query={{

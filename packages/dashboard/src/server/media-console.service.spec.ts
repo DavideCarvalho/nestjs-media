@@ -24,10 +24,13 @@ async function seeded(keys: string[], disk = new InMemoryDisk()): Promise<InMemo
 describe('MediaConsoleService', () => {
   it('degrades every capability to an empty shape when nothing is configured', async () => {
     const service = new MediaConsoleService(null, null, null, null);
-    expect(await service.listDisks()).toEqual({ disks: [] });
-    expect(await service.listUploads({})).toEqual({ uploads: [] });
-    expect(await service.listCollections()).toEqual({ collections: [] });
-    expect(await service.listLibrary({})).toEqual({ records: [] });
+    expect(await service.listDisks()).toEqual({ data: [] });
+    expect(await service.listUploads({})).toEqual({ data: [] });
+    expect(await service.listCollections()).toEqual({ data: [] });
+    expect(await service.listLibrary({})).toEqual({
+      data: [],
+      meta: { nextCursor: null, prevCursor: null, hasNext: false, hasPrev: false },
+    });
     expect(service.topology()).toEqual({
       hasStore: false,
       hasUploads: false,
@@ -52,17 +55,17 @@ describe('MediaConsoleService', () => {
       primary: {} as MultipartUploadDriver,
     });
     const result = await service.listDisks();
-    expect(result.disks.map((d) => d.name)).toEqual(['primary', 'secondary']);
-    expect(result.disks[0]?.default).toBe(true);
-    expect(result.disks[1]?.default).toBe(false);
-    expect(result.disks[0]?.capabilities).toEqual({
+    expect(result.data.map((d) => d.name)).toEqual(['primary', 'secondary']);
+    expect(result.data[0]?.default).toBe(true);
+    expect(result.data[1]?.default).toBe(false);
+    expect(result.data[0]?.capabilities).toEqual({
       presign: true,
       multipart: true,
       publicUrls: false,
       list: true,
       ranged: true,
     });
-    expect(result.disks[1]?.capabilities).toMatchObject({
+    expect(result.data[1]?.capabilities).toMatchObject({
       presign: false,
       multipart: false,
       publicUrls: true,
@@ -83,9 +86,9 @@ describe('MediaConsoleService', () => {
     const uploads = { list: async () => [session] } as unknown as UploadSessionStore;
     const service = new MediaConsoleService(fakeStorage(), null, uploads, false);
     const result = await service.listUploads({});
-    expect(result.uploads).toHaveLength(1);
-    expect(result.uploads[0]?.percent).toBe(25);
-    expect(result.uploads[0]?.multipart).toBe(false);
+    expect(result.data).toHaveLength(1);
+    expect(result.data[0]?.percent).toBe(25);
+    expect(result.data[0]?.multipart).toBe(false);
   });
 
   it('maps a library page and forwards the cursor', async () => {
@@ -114,9 +117,14 @@ describe('MediaConsoleService', () => {
     const store = { list: async () => page } as unknown as MediaStore;
     const service = new MediaConsoleService(fakeStorage(), store, null, false);
     const result = await service.listLibrary({ collection: 'gallery' });
-    expect(result.records[0]?.id).toBe('m1');
-    expect(result.records[0]?.createdAt).toBe('2026-01-01T00:00:00.000Z');
-    expect(result.cursor).toBe('next');
+    expect(result.data[0]?.id).toBe('m1');
+    expect(result.data[0]?.createdAt).toBe('2026-01-01T00:00:00.000Z');
+    expect(result.meta).toEqual({
+      nextCursor: 'next',
+      prevCursor: null,
+      hasNext: true,
+      hasPrev: false,
+    });
     expect(service.topology().hasStore).toBe(true);
   });
 });
@@ -134,16 +142,20 @@ describe('MediaConsoleService — listing', () => {
 
     const root = await service.listObjects('primary', {});
     expect(root.folders).toEqual([{ name: 'docs', prefix: 'docs/' }]);
-    expect(root.files.map((f) => f.name)).toEqual(['top.txt']);
+    expect(root.data.map((f) => f.name)).toEqual(['top.txt']);
 
     const docs = await service.listObjects('primary', { prefix: 'docs' });
     expect(docs.folders.map((f) => f.prefix)).toEqual(['docs/empty/', 'docs/sub/']);
-    expect(docs.files).toEqual([
+    expect(docs.data).toEqual([
       expect.objectContaining({ key: 'docs/a.txt', name: 'a.txt', sizeBytes: 18 }),
     ]);
 
     const empty = await service.listObjects('primary', { prefix: 'docs/empty/' });
-    expect(empty).toEqual({ folders: [], files: [] });
+    expect(empty).toEqual({
+      data: [],
+      folders: [],
+      meta: { nextCursor: null, prevCursor: null, hasNext: false, hasPrev: false },
+    });
   });
 
   it('pages a folded listing with a cursor, never repeating a folder', async () => {
@@ -156,8 +168,8 @@ describe('MediaConsoleService — listing', () => {
         limit: 2,
         ...(cursor ? { cursor } : {}),
       });
-      seen.push(...page.folders.map((f) => f.prefix), ...page.files.map((f) => f.key));
-      cursor = page.cursor;
+      seen.push(...page.folders.map((f) => f.prefix), ...page.data.map((f) => f.key));
+      cursor = page.meta.nextCursor ?? undefined;
     } while (cursor);
     expect(seen).toEqual(['a/', 'b.txt', 'c/', 'd.txt']);
   });
@@ -180,7 +192,7 @@ describe('MediaConsoleService — listing', () => {
     );
     const result = await service.listObjects('primary', {});
     expect(result.folders.map((f) => f.name)).toEqual(['bases', 'templates']);
-    expect(result.files.map((f) => f.key)).toEqual(['a.txt']);
+    expect(result.data.map((f) => f.key)).toEqual(['a.txt']);
   });
 
   it('answers 400 for a prefix no disk accepts, 404 for an unknown disk', async () => {

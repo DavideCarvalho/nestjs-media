@@ -76,18 +76,18 @@ async function setup(scope: ConsoleTenancyScope | null) {
 describe('MediaConsoleService tenancy', () => {
   it('without a tenancy scope (tenancy off, or an older MediaModule) shows everything', async () => {
     const { service } = await setup(null);
-    expect((await service.listLibrary({})).records.map((r) => r.id)).toEqual(['a', 'b', 'c']);
-    expect((await service.listUploads({})).uploads).toHaveLength(3);
+    expect((await service.listLibrary({})).data.map((r) => r.id)).toEqual(['a', 'b', 'c']);
+    expect((await service.listUploads({})).data).toHaveLength(3);
     expect((await service.libraryDetail('b')).record.id).toBe('b');
   });
 
   it("scopes library, collections and uploads to the request's tenant", async () => {
     const { service } = await setup(scopeFor({ id: 't1' }));
-    expect((await service.listLibrary({})).records.map((r) => r.id)).toEqual(['a']);
+    expect((await service.listLibrary({})).data.map((r) => r.id)).toEqual(['a']);
     expect(await service.listCollections()).toEqual({
-      collections: [{ key: 'gallery', count: 1, sumSize: 1 }],
+      data: [{ key: 'gallery', count: 1, sumSize: 1 }],
     });
-    expect((await service.listUploads({})).uploads.map((u) => u.id)).toEqual(['a']);
+    expect((await service.listUploads({})).data.map((u) => u.id)).toEqual(['a']);
     expect((await service.libraryDetail('a')).record.id).toBe('a');
     expect((await service.uploadDetail('a')).upload.id).toBe('a');
   });
@@ -118,9 +118,9 @@ describe('MediaConsoleService tenancy', () => {
 
   it("a tenantless request sees only rows with no tenant; 'shared' adds them to a tenant", async () => {
     const tenantless = await setup(scopeFor({ id: null }));
-    expect((await tenantless.service.listLibrary({})).records.map((r) => r.id)).toEqual(['c']);
+    expect((await tenantless.service.listLibrary({})).data.map((r) => r.id)).toEqual(['c']);
     const shared = await setup(scopeFor({ id: 't2', orNull: true }));
-    expect((await shared.service.listLibrary({})).records.map((r) => r.id)).toEqual(['b', 'c']);
+    expect((await shared.service.listLibrary({})).data.map((r) => r.id)).toEqual(['b', 'c']);
   });
 });
 
@@ -132,14 +132,14 @@ describe('MediaConsoleService tenancy: labels, required, pathPrefix', () => {
 
   it('shows each row’s tenant with its label, and no tenant as null', async () => {
     const { service } = await setup(labelled(undefined));
-    const records = (await service.listLibrary({})).records;
+    const records = (await service.listLibrary({})).data;
     expect(records.map((r) => r.tenant)).toEqual([
       { id: 't1', label: 'Org T1' },
       { id: 't2', label: 'Org T2' },
       null,
     ]);
     expect((await service.libraryDetail('b')).record.tenant).toEqual({ id: 't2', label: 'Org T2' });
-    expect((await service.listUploads({})).uploads.map((u) => u.tenant?.label ?? null)).toEqual([
+    expect((await service.listUploads({})).data.map((u) => u.tenant?.label ?? null)).toEqual([
       'Org T1',
       'Org T2',
       null,
@@ -154,12 +154,12 @@ describe('MediaConsoleService tenancy: labels, required, pathPrefix', () => {
         throw new Error('down');
       },
     });
-    expect((await failing.service.listLibrary({})).records[0]?.tenant).toEqual({
+    expect((await failing.service.listLibrary({})).data[0]?.tenant).toEqual({
       id: 't1',
       label: 't1',
     });
     const older = await setup(scopeFor(undefined));
-    expect((await older.service.listLibrary({})).records[0]?.tenant).toEqual({
+    expect((await older.service.listLibrary({})).data[0]?.tenant).toEqual({
       id: 't1',
       label: 't1',
     });
@@ -167,7 +167,7 @@ describe('MediaConsoleService tenancy: labels, required, pathPrefix', () => {
 
   it('carries no tenant field without tenancy', async () => {
     const { service } = await setup(null);
-    expect((await service.listLibrary({})).records[0]).not.toHaveProperty('tenant');
+    expect((await service.listLibrary({})).data[0]).not.toHaveProperty('tenant');
   });
 
   it('search: no tenant where one is required finds nothing, and does not throw', async () => {
@@ -259,8 +259,8 @@ describe('MediaConsoleService tenancy: disk browsing under pathPrefix', () => {
   }
   const names = (listing: {
     folders: Array<{ prefix: string }>;
-    files: Array<{ key: string }>;
-  }) => [...listing.folders.map((f) => f.prefix), ...listing.files.map((f) => f.key)];
+    data: Array<{ key: string }>;
+  }) => [...listing.folders.map((f) => f.prefix), ...listing.data.map((f) => f.key)];
   const serve = { req: {}, res: {} } as never;
 
   it('a tenant browses only its own t/<tenantId>/, the levels above show just the way there', async () => {
@@ -346,7 +346,7 @@ describe('MediaConsoleService tenancy: disk browsing under pathPrefix', () => {
 
   it('a request with no tenant browses no disk object', async () => {
     const { service } = await browse([], { id: null });
-    expect(await service.listObjects('local', {})).toEqual({ folders: [], files: [] });
+    expect(await service.listObjects('local', {})).toMatchObject({ data: [], folders: [] });
     await expect(service.listObjects('local', { prefix: 't/' })).rejects.toMatchObject({
       status: 404,
     });

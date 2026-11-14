@@ -126,7 +126,7 @@ export function CollectionsView({
           query={collectionsQuery}
           skeleton={<CollectionsTable collections={undefined} />}
         >
-          {(data) => <CollectionsTable collections={data.collections} />}
+          {(data) => <CollectionsTable collections={data.data} />}
         </QueryBoundary>
       )}
     </PageBody>

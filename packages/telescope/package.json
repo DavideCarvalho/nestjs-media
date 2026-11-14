@@ -44,7 +44,7 @@
   "peerDependencies": {
     "@dudousxd/nestjs-diagnostics": ">=0.7.0 <1.0.0",
     "@dudousxd/nestjs-media-core": ">=0.8.0 <1.0.0",
-    "@dudousxd/nestjs-telescope": "^1.0.0 || ^2.0.0 || ^3.0.0 || ^4.0.0",
+    "@dudousxd/nestjs-telescope": "^1.0.0 || ^2.0.0 || ^3.0.0 || ^4.0.0 || ^5.0.0",
     "@nestjs/storage": ">=0.0.5 <0.1.0"
   },
   "devDependencies": {

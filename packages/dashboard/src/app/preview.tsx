@@ -25,7 +25,7 @@ import './styles.css';
 const TOPOLOGY: Topology = { hasStore: true, hasUploads: true, disks: 3, actions: true };
 
 const DISKS: DiskListResponse = {
-  disks: [
+  data: [
     {
       name: 'uploads',
       default: true,
@@ -60,7 +60,7 @@ const ROOT_OBJECTS: ObjectListResponse = {
     { name: 'avatars', prefix: 'avatars/' },
     { name: 'exports', prefix: 'exports/' },
   ],
-  files: [
+  data: [
     {
       key: 'poster.png',
       name: 'poster.png',
@@ -80,11 +80,12 @@ const ROOT_OBJECTS: ObjectListResponse = {
       lastModified: '2026-07-21T07:02:00.000Z',
     },
   ],
+  meta: { nextCursor: null, prevCursor: null, hasNext: false, hasPrev: false },
 };
 
 const NESTED_OBJECTS: ObjectListResponse = {
   folders: [{ name: '2026-Q3', prefix: 'invoices/2026-Q3/' }],
-  files: [
+  data: [
     {
       key: 'invoices/summary.pdf',
       name: 'summary.pdf',
@@ -92,10 +93,11 @@ const NESTED_OBJECTS: ObjectListResponse = {
       lastModified: '2026-07-19T11:25:00.000Z',
     },
   ],
+  meta: { nextCursor: null, prevCursor: null, hasNext: false, hasPrev: false },
 };
 
 const UPLOADS: UploadListResponse = {
-  uploads: [
+  data: [
     {
       id: 'upl_9f2c',
       disk: 'uploads',
@@ -133,7 +135,7 @@ const UPLOADS: UploadListResponse = {
 };
 
 const UPLOAD_DETAIL: UploadDetailResponse = {
-  upload: UPLOADS.uploads[0] as UploadListResponse['uploads'][number],
+  upload: UPLOADS.data[0] as UploadListResponse['data'][number],
   parts: [
     { partNumber: 1, etag: '"9b2cf5a1e0d34c7fb0a1"' },
     { partNumber: 2, etag: '"4f1ab77c2e9d10bb63aa"' },
@@ -142,7 +144,7 @@ const UPLOAD_DETAIL: UploadDetailResponse = {
 };
 
 const COLLECTIONS: CollectionsResponse = {
-  collections: [
+  data: [
     { key: 'avatars', count: 128, sumSize: 38_112_004 },
     { key: 'documents', count: 41, sumSize: 902_331_004 },
     { key: 'thumbnails', count: 512, sumSize: 12_400_112 },
@@ -150,7 +152,7 @@ const COLLECTIONS: CollectionsResponse = {
 };
 
 const LIBRARY: LibraryListResponse = {
-  records: [
+  data: [
     {
       id: 'rec_01',
       ownerType: 'User',
@@ -204,10 +206,11 @@ const LIBRARY: LibraryListResponse = {
       createdAt: '2026-07-17T10:10:00.000Z',
     },
   ],
+  meta: { nextCursor: null, prevCursor: null, hasNext: false, hasPrev: false },
 };
 
 const LIBRARY_DETAIL: LibraryDetailResponse = {
-  record: LIBRARY.records[0] as LibraryListResponse['records'][number],
+  record: LIBRARY.data[0] as LibraryListResponse['data'][number],
   variants: [
     { name: 'original', url: SAMPLE_IMAGE, disk: 'public', path: 'posters/77/hero.webp' },
     { name: 'thumb', url: SAMPLE_IMAGE, disk: 'public', path: 'thumbnails/77/hero.webp' },
@@ -251,14 +254,14 @@ function searchFixture(search: URLSearchParams): unknown {
       title: 'Media',
       icon: 'media',
       hits: [
-        ...LIBRARY.records
+        ...LIBRARY.data
           .filter((r) => r.fileName.toLowerCase().includes(q))
           .map((r) => ({
             title: r.fileName,
             subtitle: `Library · ${r.collection} · ${r.mimeType}`,
             href: `/media#/library/${r.id}`,
           })),
-        ...ROOT_OBJECTS.files
+        ...ROOT_OBJECTS.data
           .filter((f) => f.name.toLowerCase().includes(q))
           .map((f) => ({
             title: f.name,
