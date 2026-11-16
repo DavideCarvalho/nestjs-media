@@ -3,7 +3,6 @@ import { type JSX, useEffect, useMemo, useState } from 'react';
 import { ErrorBoundary } from '../aviary-kit/blocks/error-boundary';
 import { readShellConfig } from '../aviary-kit/shell-config';
 import { AppShell, type NavSection } from '../aviary-kit/shell/app-shell';
-import type { SearchCommand } from '../aviary-kit/shell/console-search';
 import {
   ConsoleAccessError,
   mediaConsoleClient,
@@ -143,6 +142,7 @@ export function App(): JSX.Element {
             label: 'Library',
             icon: <ImageIcon />,
             href: '#/library',
+            keywords: ['media', 'files', 'images'],
             onSelect: () => go('library'),
           },
           {
@@ -150,6 +150,7 @@ export function App(): JSX.Element {
             label: 'Collections',
             icon: <LayersIcon />,
             href: '#/collections',
+            keywords: ['albums', 'groups'],
             onSelect: () => go('collections'),
           },
         ],
@@ -162,6 +163,7 @@ export function App(): JSX.Element {
             label: 'Uploads',
             icon: <UploadIcon />,
             href: '#/uploads',
+            keywords: ['transfers', 'progress'],
             onSelect: () => go('uploads'),
           },
           {
@@ -169,28 +171,13 @@ export function App(): JSX.Element {
             label: 'Disks',
             icon: <DiskIcon />,
             href: '#/disks',
+            keywords: ['storage', 's3', 'buckets'],
             onSelect: () => go('disks'),
           },
         ],
       },
     ],
     [],
-  );
-
-  // ⌘K: this console's pages, listed above the cross-console hits.
-  const commands = useMemo<SearchCommand[]>(
-    () =>
-      nav.flatMap((section) =>
-        section.items.map((item) => ({
-          id: `page:${item.id}`,
-          label: item.label,
-          group: 'Pages',
-          icon: item.icon,
-          keywords: [section.section],
-          onSelect: () => item.onSelect?.(),
-        })),
-      ),
-    [nav],
   );
 
   return (
@@ -205,7 +192,6 @@ export function App(): JSX.Element {
       activeId={route.tab}
       shell={shell}
       title={TITLES[route.tab]}
-      commands={commands}
       searchPlaceholder="Search files, records, runs, threads…"
       actions={<TopologyChips topology={topology.data} />}
     >
