@@ -7,6 +7,7 @@ import {
 import { MediaConsolesController } from './console-switcher.js';
 import { consoleController } from './controller-decorators.js';
 import { MediaDevToolsRegistration } from './dev-tools.js';
+import { MEDIA_DASHBOARD_FEDERATION, type MediaConsoleFederation } from './federation.js';
 import { MediaConsoleActionsController } from './media-console-actions.controller.js';
 import { MediaConsoleReadController } from './media-console-read.controller.js';
 import { MediaConsoleService } from './media-console.service.js';
@@ -48,6 +49,8 @@ export interface MediaConsoleApiModuleOptions {
   routes?: boolean;
   /** See `MediaDashboardOptions.devTools`. Default: on when the routes are mounted. */
   devTools?: boolean;
+  /** See `MediaDashboardOptions.federation`. */
+  federation?: MediaConsoleFederation;
 }
 
 /**
@@ -77,6 +80,7 @@ export class MediaConsoleApiModule {
           options.moduleName ?? 'MediaConsoleApiModule.register()',
         ),
         { provide: MEDIA_DASHBOARD_ACTIONS, useValue: options.actions },
+        { provide: MEDIA_DASHBOARD_FEDERATION, useValue: options.federation ?? null },
         {
           provide: MEDIA_DASHBOARD_DEV_TOOLS,
           useValue: options.devTools ?? options.routes !== false,
@@ -90,7 +94,12 @@ export class MediaConsoleApiModule {
       ],
       // For a host mounting the controllers itself (`routes: false`): its subclasses inject these, and
       // `ConsoleAuthorizeGuard` injects the resolved `authorize` check.
-      exports: [MediaConsoleService, MEDIA_DASHBOARD_ACTIONS, CONSOLE_AUTHORIZE_DECIDE],
+      exports: [
+        MediaConsoleService,
+        MEDIA_DASHBOARD_ACTIONS,
+        CONSOLE_AUTHORIZE_DECIDE,
+        MEDIA_DASHBOARD_FEDERATION,
+      ],
     };
   }
 }

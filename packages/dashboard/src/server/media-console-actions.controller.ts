@@ -9,8 +9,10 @@ import {
   Post,
   Query,
   Req,
+  UseInterceptors,
 } from '@nestjs/common';
 import { OpenToAuthorization } from './controller-decorators.js';
+import { MediaConsoleAppInterceptor } from './federation.js';
 import { MediaConsoleService } from './media-console.service.js';
 
 interface CopyMoveBody {
@@ -31,6 +33,8 @@ interface CreateFolderBody {
  */
 // Open to `@nestjs/authorization`'s deny-by-default guard; the console's `authorize` decides access.
 @OpenToAuthorization()
+// A federated console's `?app=` / `x-media-app`: the action runs against the selected app's stores.
+@UseInterceptors(MediaConsoleAppInterceptor)
 @Controller()
 export class MediaConsoleActionsController {
   constructor(@Inject(MediaConsoleService) private readonly service: MediaConsoleService) {}

@@ -10,6 +10,7 @@ import type { ConsoleAuthorize } from './console-authorize.js';
 import type { ConsoleSignOutOption, ConsoleViewerResolver } from './console-shell.js';
 import { MediaConsoleRegistration } from './console-switcher.js';
 import { consoleController } from './controller-decorators.js';
+import { type MediaConsoleFederation, assertValidFederation } from './federation.js';
 import { MediaConsoleApiModule } from './media-console-api.module.js';
 import { MediaDashboardUiController } from './media-dashboard-ui.controller.js';
 import type { ObjectInsightProvider } from './object-insights.js';
@@ -153,6 +154,15 @@ export interface MediaDashboardOptions {
    * (`account.signOut`), else none. Only same-origin paths (`/x`) are ever sent to the page.
    */
   signOut?: ConsoleSignOutOption;
+  /**
+   * Make this a federated console: it also shows the media of other apps, each read in place from
+   * that app's own stores (`{ store?, uploads?, storage?, label? }` per app name). The console gets
+   * an app switcher; the selected app is in the URL (`?app=<name>`) and every read and action of a
+   * request is served from that app's stores. Disk writes answer 501 for a federated app (they run
+   * in the app). An `authorize` `apps` grant names the apps a viewer may select. Omitted: the
+   * console shows its own app only, as before.
+   */
+  federation?: MediaConsoleFederation;
 }
 
 /**
@@ -194,6 +204,8 @@ export interface MediaDashboardAsyncOptions {
   viewer?: ConsoleViewerResolver;
   /** See {@link MediaDashboardOptions.signOut}. */
   signOut?: ConsoleSignOutOption;
+  /** See {@link MediaDashboardOptions.federation}. Static, like `authorize`. */
+  federation?: MediaConsoleFederation;
 }
 
 /** Leading slash, no trailing slash. */
@@ -243,9 +255,11 @@ export class MediaDashboardModule {
       devTools?: boolean;
       viewer?: ConsoleViewerResolver;
       signOut?: ConsoleSignOutOption;
+      federation?: MediaConsoleFederation;
     },
     insightsProvider: Provider,
   ): DynamicModule {
+    assertValidFederation(options.federation);
     const basePath = normalize(options.basePath ?? '/media');
     const apiBasePath = normalize(options.apiBasePath ?? `${basePath}/api`);
     const actions = options.actions === true;
@@ -265,6 +279,7 @@ export class MediaDashboardModule {
           ...(options.decorators ? { decorators: options.decorators } : {}),
           routes: mount,
           ...(options.devTools !== undefined ? { devTools: options.devTools } : {}),
+          ...(options.federation !== undefined ? { federation: options.federation } : {}),
         }),
         ...(mount
           ? [

@@ -16,6 +16,7 @@ import {
   applyDecorators,
 } from '@nestjs/common';
 import { HttpAdapterHost, ModuleRef } from '@nestjs/core';
+import { CONSOLE_APPS, grantedApps } from './federation.js';
 
 // ── The contract (same names and shapes in every Aviary console) ─────────────────────────────────
 
@@ -23,10 +24,14 @@ import { HttpAdapterHost, ModuleRef } from '@nestjs/core';
  * What an `authorize` check answers. An allow may name who it let in (`caller`, for example
  * `'user:42'`): the dev MCP endpoint logs it as the caller of a developer tool. Never put a secret
  * in it.
+ *
+ * On a federated console (the dashboard's `federation` option) an allow may also name the `apps`
+ * the viewer may select: `'*'` (or omitted) is every app, the console's own included; a list is
+ * only those federated apps (the console's own app is then hidden too).
  */
 export type ConsoleAuthorizeResult =
   | boolean
-  | { allowed: true; caller?: string }
+  | { allowed: true; caller?: string; apps?: '*' | string[] }
   | { allowed: false; reason?: 'unauthenticated' | 'forbidden' }
   | { redirectTo: string };
 
@@ -50,7 +55,7 @@ export type ConsoleAuthorize =
   | string;
 
 export type ConsoleDecision =
-  | { allowed: true; caller?: string }
+  | { allowed: true; caller?: string; apps?: '*' | string[] }
   | { allowed: false; reason: 'unauthenticated' | 'forbidden'; redirectTo?: string };
 
 /** The provider `@dudousxd/nestjs-authz`'s `AuthzModule` registers to resolve gate names. */
@@ -78,8 +83,17 @@ export function consoleAuthorizeMissingWarning(registration: string): string {
 }
 
 // Every decision is a fresh object: a caller may mutate what it gets back.
-const allow = (caller?: string): ConsoleDecision =>
-  caller !== undefined && caller !== '' ? { allowed: true, caller } : { allowed: true };
+const allow = (caller?: string, apps?: '*' | string[]): ConsoleDecision => ({
+  allowed: true,
+  ...(caller !== undefined && caller !== '' ? { caller } : {}),
+  ...(apps !== undefined ? { apps } : {}),
+});
+
+/** An `apps` grant: `'*'`, a list of names (non-strings dropped), or `undefined` (none given). */
+function appsGrant(value: unknown): '*' | string[] | undefined {
+  if (value === '*') return '*';
+  return grantedApps(value);
+}
 const forbidden = (): ConsoleDecision => ({ allowed: false, reason: 'forbidden' });
 const unauthenticated = (): ConsoleDecision => ({ allowed: false, reason: 'unauthenticated' });
 
@@ -127,12 +141,16 @@ export function normalizeConsoleResult(result: unknown): ConsoleDecision {
     reason?: unknown;
     redirectTo?: unknown;
     caller?: unknown;
+    apps?: unknown;
   };
   if (typeof shape.redirectTo === 'string' && shape.allowed !== true) {
     return { allowed: false, reason: 'unauthenticated', redirectTo: shape.redirectTo };
   }
   if (shape.allowed === true) {
-    return allow(typeof shape.caller === 'string' ? shape.caller : undefined);
+    return allow(
+      typeof shape.caller === 'string' ? shape.caller : undefined,
+      appsGrant(shape.apps),
+    );
   }
   return shape.reason === 'unauthenticated' ? unauthenticated() : forbidden();
 }
@@ -421,7 +439,15 @@ export class ConsoleAuthorizeGuard implements CanActivate {
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
     const decision = await this.decide(context);
-    if (decision.allowed) return true;
+    if (decision.allowed) {
+      // The viewer's app grant, for `MediaConsoleAppInterceptor` (a federated console).
+      const apps = grantedApps(decision.apps);
+      if (apps !== undefined && context.getType() === 'http') {
+        const request = context.switchToHttp().getRequest<Record<symbol, unknown> | undefined>();
+        if (request) request[CONSOLE_APPS] = apps;
+      }
+      return true;
+    }
     throw new ConsoleAccessDenied(decision, isPageNavigation(context));
   }
 }

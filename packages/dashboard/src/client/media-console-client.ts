@@ -32,6 +32,28 @@ export function consoleSearchEndpoint(): string {
   return `${apiBase()}/consoles/search`;
 }
 
+/** The query parameter a federated console names the selected app in (see {@link selectedApp}). */
+export const APP_PARAM = 'app';
+/** The header every API call names the selected app in. */
+export const APP_HEADER = 'x-media-app';
+
+/**
+ * The app a federated console shows, from the page URL (`?app=<name>`), or `undefined` for the
+ * console's own app. Every API call names it in the `x-media-app` header; the byte URLs
+ * (`objectRawUrl`, `objectDownloadUrl`), which the browser loads without our headers, carry `?app=`.
+ */
+export function selectedApp(): string | undefined {
+  if (typeof window === 'undefined') return undefined;
+  const app = new URLSearchParams(window.location.search).get(APP_PARAM);
+  return app ? app : undefined;
+}
+
+/** `headers` with the selected app's header added (unchanged when no app is selected). */
+function withApp(headers: Record<string, string> = {}): Record<string, string> {
+  const app = selectedApp();
+  return app === undefined ? headers : { ...headers, [APP_HEADER]: app };
+}
+
 function withQuery(path: string, params: Record<string, string | number | undefined>): string {
   const search = new URLSearchParams();
   for (const [key, value] of Object.entries(params)) {
@@ -86,7 +108,10 @@ async function ensureOk(response: Response): Promise<void> {
 }
 
 async function getJson<T>(path: string): Promise<T> {
-  const response = await fetch(`${apiBase()}${path}`, { credentials: 'same-origin' });
+  const response = await fetch(`${apiBase()}${path}`, {
+    credentials: 'same-origin',
+    headers: withApp(),
+  });
   await ensureOk(response);
   return response.json();
 }
@@ -99,9 +124,8 @@ async function send(
   const response = await fetch(`${apiBase()}${path}`, {
     method,
     credentials: 'same-origin',
-    ...(body
-      ? { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }
-      : {}),
+    headers: withApp(body ? { 'Content-Type': 'application/json' } : {}),
+    ...(body ? { body: JSON.stringify(body) } : {}),
   });
   await ensureOk(response);
 }
@@ -112,7 +136,7 @@ async function sendRaw(path: string, body: Blob): Promise<void> {
   const response = await fetch(`${apiBase()}${path}`, {
     method: 'POST',
     credentials: 'same-origin',
-    headers: { 'Content-Type': 'application/octet-stream' },
+    headers: withApp({ 'Content-Type': 'application/octet-stream' }),
     body,
   });
   await ensureOk(response);
@@ -138,13 +162,19 @@ export const mediaConsoleClient = {
   /** Same-origin URL that streams the object bytes inline (Content-Disposition: inline) — used to
    *  embed previews that a cross-origin signed URL would download (PDFs) or that CORS would block. */
   objectRawUrl: (disk: string, key: string): string =>
-    `${apiBase()}${withQuery(`/disks/${encodeURIComponent(disk)}/object/raw`, { key })}`,
+    `${apiBase()}${withQuery(`/disks/${encodeURIComponent(disk)}/object/raw`, {
+      key,
+      [APP_PARAM]: selectedApp(),
+    })}`,
   /** Same-origin URL that streams the object as a SAVE (Content-Disposition: attachment, named
    *  after the key). A URL rather than a fetch on purpose: the download has to be a real navigation
    *  so the browser owns the save dialog and the progress — pulling the bytes through `fetch` would
    *  buffer the whole object in the tab first, which is exactly wrong for the large ones. */
   objectDownloadUrl: (disk: string, key: string): string =>
-    `${apiBase()}${withQuery(`/disks/${encodeURIComponent(disk)}/object/download`, { key })}`,
+    `${apiBase()}${withQuery(`/disks/${encodeURIComponent(disk)}/object/download`, {
+      key,
+      [APP_PARAM]: selectedApp(),
+    })}`,
   /** Read up to `maxBytes` of an object as text through the inline proxy, aborting the stream once the
    *  budget is reached — so a many-MB CSV/text file is *sampled* (its head) without downloading the
    *  whole thing. Returns the decoded text and the bytes actually read (compare to the object's size

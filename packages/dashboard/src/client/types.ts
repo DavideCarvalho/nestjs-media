@@ -172,6 +172,16 @@ export interface Topology {
   hasUploads: boolean;
   disks: number;
   actions: boolean;
+  /**
+   * On a federated console (the server's `federation` option): the apps the viewer may switch
+   * between. `local` is the console's own app (`null` when the viewer's `apps` grant hides it);
+   * `current` is the federated app this answer is for, absent for the console's own app.
+   */
+  federation?: {
+    local: { label: string } | null;
+    apps: Array<{ name: string; label: string }>;
+    current?: string;
+  };
 }
 
 /** One label/value row of an {@link ObjectInsight}. Rendered verbatim as text — no markup. */

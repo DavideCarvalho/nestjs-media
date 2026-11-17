@@ -8,6 +8,7 @@ import {
   Req,
   Res,
   type StreamableFile,
+  UseInterceptors,
 } from '@nestjs/common';
 import type {
   CollectionsResponse,
@@ -22,6 +23,7 @@ import type {
 } from '../client/types.js';
 import { downloadFilename } from './content-disposition.js';
 import { OpenToAuthorization } from './controller-decorators.js';
+import { FEDERATED_APP_PARAM, MediaConsoleAppInterceptor } from './federation.js';
 import {
   ListQueryError,
   parseCursorParams,
@@ -64,6 +66,8 @@ function forwardPage(query: ListQuery, maxSize: number): { cursor?: string; limi
  */
 // Open to `@nestjs/authorization`'s deny-by-default guard; the console's `authorize` decides access.
 @OpenToAuthorization()
+// A federated console's `?app=` / `x-media-app`: the handler reads the selected app's stores.
+@UseInterceptors(MediaConsoleAppInterceptor)
 @Controller()
 export class MediaConsoleReadController {
   constructor(@Inject(MediaConsoleService) private readonly service: MediaConsoleService) {}
@@ -80,7 +84,7 @@ export class MediaConsoleReadController {
    */
   @Get('disks/:disk/objects')
   objects(@Param('disk') disk: string, @Query() query: ListQuery): Promise<ObjectListResponse> {
-    rejectUnknownParams(query, ['prefix', ...CURSOR_PARAMS]);
+    rejectUnknownParams(query, ['prefix', ...CURSOR_PARAMS, FEDERATED_APP_PARAM]);
     const prefix = query.prefix;
     if (prefix !== undefined && typeof prefix !== 'string') {
       throw new ListQueryError('Invalid "prefix": expected a single folder path.');
@@ -151,7 +155,7 @@ export class MediaConsoleReadController {
     if (query.prefix !== undefined) {
       throw new ListQueryError('"prefix" was removed; use "filter[key][startsWith]" instead.');
     }
-    rejectUnknownParams(query, ['filter']);
+    rejectUnknownParams(query, ['filter', FEDERATED_APP_PARAM]);
     let disk: string | undefined;
     let prefix: string | undefined;
     for (const { field, value } of parseFilterParams(query, {
@@ -183,7 +187,7 @@ export class MediaConsoleReadController {
    */
   @Get('library')
   library(@Query() query: ListQuery): Promise<LibraryListResponse> {
-    rejectUnknownParams(query, ['filter', ...CURSOR_PARAMS]);
+    rejectUnknownParams(query, ['filter', ...CURSOR_PARAMS, FEDERATED_APP_PARAM]);
     const filter: { collection?: string; disk?: string } = {};
     for (const { field, value } of parseFilterParams(query, {
       fields: { collection: ['eq'], disk: ['eq'] },

@@ -10,6 +10,11 @@ import {
   Optional,
 } from '@nestjs/common';
 import { CONSOLE_AUTHORIZE_DECIDE, type ConsoleDecide } from './console-authorize.js';
+import {
+  MEDIA_DASHBOARD_FEDERATION,
+  type MediaConsoleFederation,
+  grantedApps,
+} from './federation.js';
 import { MediaConsoleService } from './media-console.service.js';
 import { MEDIA_DASHBOARD_ACTIONS, MEDIA_DASHBOARD_DEV_TOOLS } from './tokens.js';
 
@@ -418,6 +423,9 @@ export class MediaDevToolsRegistration implements OnModuleInit, OnModuleDestroy 
     @Inject(MediaConsoleService) private readonly service: MediaConsoleService,
     @Inject(CONSOLE_AUTHORIZE_DECIDE) private readonly decide: ConsoleDecide,
     @Optional() @Inject(MEDIA_DASHBOARD_ACTIONS) private readonly actions: boolean | null = null,
+    @Optional()
+    @Inject(MEDIA_DASHBOARD_FEDERATION)
+    private readonly federation: MediaConsoleFederation | null = null,
   ) {}
 
   onModuleInit(): void {
@@ -428,7 +436,19 @@ export class MediaDevToolsRegistration implements OnModuleInit, OnModuleDestroy 
       this.#unregister = slot.register({
         lib: 'media',
         title: 'Media',
-        authorize: (context) => this.decide(context),
+        authorize: async (context) => {
+          const decision = await this.decide(context);
+          // The tools read this app; on a federated console a list `apps` grant hides it.
+          if (decision.allowed && this.federation && grantedApps(decision.apps) !== undefined) {
+            return { allowed: false, reason: 'forbidden' };
+          }
+          return decision.allowed
+            ? {
+                allowed: true,
+                ...(decision.caller !== undefined ? { caller: decision.caller } : {}),
+              }
+            : decision;
+        },
         tools: mediaDevTools(this.service, { actions: this.actions === true }),
       });
     } catch (error) {
