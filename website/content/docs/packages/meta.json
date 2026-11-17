@@ -17,6 +17,7 @@
     "react",
     "upload-redis",
     "testing",
-    "dashboard"
+    "dashboard",
+    "dashboard-federation"
   ]
 }

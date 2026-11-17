@@ -1,0 +1,151 @@
+---
+title: Federated console
+icon: Network
+description: One media console on a central app that shows the media of several apps, each read in place from that app's own stores.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+A **federated console** is one [media console](/docs/packages/dashboard) on a central app that also
+shows the media of other apps. Each app keeps its library, upload sessions and files in its own
+database, Redis and buckets. Nothing is shipped to the central app and the other apps need no change:
+the console reads their stores in place.
+
+The viewer picks the app in a switcher in the console's header. The choice is in the page URL
+(`/media?app=orders`), so a link opens the same app. The console's views and their filters stay in
+the hash (`#/library?…`), independently of `?app=`.
+
+## Setup
+
+On the central app, pass `federation` with one entry per app. Each entry hands the console handles
+on that app's stores:
+
+```ts
+import { DrizzlePgMediaStore } from '@dudousxd/nestjs-media-database-drizzle/pg';
+import { RedisUploadSessionStore } from '@dudousxd/nestjs-media-upload-redis';
+import { S3Disk, Storage } from '@nestjs/storage';
+
+MediaDashboardModule.forRoot({
+  authorize,
+  actions: true,
+  federation: {
+    localLabel: 'Central', // the central app's own media, in the switcher. Default 'this app'
+    apps: {
+      orders: {
+        label: 'Orders',
+        // The app's media table, through a user that may read it.
+        store: new DrizzlePgMediaStore(ordersReadOnlyDb, { schema: 'orders' }),
+        // The app's upload sessions, on the app's Redis (same key prefix as the app).
+        uploads: new RedisUploadSessionStore(ordersRedis),
+        // The app's disks, under the names the app uses, with credentials that may read them.
+        storage: new Storage(
+          new Map([['s3', new S3Disk({ bucket: 'orders-media', region, credentials: ordersReader })]]),
+          's3',
+        ),
+      },
+      billing: { store: new DrizzlePgMediaStore(billingReadOnlyDb, { schema: 'billing' }) },
+    },
+  },
+});
+```
+
+| Key | What it serves | Omitted |
+| --- | --- | --- |
+| `store` | Library and Collections pages, a record's variants | the app shows no library |
+| `uploads` | Uploads page | the app shows no uploads |
+| `storage` | Disks page, previews and downloads, variant URLs | the app shows no disks |
+| `label` | The switcher's label | the app's name |
+
+Each app needs at least one of `store`, `uploads` or `storage`. App names are 1–100 letters,
+digits, `.`, `_` or `-`. The console refuses a malformed `federation` at boot.
+
+<Callout type="info">
+  Build each handle the way the app builds its own, against the same database, key prefix and disk
+  names: the console reads exactly what the app wrote. Don't let a handle create or migrate a schema
+  it reads: the app owns it.
+</Callout>
+
+### Read-only access
+
+Browsing needs only read access. For Postgres, a role per app:
+
+```sql
+CREATE ROLE media_console LOGIN PASSWORD '…';
+GRANT USAGE ON SCHEMA orders TO media_console;
+GRANT SELECT ON ALL TABLES IN SCHEMA orders TO media_console;
+ALTER DEFAULT PRIVILEGES IN SCHEMA orders GRANT SELECT ON TABLES TO media_console;
+-- Only if the console may delete records of this app (see "Actions"):
+GRANT DELETE ON orders.media TO media_console;
+```
+
+For the disks, credentials that may list and read the app's buckets (`s3:ListBucket`,
+`s3:GetObject`) are enough: the console never writes to a federated app's disk.
+
+## Actions
+
+With `actions: true`, the actions run against the selected app's stores:
+
+| Action | For a federated app |
+| --- | --- |
+| Delete a library record | Deletes the row from the app's `store`, like on the console's own app (the files stay). Needs `DELETE` on the media table. |
+| Cancel an upload session | Removes the session from the app's `uploads`, like on the console's own app. |
+| Upload, new folder, delete, copy or move on a disk | **501.** Disk writes belong to the app that owns the disk; the console holds at most a read handle. The Disks page hides these controls for a federated app. |
+
+Both supported actions are single writes to the app's store, the same writes the console makes on
+its own app, so nothing has to run in the app's process. The console never runs anything else on
+another app's behalf: there is no transport between the console and the apps.
+
+## Who sees which app
+
+`authorize` may name the apps a viewer may select, with an `apps` grant on its allow:
+
+```ts
+authorize: (ctx) => {
+  const user = ctx.switchToHttp().getRequest().user;
+  if (user?.isAdmin) return { allowed: true }; // or apps: '*': every app, the central one included
+  if (user?.team === 'orders') return { allowed: true, apps: ['orders'] };
+  return false;
+},
+```
+
+- `'*'` or no `apps`: every app, the console's own included.
+- A list: only those federated apps. The console's own app is not in the list, so it is hidden:
+  the switcher leaves it out, the page opens on the first app of the list, and an API call without
+  `?app=` answers 404. The ⌘K search and the MCP dev tools, which read the console's own app, show
+  that viewer nothing.
+- An app outside the grant, or one that doesn't exist, answers 404.
+
+The grant admits a selected app as a whole: the app's rows are not narrowed further by the central
+app's `tenancy`, which describes the central app's own media.
+
+Without `federation`, an `apps` grant has no effect.
+
+## The wire
+
+The SPA sends the selected app on every API call in the `x-media-app` header. URLs the browser
+loads on its own (an `<img src>`, a download link, a proxied object URL) carry `?app=<name>`
+instead. A host calling the API directly can use either. No app selected is the console's own app.
+
+`GET <api>/topology` reports the switcher:
+
+```json
+{
+  "hasStore": true,
+  "federation": {
+    "local": { "label": "Central" },
+    "apps": [{ "name": "orders", "label": "Orders" }, { "name": "billing", "label": "billing" }],
+    "current": "orders"
+  }
+}
+```
+
+`local` is `null` when the viewer's grant hides the console's own app. `current` is absent for the
+console's own app.
+
+## What stays on the central app
+
+- **Object insights** (`objectInsights`) describe the central app's files: they are not asked about
+  a federated app's objects.
+- **Tenancy** and **multipart side-cars** are the central app's. A federated app's records are shown
+  with no tenant column, and its disks list without the multipart badge.
+- **⌘K search** and the **MCP dev tools** read the central app's own media.

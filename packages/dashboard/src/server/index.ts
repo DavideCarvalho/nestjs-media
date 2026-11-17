@@ -36,6 +36,17 @@ export * from './console-shell.js';
 export type { MediaShellOptions } from './media-dashboard-ui.controller.js';
 export type { ObjectUrlConfig, ObjectUrlStrategy } from './object-urls.js';
 export { MediaConsoleService } from './media-console.service.js';
+// Federated console: one console showing the media of several apps (see `federation`).
+export {
+  FEDERATED_APP_HEADER,
+  FEDERATED_APP_PARAM,
+  MEDIA_DASHBOARD_FEDERATION,
+  MediaConsoleAppInterceptor,
+  currentFederatedApp,
+  type FederatedMediaApp,
+  type MediaConsoleFederation,
+  type MediaFederationDescription,
+} from './federation.js';
 // Developer tools over MCP (the agent's dev endpoint) and the console switcher.
 export {
   DEV_TOOLS_SLOT,

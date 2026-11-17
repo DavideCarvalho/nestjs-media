@@ -8,11 +8,17 @@ import {
   Logger,
   type OnModuleDestroy,
   type OnModuleInit,
+  Optional,
   Query,
   createParamDecorator,
 } from '@nestjs/common';
 import { CONSOLE_AUTHORIZE_DECIDE, type ConsoleDecide } from './console-authorize.js';
 import { OpenToAuthorization } from './controller-decorators.js';
+import {
+  MEDIA_DASHBOARD_FEDERATION,
+  type MediaConsoleFederation,
+  grantedApps,
+} from './federation.js';
 import { MediaConsoleService } from './media-console.service.js';
 import { MEDIA_DASHBOARD_BASE_PATH } from './tokens.js';
 
@@ -421,6 +427,9 @@ export class MediaConsoleRegistration implements OnModuleInit, OnModuleDestroy {
     @Inject(MEDIA_DASHBOARD_BASE_PATH) private readonly basePath: string,
     @Inject(CONSOLE_AUTHORIZE_DECIDE) private readonly decide: ConsoleDecide,
     private readonly media: MediaConsoleService,
+    @Optional()
+    @Inject(MEDIA_DASHBOARD_FEDERATION)
+    private readonly federation: MediaConsoleFederation | null = null,
   ) {}
 
   onModuleInit(): void {
@@ -432,7 +441,14 @@ export class MediaConsoleRegistration implements OnModuleInit, OnModuleDestroy {
         order: 50,
         path: this.basePath,
         authorize: (context) => this.decide(context),
-        search: (_context, q, limit) => this.media.search(q, limit, this.basePath),
+        search: async (context, q, limit) => {
+          // The search reads this app; on a federated console a list `apps` grant hides it.
+          if (this.federation) {
+            const decision = await this.decide(context);
+            if (!decision.allowed || grantedApps(decision.apps) !== undefined) return [];
+          }
+          return this.media.search(q, limit, this.basePath);
+        },
       },
       logger,
     );

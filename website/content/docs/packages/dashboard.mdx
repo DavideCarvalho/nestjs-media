@@ -533,6 +533,12 @@ MCP server lists actions.
 The tools are registered while the console's routes are mounted. `devTools: true` keeps them with
 `routes: false`, and `devTools: false` turns them off.
 
+## One console for several apps
+
+`federation` turns this into a console for several apps: a switcher in the header picks the app
+(`?app=<name>`), and the console reads that app's library, upload sessions and disks in place from
+the app's own stores. See [Federated console](/docs/packages/dashboard-federation).
+
 ## Switching between consoles
 
 When the app mounts other Aviary consoles too (durable's Workflows, Telescope, Agents), the console's

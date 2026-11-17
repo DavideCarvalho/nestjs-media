@@ -21,6 +21,7 @@ import {
   Injectable,
   Logger,
   NotFoundException,
+  NotImplementedException,
   Optional,
   type StreamableFile,
 } from '@nestjs/common';
@@ -51,6 +52,13 @@ import {
   encodeDiskCursor,
   isRejectedDriverCursor,
 } from './disk-cursor.js';
+import {
+  FEDERATED_APP_PARAM,
+  type MediaConsoleScope,
+  currentMediaConsoleScope,
+  describeFederation,
+  seesLocalApp,
+} from './federation.js';
 import { ListQueryError, cursorPage } from './list-api.js';
 import type {
   ObjectInsight,
@@ -228,15 +236,17 @@ function mapRecord(record: MediaRecord, labels?: Labels): LibraryRecord {
 @Injectable()
 export class MediaConsoleService {
   constructor(
-    @Optional() @Inject(Storage) private readonly storage: Storage | null,
-    @Optional() @Inject(MEDIA_STORE) private readonly store: MediaStore | null,
-    @Optional() @Inject(MEDIA_UPLOAD_SESSIONS) private readonly uploads: UploadSessionStore | null,
+    @Optional() @Inject(Storage) private readonly ownStorage: Storage | null,
+    @Optional() @Inject(MEDIA_STORE) private readonly ownStore: MediaStore | null,
+    @Optional()
+    @Inject(MEDIA_UPLOAD_SESSIONS)
+    private readonly ownUploads: UploadSessionStore | null,
     @Optional() @Inject(MEDIA_DASHBOARD_ACTIONS) private readonly actionsEnabled: boolean | null,
     // Defaulted, not merely `@Optional()`: the console service is constructed directly in unit
     // tests (and by any host wiring it by hand).
     @Optional()
     @Inject(MEDIA_CONSOLE_OBJECT_INSIGHTS)
-    private readonly insightProviders: ObjectInsightProvider[] | null = null,
+    private readonly ownInsightProviders: ObjectInsightProvider[] | null = null,
     // Strategy and mount path travel as ONE value. `null` means `auto`.
     @Optional()
     @Inject(MEDIA_CONSOLE_OBJECT_URLS)
@@ -244,12 +254,69 @@ export class MediaConsoleService {
     /** `MediaModuleOptions.multipart`: native folder listing and the multipart badge. */
     @Optional()
     @Inject(MEDIA_MULTIPART)
-    private readonly multipart: MultipartDrivers | null = null,
+    private readonly ownMultipart: MultipartDrivers | null = null,
     /** `MediaModuleOptions.tenancy`: library records and upload sessions follow the request's tenant. */
     @Optional()
     @Inject(MEDIA_TENANCY)
-    private readonly tenancy: ConsoleTenancyScope | null = null,
+    private readonly ownTenancy: ConsoleTenancyScope | null = null,
   ) {}
+
+  // ── Which app a request reads (a federated console's `?app=`) ──────────────────────────────────
+  //
+  // Every read and action goes through these getters. On a federated console a request for another
+  // app reads that app's stores (`federation.apps[name]`), not narrowed by this app's tenancy (the
+  // `apps` grant admitted the whole app), with no object insights (those describe this app's
+  // files). A request for this app under a list `apps` grant, which hides it, answers 404.
+
+  /** The federated app of the running request, after checking this app is visible otherwise. */
+  private scoped(): MediaConsoleScope['app'] {
+    const scope = currentMediaConsoleScope();
+    if (scope?.app) return scope.app;
+    if (scope && !seesLocalApp(scope.grant)) {
+      throw new NotFoundException('No app selected: choose one of the apps you may see');
+    }
+    return undefined;
+  }
+
+  private get storage(): Storage | null {
+    const app = this.scoped();
+    return app ? (app.storage ?? null) : this.ownStorage;
+  }
+
+  private get store(): MediaStore | null {
+    const app = this.scoped();
+    return app ? (app.store ?? null) : this.ownStore;
+  }
+
+  private get uploads(): UploadSessionStore | null {
+    const app = this.scoped();
+    return app ? (app.uploads ?? null) : this.ownUploads;
+  }
+
+  private get insightProviders(): ObjectInsightProvider[] | null {
+    return this.scoped() ? null : this.ownInsightProviders;
+  }
+
+  private get multipart(): MultipartDrivers | null {
+    return this.scoped() ? null : this.ownMultipart;
+  }
+
+  private get tenancy(): ConsoleTenancyScope | null {
+    return this.scoped() ? null : this.ownTenancy;
+  }
+
+  /**
+   * Disk writes belong to the app that owns the disk: for a federated app they answer 501 (the
+   * console holds, at most, a handle that may read the app's buckets).
+   */
+  private assertDiskWritable(): void {
+    const app = this.scoped();
+    if (app) {
+      throw new NotImplementedException(
+        `Disk writes are not available for the federated app "${app.name}": they run in that app.`,
+      );
+    }
+  }
 
   /** The store filter for this request (`undefined`: every row). */
   private async tenantMatch(): Promise<MediaTenantMatch | undefined> {
@@ -315,7 +382,12 @@ export class MediaConsoleService {
    * `proxy` always routes through this server.
    */
   private async objectUrl(disk: StorageDisk, name: string, key: string): Promise<string> {
-    const proxy = () => objectProxyUrl(this.objectUrls?.apiBasePath ?? '', 'raw', name, key);
+    const app = this.scoped()?.name;
+    const proxy = () => {
+      const url = objectProxyUrl(this.objectUrls?.apiBasePath ?? '', 'raw', name, key);
+      // `<img src>` can't send the `x-media-app` header: the app rides in the query.
+      return app ? `${url}&${FEDERATED_APP_PARAM}=${encodeURIComponent(app)}` : url;
+    };
     if (this.objectUrls?.strategy === 'proxy') return proxy();
     if (hasPublicUrl(disk)) return disk.url(key);
     if (await canPresign(disk)) return disk.signedUrl(key, { expiresIn: URL_TTL_SECONDS * 1000 });
@@ -492,6 +564,7 @@ export class MediaConsoleService {
     contentType?: string,
     contentLength?: number,
   ): Promise<void> {
+    this.assertDiskWritable();
     const store = this.diskOrThrow(disk);
     await this.confine(disk, key);
     await http(() =>
@@ -507,6 +580,7 @@ export class MediaConsoleService {
    * `@nestjs/storage` keys can't end with `/`. Listings show the folder because a key lives in it.
    */
   async createFolder(disk: string, prefix: string): Promise<void> {
+    this.assertDiskWritable();
     const store = this.diskOrThrow(disk);
     const folder = clientFolder(prefix, 'Folder name');
     await this.confineFolder(disk, folder);
@@ -514,6 +588,7 @@ export class MediaConsoleService {
   }
 
   async deleteObject(disk: string, key: string): Promise<void> {
+    this.assertDiskWritable();
     const store = this.diskOrThrow(disk);
     await this.confine(disk, key);
     await http(() => store.delete(key));
@@ -525,6 +600,7 @@ export class MediaConsoleService {
    * can't be addressed through `@nestjs/storage`; it is skipped.
    */
   async deleteFolder(disk: string, prefix: string): Promise<void> {
+    this.assertDiskWritable();
     const store = this.diskOrThrow(disk);
     const folder = clientFolder(prefix, 'Folder');
     await this.confineFolder(disk, folder);
@@ -540,12 +616,14 @@ export class MediaConsoleService {
   }
 
   async copyObject(fromDisk: string, from: string, toDisk: string, to: string): Promise<void> {
+    this.assertDiskWritable();
     await this.confine(fromDisk, from);
     await this.confine(toDisk, to);
     await http(() => this.transferKey('copy', fromDisk, from, toDisk, to));
   }
 
   async moveObject(fromDisk: string, from: string, toDisk: string, to: string): Promise<void> {
+    this.assertDiskWritable();
     await this.confine(fromDisk, from);
     await this.confine(toDisk, to);
     await http(() => this.transferKey('move', fromDisk, from, toDisk, to));
@@ -588,11 +666,13 @@ export class MediaConsoleService {
 
   /** Moves a whole folder (every file under `<from>/`, nested included) to `<to>/`. */
   async moveFolder(fromDisk: string, from: string, toDisk: string, to: string): Promise<void> {
+    this.assertDiskWritable();
     await http(() => this.transferFolder('move', fromDisk, from, toDisk, to));
   }
 
   /** Copies a whole folder (every file under `<from>/`, nested included) to `<to>/`. */
   async copyFolder(fromDisk: string, from: string, toDisk: string, to: string): Promise<void> {
+    this.assertDiskWritable();
     await http(() => this.transferFolder('copy', fromDisk, from, toDisk, to));
   }
 
@@ -870,7 +950,16 @@ export class MediaConsoleService {
   }
 
   topology(): Topology {
+    const scope = currentMediaConsoleScope();
+    const federation = scope
+      ? { federation: describeFederation(scope.federation, scope.grant, scope.app?.name) }
+      : {};
+    if (scope && !scope.app && !seesLocalApp(scope.grant)) {
+      // This app is hidden from the viewer: the switcher sends the SPA to an app it may see.
+      return { hasStore: false, hasUploads: false, disks: 0, actions: false, ...federation };
+    }
     return {
+      ...federation,
       hasStore: this.store !== null && typeof this.store.list === 'function',
       hasUploads: this.uploads !== null && typeof this.uploads.list === 'function',
       disks: this.storage ? this.storage.names().length : 0,

@@ -10,6 +10,7 @@ import {
   onConsoleAccessDenied,
 } from '../client/media-console-client.js';
 import type { Topology } from '../client/types.js';
+import { AppSelector } from './AppSelector.js';
 import { DiskIcon, ImageIcon, LayersIcon, UploadIcon } from './icons.js';
 import { Dot } from './ui.js';
 import { type Tab, useHashRoute } from './useHashRoute.js';
@@ -144,6 +145,8 @@ function Console(): JSX.Element {
   const denied =
     reported ?? (topology.error instanceof ConsoleAccessError ? topology.error : undefined);
   const actions = topology.data?.actions ?? false;
+  // A federated app's disks are read-only here: their writes run in that app (the server 501s).
+  const diskActions = actions && topology.data?.federation?.current === undefined;
 
   const nav = useMemo<NavSection[]>(
     () => [
@@ -206,13 +209,18 @@ function Console(): JSX.Element {
       shell={shell}
       title={TITLES[route.tab]}
       searchPlaceholder="Search files, records, runs, threads…"
-      actions={<TopologyChips topology={topology.data} />}
+      actions={
+        <>
+          <AppSelector topology={topology.data} />
+          <TopologyChips topology={topology.data} />
+        </>
+      }
     >
       {denied ? (
         <AccessDenied error={denied} />
       ) : (
         <ErrorBoundary label={TITLES[route.tab]} resetKeys={[route.tab]}>
-          {route.tab === 'disks' && <DisksView route={route} actions={actions} />}
+          {route.tab === 'disks' && <DisksView route={route} actions={diskActions} />}
           {route.tab === 'uploads' && <UploadsView route={route} actions={actions} />}
           {route.tab === 'library' && (
             <LibraryView
