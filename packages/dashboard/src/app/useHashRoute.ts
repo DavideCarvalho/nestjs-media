@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { splitHash, subscribeHashUrl } from '../aviary-kit/url-state/hash-url';
 
 export type Tab = 'disks' | 'uploads' | 'library' | 'collections';
 
@@ -35,10 +36,10 @@ function decode(segment: string): string | undefined {
 }
 
 export function parseHash(hash: string): Route {
-  const raw = hash.replace(/^#\/?/, '');
-  const [pathPart, queryPart] = raw.split('?');
-  const segments = (pathPart ?? '').split('/').filter((segment) => segment.length > 0);
-  const params = new URLSearchParams(queryPart ?? '');
+  // Splits on the FIRST `?` only: a preview key or prefix may itself contain one.
+  const { path, search } = splitHash(hash);
+  const segments = path.split('/').filter((segment) => segment.length > 0);
+  const params = new URLSearchParams(search);
   const head = segments[0] ?? 'disks';
   const tab: Tab = isTab(head) ? head : 'disks';
 
@@ -61,15 +62,36 @@ export function parseHash(hash: string): Route {
   return route;
 }
 
+/** Two routes name the same view (same tab, drill-in, folder, preview, collection). */
+function sameRoute(a: Route, b: Route): boolean {
+  return (
+    a.tab === b.tab &&
+    a.disk === b.disk &&
+    a.prefix === b.prefix &&
+    a.preview === b.preview &&
+    a.uploadId === b.uploadId &&
+    a.recordId === b.recordId &&
+    a.collection === b.collection
+  );
+}
+
+/**
+ * The current route, following links and back/forward (`hashchange`, `popstate`) and the views' own
+ * view-state writes (nuqs, through the kit's `NuqsHashAdapter`: a preview's tab, a grid's filter),
+ * which are query-only and fire no `hashchange`. The route object is kept while the route itself is
+ * unchanged, so such a write doesn't re-render the console.
+ */
 export function useHashRoute(): Route {
   const [route, setRoute] = useState<Route>(() => parseHash(window.location.hash));
   useEffect(() => {
-    function onChange(): void {
-      setRoute(parseHash(window.location.hash));
-    }
-    window.addEventListener('hashchange', onChange);
+    const unsubscribe = subscribeHashUrl(() =>
+      setRoute((prev) => {
+        const next = parseHash(window.location.hash);
+        return sameRoute(prev, next) ? prev : next;
+      }),
+    );
     if (!window.location.hash) window.location.hash = '#/disks';
-    return () => window.removeEventListener('hashchange', onChange);
+    return unsubscribe;
   }, []);
   return route;
 }

@@ -1,3 +1,4 @@
+import { createParser, parseAsString, useQueryStates } from 'nuqs';
 import { type JSX, useEffect, useMemo, useRef, useState } from 'react';
 import { Button } from './ui.js';
 
@@ -13,6 +14,26 @@ interface SortState {
   index: number;
   dir: SortDir;
 }
+
+/** `?sort=<column index>.<asc|desc>`, e.g. `2.desc`; absent = file order. */
+export const sortParam = createParser<SortState>({
+  parse: (value) => {
+    const match = /^(\d+)\.(asc|desc)$/.exec(value);
+    return match ? { index: Number(match[1]), dir: match[2] as SortDir } : null;
+  },
+  serialize: (sort) => `${sort.index}.${sort.dir}`,
+  eq: (a, b) => a.index === b.index && a.dir === b.dir,
+});
+
+/**
+ * The grid's view state in the URL, next to the open preview (`…&preview=data.csv&q=paid&sort=2.desc`),
+ * so a filtered, sorted look at a file is a link. Typing the filter rewrites the current history
+ * entry; a sort click adds one. Column filters stay local.
+ */
+const GRID_VIEW = {
+  q: parseAsString.withDefault(''),
+  sort: sortParam.withOptions({ history: 'push' }),
+};
 
 /** Compares two cells numerically when both parse as numbers, else as a natural-order string sort
  *  (so "row2" precedes "row10"). Empty cells sort as strings. */
@@ -35,9 +56,9 @@ function compareCells(left: string, right: string): number {
  * top/bottom spacer rows — so a many-thousand-row file scrolls without mounting every `<tr>`.
  */
 export function DataTable({ header, body }: { header: string[]; body: string[][] }): JSX.Element {
-  const [globalFilter, setGlobalFilter] = useState('');
+  const [{ q: globalFilter, sort }, setGrid] = useQueryStates(GRID_VIEW);
+  const setGlobalFilter = (q: string) => void setGrid({ q });
   const [columnFilters, setColumnFilters] = useState<Record<number, string>>({});
-  const [sort, setSort] = useState<SortState | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const [scrollTop, setScrollTop] = useState(0);
   const [viewportHeight, setViewportHeight] = useState(0);
@@ -86,17 +107,18 @@ export function DataTable({ header, body }: { header: string[]; body: string[][]
   const hasControls = sort !== null || isFiltered;
 
   function toggleSort(index: number): void {
-    setSort((previous) => {
-      if (!previous || previous.index !== index) return { index, dir: 'asc' };
-      if (previous.dir === 'asc') return { index, dir: 'desc' };
-      return null;
-    });
+    const next: SortState | null =
+      !sort || sort.index !== index
+        ? { index, dir: 'asc' }
+        : sort.dir === 'asc'
+          ? { index, dir: 'desc' }
+          : null;
+    void setGrid({ sort: next });
   }
 
   function reset(): void {
-    setSort(null);
     setColumnFilters({});
-    setGlobalFilter('');
+    void setGrid({ q: null, sort: null }, { history: 'push' });
   }
 
   return (

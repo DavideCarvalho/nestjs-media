@@ -3,6 +3,7 @@ import { type JSX, useEffect, useMemo, useState } from 'react';
 import { ErrorBoundary } from '../aviary-kit/blocks/error-boundary';
 import { readShellConfig } from '../aviary-kit/shell-config';
 import { AppShell, type NavSection } from '../aviary-kit/shell/app-shell';
+import { NuqsHashAdapter } from '../aviary-kit/url-state/nuqs-hash-adapter';
 import {
   ConsoleAccessError,
   mediaConsoleClient,
@@ -113,11 +114,23 @@ function go(tab: Tab): void {
 }
 
 /**
+ * The media console, under the kit's `NuqsHashAdapter`: a view's state beyond its route (a
+ * preview's tab, a data grid's filter and sort) lives in the hash's query too, so it is a link.
+ */
+export function App(): JSX.Element {
+  return (
+    <NuqsHashAdapter>
+      <Console />
+    </NuqsHashAdapter>
+  );
+}
+
+/**
  * The media console: the Aviary shell (kit) around four pages — LIBRARY (Library, Collections) and
  * TRANSFERS (Uploads, and Disks, the object browser you upload into). Every page renders inside
  * its own error boundary; a denial from the API replaces the pages with the access-denied state.
  */
-export function App(): JSX.Element {
+function Console(): JSX.Element {
   // What the server put in the page: switcher, ⌘K search, viewer, sign-out (all optional).
   const shell = useMemo(() => readShellConfig(CONFIG_ELEMENT_ID), []);
   const route = useHashRoute();

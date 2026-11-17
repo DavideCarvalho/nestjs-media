@@ -1,5 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
-import { type JSX, useMemo, useState } from 'react';
+import { parseAsString, useQueryState } from 'nuqs';
+import { type JSX, useMemo } from 'react';
 import * as XLSX from 'xlsx';
 import { mediaConsoleClient } from '../../client/media-console-client.js';
 import { DataTable } from '../DataTable.js';
@@ -23,11 +24,17 @@ export function SheetPreview({ item }: { item: PreviewItem }): JSX.Element {
     staleTime: 60_000,
     enabled: !tooLarge,
   });
-  const [sheetIndex, setSheetIndex] = useState(0);
+  // `?sheet=<name>` (the first sheet is the default); switching adds a history entry.
+  const [sheetName, setSheetName] = useQueryState(
+    'sheet',
+    parseAsString.withOptions({ history: 'push' }),
+  );
   const workbook = useMemo(
     () => (query.data ? XLSX.read(query.data, { type: 'array' }) : undefined),
     [query.data],
   );
+  // An unknown name (a link to a sheet since renamed) falls back to the first sheet.
+  const sheetIndex = Math.max(0, workbook?.SheetNames.indexOf(sheetName ?? '') ?? 0);
   const grid = useMemo(() => {
     if (!workbook) return undefined;
     const name = workbook.SheetNames[Math.min(sheetIndex, workbook.SheetNames.length - 1)];
@@ -62,7 +69,7 @@ export function SheetPreview({ item }: { item: PreviewItem }): JSX.Element {
             <Button
               key={name}
               tone={index === sheetIndex ? 'selected' : 'quiet'}
-              onClick={() => setSheetIndex(index)}
+              onClick={() => void setSheetName(index === 0 ? null : name)}
               className="px-2 py-0.5"
             >
               {name}
