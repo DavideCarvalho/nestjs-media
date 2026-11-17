@@ -1,5 +1,11 @@
 # @dudousxd/nestjs-media-dashboard
 
+## 0.26.0
+
+### Minor Changes
+
+- [#222](https://github.com/DavideCarvalho/nestjs-media/pull/222) [`8b7bc94`](https://github.com/DavideCarvalho/nestjs-media/commit/8b7bc94bb123eea5f0c0b462cd2b1932143f892a) Thanks [@DavideCarvalho](https://github.com/DavideCarvalho)! - A preview's view state now lives in the URL next to `?preview=`, so it can be shared, bookmarked and reloaded, and Back/Forward step through it: a table preview's filter and sort (`q`, `sort=2.desc`), a spreadsheet's sheet (`sheet`) and a Markdown file's Source view (`view=source`). They are read and written with nuqs through the console kit's hash adapter; a value at its default is left out, so existing links open as before. The hash router now splits the route on the first `?` only, so a preview key containing `?` opens.
+
 ## 0.25.0
 
 ### Minor Changes
