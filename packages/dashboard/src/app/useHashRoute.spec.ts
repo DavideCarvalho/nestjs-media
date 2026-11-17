@@ -42,4 +42,14 @@ describe('parseHash', () => {
   it('parses the collections page (the LIBRARY section of the sidebar)', () => {
     expect(parseHash('#/collections')).toEqual({ tab: 'collections' });
   });
+
+  it('reads the route past view-state params, and a `?` inside a value', () => {
+    expect(parseHash('#/disks/d?prefix=a/&preview=a/b.csv&q=paid&sort=2.desc')).toEqual({
+      tab: 'disks',
+      disk: 'd',
+      prefix: 'a/',
+      preview: 'a/b.csv',
+    });
+    expect(parseHash('#/disks/d?preview=what?.md').preview).toBe('what?.md');
+  });
 });

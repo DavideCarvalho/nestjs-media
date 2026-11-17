@@ -568,6 +568,12 @@ none, the search finds nothing.
 A hit opens the record or the file preview directly. The same links work by hand:
 `/media#/library/<id>` and `/media#/disks/<disk>?prefix=<folder>&preview=<key>`.
 
+A preview's own view rides in the same link, so what you are looking at can be shared: a table
+preview (CSV, spreadsheet, NDJSON, Parquet, archive listing) keeps its filter and sort in `q` and
+`sort` (`<column>.<asc|desc>`, e.g. `2.desc`), a spreadsheet its sheet in `sheet`, a Markdown file
+`view=source`. Typing the filter rewrites the current history entry; a sort, sheet or view pick
+adds one, so Back undoes it. Opening another file starts it fresh.
+
 The endpoint is `GET <apiBasePath>/consoles/search?q=`, behind the console's own `authorize`.
 `&console=<id>` answers for that one console only (still behind its own `authorize`): the palette
 asks this console and each console in the switcher on its own, and shows each group as it answers.

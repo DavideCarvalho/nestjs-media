@@ -1,7 +1,8 @@
 import { useQuery } from '@tanstack/react-query';
 import DOMPurify from 'dompurify';
 import { marked } from 'marked';
-import { type JSX, useMemo, useState } from 'react';
+import { parseAsStringLiteral, useQueryState } from 'nuqs';
+import { type JSX, useMemo } from 'react';
 import { mediaConsoleClient } from '../../client/media-console-client.js';
 import { Alert, Button, Notice, formatBytes } from '../ui.js';
 import { FallbackCard, SAMPLE_TEXT_BYTES, readErrorMessage } from './shared.js';
@@ -80,13 +81,17 @@ const PROSE_CLASSES = [
   '[&_input]:mr-1 [&_input]:align-middle',
 ].join(' ');
 
-type MarkdownView = 'rendered' | 'source';
+const MARKDOWN_VIEWS = ['rendered', 'source'] as const;
 
 /** The rendered/source toggle plus whichever pane it selects. Split out from the fetching component
  *  so the parse memo and the toggle's state live below the loading and error returns, rather than
  *  being hooks that have to run before them. */
 function MarkdownBody({ source }: { source: string }): JSX.Element {
-  const [view, setView] = useState<MarkdownView>('rendered');
+  // `?view=source` (rendered is the default); switching adds a history entry.
+  const [view, setView] = useQueryState(
+    'view',
+    parseAsStringLiteral(MARKDOWN_VIEWS).withDefault('rendered').withOptions({ history: 'push' }),
+  );
   // Keyed on the text, not on the view: flipping to Source and back is a toggle, and re-parsing a
   // multi-megabyte document to answer it would make the button feel broken.
   const html = useMemo(() => renderMarkdown(source), [source]);
@@ -96,14 +101,14 @@ function MarkdownBody({ source }: { source: string }): JSX.Element {
       <div className="flex shrink-0 flex-wrap gap-1">
         <Button
           tone={view === 'rendered' ? 'selected' : 'quiet'}
-          onClick={() => setView('rendered')}
+          onClick={() => void setView('rendered')}
           className="px-2 py-0.5"
         >
           Rendered
         </Button>
         <Button
           tone={view === 'source' ? 'selected' : 'quiet'}
-          onClick={() => setView('source')}
+          onClick={() => void setView('source')}
           className="px-2 py-0.5"
         >
           Source

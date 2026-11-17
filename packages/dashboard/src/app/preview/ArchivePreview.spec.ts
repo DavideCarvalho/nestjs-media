@@ -4,6 +4,7 @@ import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { gzipSync, zipSync } from 'fflate';
 import { createElement } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { NuqsHashAdapter } from '../../aviary-kit/url-state/nuqs-hash-adapter';
 import { mediaConsoleClient } from '../../client/media-console-client.js';
 import {
   ArchivePreview,
@@ -571,7 +572,14 @@ describe('ArchivePreview', () => {
       size: zip.byteLength,
       url: 'about:blank',
     };
-    render(createElement(QueryClientProvider, { client }, createElement(ArchivePreview, { item })));
+    // The entry grid keeps its filter and sort in the URL, through the console's nuqs adapter.
+    render(
+      createElement(
+        NuqsHashAdapter,
+        null,
+        createElement(QueryClientProvider, { client }, createElement(ArchivePreview, { item })),
+      ),
+    );
   }
 
   afterEach(() => {

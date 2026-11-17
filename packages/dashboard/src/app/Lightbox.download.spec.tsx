@@ -2,6 +2,7 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { cleanup, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { NuqsHashAdapter } from '../aviary-kit/url-state/nuqs-hash-adapter';
 import { Lightbox, type PreviewItem } from './Lightbox.js';
 
 afterEach(cleanup);
@@ -23,9 +24,11 @@ function renderLightbox(): void {
   );
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   render(
-    <QueryClientProvider client={client}>
-      <Lightbox item={ITEM} onClose={() => undefined} />
-    </QueryClientProvider>,
+    <NuqsHashAdapter>
+      <QueryClientProvider client={client}>
+        <Lightbox item={ITEM} onClose={() => undefined} />
+      </QueryClientProvider>
+    </NuqsHashAdapter>,
   );
 }
 
