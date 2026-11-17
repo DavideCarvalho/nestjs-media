@@ -145,6 +145,10 @@ export function assertValidFederation(federation: MediaConsoleFederation | undef
       'MediaDashboardModule: `federation.apps` must be an object of { [name]: { store?, uploads?, storage?, label? } }.',
     );
   }
+  const localLabel = federation.localLabel;
+  if (localLabel !== undefined && (typeof localLabel !== 'string' || localLabel === '')) {
+    throw new Error('MediaDashboardModule: `federation.localLabel` must be a non-empty string.');
+  }
   const names = Object.keys(apps);
   if (names.length === 0) throw new Error('MediaDashboardModule: `federation.apps` names no app.');
   for (const name of names) {

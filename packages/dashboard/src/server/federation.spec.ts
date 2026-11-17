@@ -79,6 +79,7 @@ describe('assertValidFederation', () => {
       assertValidFederation({ apps: { 'x/y': { store: new InMemoryMediaStore() } } }),
     ).toThrow(/must be 1–100/);
     expect(() => assertValidFederation({ apps: { a: {} } })).toThrow(/at least one of/);
+    expect(() => assertValidFederation({ ...federation, localLabel: '' })).toThrow(/localLabel/);
     expect(() =>
       assertValidFederation({ apps: { a: { store: new InMemoryMediaStore(), label: '' } } }),
     ).toThrow(/label/);
