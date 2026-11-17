@@ -92,6 +92,15 @@ describe('DataTable: filter and sort in the URL', () => {
   });
 });
 
+describe('DataTable: a sort on a column the file lacks', () => {
+  it('is ignored: file order, and no reset offered', () => {
+    goTo('/media#/disks/primary?preview=bills.csv&sort=9.desc');
+    renderGrid();
+    expect(names()).toEqual(['alice', 'bob', 'carol']);
+    expect(screen.queryByRole('button', { name: 'reset' })).toBeNull();
+  });
+});
+
 describe('sortParam', () => {
   it('round-trips `<column>.<dir>` and rejects anything else', () => {
     expect(sortParam.serialize({ index: 2, dir: 'desc' })).toBe('2.desc');

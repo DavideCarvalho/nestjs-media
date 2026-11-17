@@ -56,7 +56,11 @@ function compareCells(left: string, right: string): number {
  * top/bottom spacer rows — so a many-thousand-row file scrolls without mounting every `<tr>`.
  */
 export function DataTable({ header, body }: { header: string[]; body: string[][] }): JSX.Element {
-  const [{ q: globalFilter, sort }, setGrid] = useQueryStates(GRID_VIEW);
+  const [{ q: globalFilter, sort: sortParamValue }, setGrid] = useQueryStates(GRID_VIEW);
+  // A link can name a column this file doesn't have (`?sort=9.desc` on three columns): no sort then,
+  // rather than sorting by an empty column that no header shows as active.
+  const sort =
+    sortParamValue !== null && sortParamValue.index < header.length ? sortParamValue : null;
   const setGlobalFilter = (q: string) => void setGrid({ q });
   const [columnFilters, setColumnFilters] = useState<Record<number, string>>({});
   const scrollRef = useRef<HTMLDivElement>(null);
