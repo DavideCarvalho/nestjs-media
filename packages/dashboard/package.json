@@ -76,7 +76,7 @@
     "@nestjs/platform-express": "12.3.2",
     "@nestjs/storage": "0.0.5",
     "@nestjs/testing": "12.3.2",
-    "@peculiar/x509": "2.2.0",
+    "@peculiar/x509": "3.1.0",
     "@sqlite.org/sqlite-wasm": "3.53.0-build1",
     "@tailwindcss/vite": "4.3.5",
     "@tanstack/charts": "1.5.0",
